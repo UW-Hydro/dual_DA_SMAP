@@ -66,9 +66,8 @@ np.random.seed(cfg['CONTROL']['seed'])
 # Create class VIC
 vic_exe = VIC(cfg['VIC']['exe'])
 # Run VIC
-#vic_exe.run(cfg['VIC']['global'],
-#            logdir=os.path.join(cfg['OUTPUT']['output_dir'],
-#            cfg['OUTPUT']['vic_log_subdir']))
+vic_exe.run(cfg['VIC']['global'],
+            logdir=cfg['OUTPUT']['vic_log_dir'])
 
 # =========================================================== #
 # Extract VIC output soil moisture (layer 1) at the end of
@@ -77,16 +76,14 @@ vic_exe = VIC(cfg['VIC']['exe'])
 # Load VIC output
 ds = xr.open_dataset(cfg['OUTPUT']['vic_output_hist_path'])
 
-# Resample surface sm to daily time step (use the value of the last time step in each day)
+# Resample surface sm to daily mean
 da_sm1_true = ds['OUT_SOIL_MOIST'].sel(nlayer=0)
-da_sm1_true_daily = da_sm1_true.resample(dim='time', freq='D', how='last')
+da_sm1_true_daily = da_sm1_true.resample(dim='time', freq='D', how='mean')
 
-# Reformat time index
+# Reset time index to noon on each day
 da_sm1_true_daily['time'] = pd.date_range(
-        '{}-{:2d}'.format(cfg['TIME_INDEX']['start_date'],
-                          cfg['TIME_INDEX']['last_hour']),
-        '{}-{:2d}'.format(cfg['TIME_INDEX']['end_date'],
-                          cfg['TIME_INDEX']['last_hour']),
+        '{}-12'.format(cfg['TIME_INDEX']['start_date']),
+        '{}-12'.format(cfg['TIME_INDEX']['end_date']),
         freq='D')
 
 # Add noise
