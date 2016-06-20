@@ -66,9 +66,8 @@ np.random.seed(cfg['CONTROL']['seed'])
 # Create class VIC
 vic_exe = VIC(cfg['VIC']['exe'])
 # Run VIC
-#vic_exe.run(cfg['VIC']['global'],
-#            logdir=os.path.join(cfg['OUTPUT']['output_dir'],
-#            cfg['OUTPUT']['vic_log_subdir']))
+vic_exe.run(cfg['VIC']['global'],
+            logdir=cfg['OUTPUT']['vic_log_dir'])
 
 # =========================================================== #
 # Extract VIC output soil moisture (layer 1) at the end of
