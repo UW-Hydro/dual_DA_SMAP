@@ -8,7 +8,10 @@ import pandas as pd
 from tonic.models.vic.vic import VIC
 from tonic.io import read_config, read_configobj
 from da_utils import (VicStates, EnKF_VIC, generate_VIC_global_file,
-                      setup_output_dirs, check_returncode)
+                      setup_output_dirs, check_returncode,
+                      propagate_ensemble, calculate_gain_K,
+                      get_soil_moisture_and_estimated_meas_all_ensemble,
+                      calculate_gain_K_whole_field)
 
 # ============================================================ #
 # Process command line arguments
@@ -85,11 +88,10 @@ EnKF_VIC(N=cfg['EnKF']['N'],
          vic_global_template=os.path.join(cfg['CONTROL']['root_dir'],
                                           cfg['VIC']['vic_global_template']),
          vic_model_steps_per_day=cfg['VIC']['model_steps_per_day'],
-         output_vic_global_dir=dirs['global'],
-         output_vic_state_dir=dirs['states'],
-         output_vic_result_dir=dirs['history'],
-         output_vic_log_dir=dirs['logs'])
-
+         output_vic_global_root_dir=dirs['global'],
+         output_vic_state_root_dir=dirs['states'],
+         output_vic_history_root_dir=dirs['history'],
+         output_vic_log_root_dir=dirs['logs'])
 
 
 
