@@ -7,11 +7,7 @@ import pandas as pd
 
 from tonic.models.vic.vic import VIC
 from tonic.io import read_config, read_configobj
-from da_utils import (VicStates, EnKF_VIC, generate_VIC_global_file,
-                      setup_output_dirs, check_returncode,
-                      propagate_ensemble, calculate_gain_K,
-                      get_soil_moisture_and_estimated_meas_all_ensemble,
-                      calculate_gain_K_whole_field)
+from da_utils import EnKF_VIC, setup_output_dirs, generate_VIC_global_file
 
 # ============================================================ #
 # Process command line arguments
@@ -65,9 +61,6 @@ global_file = generate_VIC_global_file(
 # ============================================================ #
 # Prepare and run EnKF
 # ============================================================ #
-# --- Prepare initial states and error matrix --- #
-P0 = np.diag(np.asarray(cfg['EnKF']['P0']))
-
 # --- Load and process measurement data --- #
 # Load measurement data
 ds_meas_orig = xr.open_dataset(os.path.join(cfg['CONTROL']['root_dir'],
@@ -77,11 +70,11 @@ da_meas_orig = ds_meas_orig[cfg['EnKF']['meas_var_name']]
 da_meas = da_meas_orig.sel(time=slice(cfg['EnKF']['start_time'], cfg['EnKF']['end_time']))
 
 
-EnKF_VIC(N=cfg['EnKF']['N'],
+class_states = EnKF_VIC(N=cfg['EnKF']['N'],
          start_time=pd.to_datetime(cfg['EnKF']['start_time']),
          end_time=pd.to_datetime(cfg['EnKF']['end_time']),
          init_state_basepath=os.path.join(dirs['states'], 'state.spinup'),
-         P0=P0,
+         P0=cfg['EnKF']['P0'],
          da_meas=da_meas,
          da_meas_time_var='time',
          vic_exe=vic_exe,
@@ -92,6 +85,5 @@ EnKF_VIC(N=cfg['EnKF']['N'],
          output_vic_state_root_dir=dirs['states'],
          output_vic_history_root_dir=dirs['history'],
          output_vic_log_root_dir=dirs['logs'])
-
 
 

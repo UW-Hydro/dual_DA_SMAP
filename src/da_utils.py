@@ -7,7 +7,7 @@ from collections import OrderedDict
 import xarray as xr
 
 
-class VicStates(object):
+class States(object):
     ''' This class is a VIC states object
 
     Atributes
@@ -30,41 +30,147 @@ class VicStates(object):
     
     def __init__(self, ds):
         self.ds = ds
+        self.da_EnKF = self.convert_VICstates_to_EnKFstates_sm()
     
     
-    def add_gaussian_white_noise_soil_moisture(self, P):
-        ''' Add Gaussian noise for all active grid cells
+    def convert_VICstates_to_EnKFstates_sm(self):
+        ''' This function extracts all the soil moisture states from the original
+            VIC state file ds, and converts to a da with dimension [lat, lon, n],
+            where n is the total number of states in EnKF.
+        
+        Returns
+        ----------
+        da_sm_states: <xr.DataArray>
+            A re-shaped soil moisture DataArray;
+            Dimension: [lat, lon, n],
+                where len(n) = len(veg_class) * len(snow_band) * len(nlayer)
+        '''
+             
+        # Extract coordinates
+        veg_class = self.ds['veg_class']
+        snow_band = self.ds['snow_band']
+        nlayer = self.ds['nlayer']
+        lat = self.ds['lat']
+        lon = self.ds['lon']
+        
+        # Initialize new DataArray
+        n = len(veg_class) * len(snow_band) * len(nlayer)
+        data = np.empty([len(lat), len(lon), n])
+        data[:] = np.nan
+        da_EnKF = xr.DataArray(data,
+                               coords=[lat, lon, range(n)],
+                               dims=['lat', 'lon', 'n'])
+        
+        # Extract soil moisture states and convert dimension
+        EnKF_states = self.ds['Soil_moisture'].values.reshape(
+                                                [n, len(lat), len(lon)])
+        
+        # roll the 'n' dimension to after lat and lon, and fill in da
+        EnKF_states = np.rollaxis(EnKF_states, 0, 3) 
+        da_EnKF[:] = EnKF_states
+        
+        # Save as self.da_EnKF
+        self.da_EnKF = da_EnKF
+        
+        return self.da_EnKF
+    
+    
+    def convert_EnKFstates_sm_to_VICstates(self, da_EnKF):
+        ''' This function converts a EnKF states da (soil moisture states) back to the
+            original VIC states ds (self.ds) - as a returned ds, withouth changing self.ds
+        
+        Parameters
+        ----------
+        da_EnKF: <xr.DataArray>
+            An DataArray of EnKF states, in dimension [lat, lon, n]
+            
+        Returns
+        ----------
+        ds: <xr.DataSet>
+            A VIC states ds with soil moisture states = da_EnKF, and all the other
+            state variables = those in self.ds
+        '''
+        
+        # Extract coordinates
+        veg_class = self.ds['veg_class']
+        snow_band = self.ds['snow_band']
+        nlayer = self.ds['nlayer']
+        lat = self.ds['lat']
+        lon = self.ds['lon']
+        
+        # Initialize a new ds for new VIC states
+        ds = self.ds.copy()
+        
+        # Convert da_EnKF dimension
+        EnKF_states_reshape = da_EnKF.values.reshape(len(lat), len(lon), len(veg_class),
+                                                 len(snow_band), len(nlayer))
+        EnKF_states_reshape = np.rollaxis(EnKF_states_reshape, 0, 5)  # put lat and lon to the last
+        EnKF_states_reshape = np.rollaxis(EnKF_states_reshape, 0, 5)
+        
+        # Fill into VIC states ds
+        ds['Soil_moisture'][:] = EnKF_states_reshape
+        
+        return ds
+        
+    
+    def add_gaussian_white_noise_states(self, P):
+        ''' Add Gaussian noise for the whole field.
+            NOTE: this method does not change self
 
         Parameters
         ----------
-        P: <float> [nlayer*nlayer]
+        P: <float>
             Covariance matrix of the Gaussian noise to be added
             
         Returns
         ----------
         ds: <xr.dataset>
-            A dataset of VIC states, with purterbed soil moisture
+            A dataset of VIC states, with soil moisture states = da_EnKF, and all the other
+            state variables = those in self.ds
         '''
 
-        # Extract number of soil layers
-        nlayer = len(self.ds['nlayer'])
+        # Extract the number of EnKF states
+        n = len(self.da_EnKF['n'])
+        
+        # Check if P is in shape [n*n]
+        pass
         
         # Generate random noise for the whole field
         noise = np.random.multivariate_normal(
-                        np.zeros(nlayer), P,
-                        size=len(self.ds['veg_class'])*\
-                             len(self.ds['snow_band'])*\
-                             len(self.ds['lat'])*\
+                        np.zeros(n), P,
+                        size=len(self.ds['lat'])*\
                              len(self.ds['lon']))
-        noise_reshape = noise.reshape([len(self.ds['veg_class']),
-                                       len(self.ds['snow_band']),
-                                       nlayer,
+        noise_reshape = noise.reshape([n,
                                        len(self.ds['lat']),
                                        len(self.ds['lon'])])
+        noise_reshape = np.rollaxis(noise_reshape, 0, 3)  # roll the 'n' dimension to the last
+        
         # Add noise to soil moisture field
-        ds = self.ds.copy()
-        ds['Soil_moisture'] = self.ds['Soil_moisture'] + noise_reshape
+        da_perturbed = self.da_EnKF.copy()
+        da_perturbed[:] += noise_reshape
+        
+        # Put the perturbed soil moisture states to back to VIC states ds
+        ds = self.convert_EnKFstates_sm_to_VICstates(da_perturbed)
+
         return ds
+    
+    
+    def update_soil_moisture(self, da_K, da_y, da_y_est, R):
+        ''' This function updates soil moisture states for the whole field
+        
+        Parameters
+        ----------
+        da_K: <xr.DataArray>
+            Gain K for the whole field;
+            Dimension: [veg_class, snow_band, lat, lon, n, m], 
+            where [n, m] is the Kalman gain K;
+            This is output from function calculate_gain_K_whole_field
+        da_y: <xr.DataArray>
+            Measurement at this time point for the whole field;
+            Dimension: [lat, lon]
+            (measurement for each grid cell )
+        '''
+        pass
 
 
 def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, da_meas,
@@ -84,7 +190,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, da_meas,
         End time of EnKF run
     init_state_basepath: <str>
         Initial state directory and file name prefix (excluding '.YYMMDD_SSSSS.nc')
-    P0: <np.array>, 2-D, [n*n]
+    P0: <float>
         Initial state error matrix
     da_meas: <xr.DataArray> [time*lat*lon]
         DataArray of measurements (currently, must be only 1 variable of measurement);
@@ -116,9 +222,11 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, da_meas,
     '''
 
     # --- Pre-processing and checking inputs ---#
-    n = np.shape(P0)[0]  # numer of states
     m = 1  # number of measurements
     n_time = len(da_meas[da_meas_time_var])  # number of measurement time points
+    # Determine fraction of each veg/snowband tile in each grid cell
+    da_tile_frac = determine_tile_frac(vic_global_template)
+    
     # Check whether the dimension of P0 is consistent with number of soil moisture states
     pass
     # Check whether the run period is consistent with VIC setup
@@ -132,7 +240,10 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, da_meas,
                                         init_state_basepath,
                                         start_time.strftime('%Y%m%d'),
                                         start_time.hour*3600+start_time.second))
-    class_states = VicStates(ds_states)
+    class_states = States(ds_states)
+    
+    # Determine the number of EnKF states, n
+    n = len(class_states.da_EnKF['n'])
     # Set up initial state subdirectories
     init_state_dir_name = 'init.{}_{:05d}'.format(
                                     start_time.strftime('%Y%m%d'),
@@ -142,8 +253,9 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, da_meas,
                             mkdirs=[init_state_dir_name])[init_state_dir_name]
     # For each ensemble member, add Gaussian noise to sm states with covariance P0,
     # and save each ensemble member states
+    P0_diag = np.identity(n) * P0  # Set up P0 matrix
     for i in range(N):
-        ds = class_states.add_gaussian_white_noise_soil_moisture(P0)
+        ds = class_states.add_gaussian_white_noise_states(P0_diag)
         ds.to_netcdf(os.path.join(init_state_dir,
                                   'state.ens{}.nc'.format(i+1)),
                      format='NETCDF4_CLASSIC')
@@ -183,17 +295,21 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, da_meas,
     # --- Run EnKF --- #
     # Initialize
     state_dir_before_update = out_state_dir
+    
     # Loop over each measurement time point
     for k in range(n_time):
+        
         # Determine current time
         current_time = pd.to_datetime(da_meas[da_meas_time_var].values[k])
-        # Calculate gain K
-        da_x, da_y = get_soil_moisture_and_estimated_meas_all_ensemble(
-                            N,
-                            state_dir=state_dir_before_update,
-                            state_time=current_time)
-        da_K = calculate_gain_K_whole_field(da_x, da_y)
         
+        # Calculate gain K
+        da_x, da_y_est = get_soil_moisture_and_estimated_meas_all_ensemble(
+                                N,
+                                state_dir=state_dir_before_update,
+                                state_time=current_time, 
+                                da_tile_frac=da_tile_frac)
+        da_K = calculate_gain_K_whole_field(da_x, da_y_est)
+
         return
 
 
@@ -386,45 +502,70 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
 #        check_returncode(returncode, expected=0)
 
 
-def calculate_gain_K(n, m, x, y):
-    ''' This function calculates Kalman gain K from ensemble.
+def determine_tile_frac(global_path):
+    ''' Determines the fraction of each veg/snowband tile in each grid cell based on VIC
+        global and parameter files
     
     Parameters
     ----------
-    n: <int>
-        Number of states
-    m: <int>
-        Number of measurements
-    x: <np.array> [n*N]
-        An array of forecasted ensemble states (before updated)
-    y: <np.array> [m*N]
-        An array of forecasted ensemble measurement estimates (before updated);
-        (y = Hx)
+    global_path: <str>
+        VIC global parameter file path; can be a template file (here it is only used to
+        extract snowband and vegparam files/options)
     
     Returns
     ----------
-    K: <np.array> [n*m]
-        Gain K
+    da_tile_frac: <xr.DataArray>
+        Fraction of each veg/snowband in each grid cell for the whole domain
+        Dimension: [veg_class, snow_band, lat, lon]
     
     Require
     ----------
     numpy
+    xarray
     '''
     
-    # Pxy = cov(x, y.transpose); size = [n*m]; divided by (N-1)
-    Pxy = np.cov(x, y)[:n, n:]
-    # Pyy = cov(y, y.transpose); size = [m*m]; divided by (N-1)
-    Pyy = np.cov(y)
-    # K = Pxy * (Pyy)-1
-    if m == 1:  # if m = 1
-        K = Pxy / Pyy
-    else:  # if m > 1
-        K = np.dot(Pxx, np.linalg.inv(Pyy))
+    # Load global parameter file
+    with open(global_path, 'r') as global_file:
+            global_param = global_file.read()
+            
+    # Extract Cv from vegparam file (as defined in the global file)
+    vegparam_nc = find_global_param_value(global_param, 'VEGPARAM')   
+    da_Cv = xr.open_dataset(vegparam_nc, decode_cf=False)['Cv']  # dim: [veg_class, lat, lon]
+    lat = da_Cv['lat']
+    lon = da_Cv['lon']
+    
+    # Extract snowband info from the global file
+    # Dimension of da_AreaFract: [snowband, lat, lon]
+    n_snowband = int(find_global_param_value(global_param, 'SNOW_BAND'))
+    if n_snowband == 1:  # if only one snowband
+        data = np.ones([1, len(lat), len(lon)])
+        da_AreaFract = xr.DataArray(data, coords=[[0], lat, lon],
+                                    dims=['snow_band', 'lat', 'lon'])
+    else:  # if more than one snowband
+        tmp, snowband_nc = find_global_param_value(global_param, 'SNOW_BAND',
+                                                          second_param=True)
+        da_AreaFract = xr.open_dataset(snowband_nc, decode_cf=False)['AreaFract']
 
-    return K
+    # Initialize the final DataArray
+    veg_class = da_Cv['veg_class']
+    snow_band = da_AreaFract['snow_band']
+    data = np.empty([len(veg_class), len(snow_band), len(lat), len(lon)])
+    data[:] = np.nan
+    da_tile_frac = xr.DataArray(data, coords=[veg_class, snow_band, lat, lon],
+                                dims=['veg_class', 'snow_band', 'lat', 'lon'])
+    
+    # Calculate fraction of each veg/snowband tile for each grid cell, and fill in
+    # da_file_frac
+    for lt in lat:
+        for lg in lon:
+            da_tile_frac.loc[:, :, lt, lg] =\
+                    da_Cv.loc[:, lt, lg] * da_AreaFract.loc[:, lt, lg]
+    
+    return da_tile_frac
 
 
-def get_soil_moisture_and_estimated_meas_all_ensemble(N, state_dir, state_time):
+def get_soil_moisture_and_estimated_meas_all_ensemble(N, state_dir, state_time,
+                                                      da_tile_frac):
     ''' This function extracts soil moisture states from netCDF state files for all ensemble
         members, for all grid cells, veg and snow band tiles.
     
@@ -437,24 +578,27 @@ def get_soil_moisture_and_estimated_meas_all_ensemble(N, state_dir, state_time):
         State file names are "state.ens<i>.xxx.nc", where <i> is 1, 2, ..., N
     state_time: <pandas.tslib.Timestamp>
         State time
+    da_tile_frac: <xr.DataArray>
+        Fraction of each veg/snowband in each grid cell for the whole domain
+        Dimension: [veg_class, snow_band, lat, lon]
 
     Returns
     ----------
     da_x: <xr.DataArray>
         Soil moisture states of all ensemble members;
-        Dimension: [veg_class, snow_band, lat, lon, n, N]
-    da_y: <xr.DataArray>
+        Dimension: [lat, lon, n, N]
+    da_y_est: <xr.DataArray>
         Estimated measurement of all ensemble members (= top-layer soil moisture);
-        Dimension: [eg_class, snow_band, lat, lon, m, N]
+        Dimension: [lat, lon, m, N]
     
     Require
     ----------
     xarray
     os
+    States
     '''
     
-    # --- Extract dimensions --- #
-    # n = nlayer, number of states
+    # --- Extract dimensions from the first ensemble member --- #
     state_name = 'state.ens1.{}_{}.nc'.format(state_time.strftime('%Y%m%d'),
                                               state_time.hour*3600+state_time.second)
     ds = xr.open_dataset(os.path.join(state_dir, state_name))
@@ -468,20 +612,22 @@ def get_soil_moisture_and_estimated_meas_all_ensemble(N, state_dir, state_time):
     lat = ds['lat']
     # lon
     lon = ds['lon']
+    # number of total states n = len(veg_class) * len(snow_band) * len(nlayer)
+    n = len(veg_class) * len(snow_band) * len(nlayer)
     
     # --- Initialize da for states and measurement estimates --- #
-    # Initialize states x [veg_class, snow_band, lat, lon, n, N]
-    x = np.empty([len(veg_class), len(snow_band), len(lat), len(lon), len(nlayer), N])
-    x[:] = np.nan
-    da_x = xr.DataArray(x,
-                        coords=[veg_class, snow_band, lat, lon, nlayer, range(1, N+1)],
-                        dims=['veg_class', 'snow_band', 'lat', 'lon', 'n', 'N'])
-    # Initialize measurement estimates y [eg_class, snow_band, lat, lon, m, N]
-    y = np.empty([len(veg_class), len(snow_band), len(lat), len(lon), 1, N])
-    y[:] = np.nan
-    da_y = xr.DataArray(y,
-                        coords=[veg_class, snow_band, lat, lon, [1], range(1, N+1)],
-                        dims=['veg_class', 'snow_band', 'lat', 'lon', 'm', 'N'])
+    # Initialize states x [lat, lon, n, N]
+    data = np.empty([len(lat), len(lon), n, N])
+    data[:] = np.nan
+    da_x = xr.DataArray(data,
+                        coords=[lat, lon, range(n), range(N)],
+                        dims=['lat', 'lon', 'n', 'N'])
+    # Initialize measurement estimates y_est [lat, lon, m, N]
+    data = np.empty([len(lat), len(lon), 1, N])
+    data[:] = np.nan
+    da_y_est = xr.DataArray(data,
+                        coords=[lat, lon, [1], range(N)],
+                        dims=['lat', 'lon', 'm', 'N'])
     
     # --- Loop over each ensemble member --- #
     for i in range(N):
@@ -490,19 +636,160 @@ def get_soil_moisture_and_estimated_meas_all_ensemble(N, state_dir, state_time):
                                                    state_time.strftime('%Y%m%d'),
                                                    state_time.hour*3600+state_time.second)
         ds = xr.open_dataset(os.path.join(state_dir, state_name))
+        class_states = States(ds)
         
-        # --- Fill x and y data in --- #
+        # --- Fill x and y_est data in --- #
         # Fill in states x
-        for j in nlayer:
-            # Fill in states x
-            da_x.loc[:, :, :, :, j, i+1] = ds['Soil_moisture'].loc[:, :, j, :, :]
-        # Fill in measurement estimates y (here it is simply top-layer sm)
-        da_y.loc[:, :, :, :, 1, i+1] = ds['Soil_moisture'].loc[:, :, nlayer[0].values, :, :]
+        da_x.loc[:, :, :, i] = class_states.da_EnKF
+        # Fill in measurement estimates y
+        da_y_est[:, :, :, i] = calculate_y_est_whole_field(
+                                        class_states.ds['Soil_moisture'], da_tile_frac)
         
-    return da_x, da_y
+    return da_x, da_y_est
 
 
-def calculate_gain_K_whole_field(da_x, da_y):
+def calculate_y_est(da_x_cell, da_tile_frac_cell):
+    ''' Caclulate estimated measurement y_est = Hx for one grid cell; here y_est is
+        calculated as tile-average top-layer soil moisture over the whole grid cell.
+    
+    Parameters
+    ----------
+    da_x_cell: <xr.DataArray>
+        An DataArray of VIC soil moisture states for a grid cell
+        Dimension: [veg_class, snow_band, nlayer]
+    da_tile_frac_cell: <xr.DataArray>
+        An DataArray of veg/band tile fraction for a grid cell
+        Dimension: [veg_class, snow_band]
+    
+    Returns
+    ----------
+    y_est: <np.float>
+        Estimated measurement for this grid cell
+    
+    Require
+    ----------
+    numpy
+    '''
+    
+    # Calculate y_est
+    y_est = np.nansum(da_x_cell[:, :, 0].values * da_tile_frac_cell.values)
+    
+    return y_est
+
+
+def calculate_y_est_whole_field(da_x, da_tile_frac):
+    ''' Calculate estimated measurement y_est = Hx for all grid cells.
+    
+    Parameters
+    ----------
+    da_x: <xr.DataArray>
+        A DataArray of VIC soil moisture states for all grid cells
+        Dimension: [veg_class, snow_band, nlayer, lat, lon]
+    da_tile_frac: <xr.DataArray>
+        Fraction of each veg/snowband in each grid cell for the whole domain
+        Dimension: [veg_class, snow_band, lat, lon]
+        
+    Returns
+    ----------
+    da_y_est: <xr.DataArray>
+        Estimated measurement (= top-layer soil moisture) for all grid cells;
+        Dimension: [lat, lon, m]
+        
+    
+    Require
+    ----------
+    xarray
+    numpy
+    '''
+    
+    # Extract lat and lon coords
+    lat = da_x['lat']
+    lon = da_x['lon']
+    
+    # Initiate da_y_est
+    data = np.empty([len(lat), len(lon), 1])
+    da_y_est = xr.DataArray(data, coords=[lat, lon, [0]], dims=['lat', 'lon', 'm'])
+    
+    # Loop over each grid cell and calculate y_est, and fill in da_y_est
+    for lt in lat:
+        for lg in lon:
+            da_y_est.loc[lt, lg, 0] = calculate_y_est(da_x.loc[:, :, :, lt, lg],
+                                                      da_tile_frac.loc[:, :, lt, lg])
+    
+    return da_y_est
+
+
+def find_global_param_value(gp, param_name, second_param=False):
+    ''' Return the value of a global parameter
+
+    Parameters
+    ----------
+    gp: <str>
+        Global parameter file, read in by read()
+    param_name: <str>
+        The name of the global parameter to find
+    second_param: <bool>
+        Whether to read a second value for the parameter (e.g., set second_param=True to
+        get the snowband param file path when SNOW_BAND>1)
+
+    Returns
+    ----------
+    line_list[1]: <str>
+        The value of the global parameter
+    (optional) line_list[2]: <str>
+        The value of the second value in the global parameter file when second_param=True
+    '''
+    for line in iter(gp.splitlines()):
+        line_list = line.split()
+        if line_list == []:
+            continue
+        key = line_list[0]
+        if key == param_name:
+            if second_param == False:
+                return line_list[1]
+            else:
+                return line_list[1], line_list[2]
+
+
+def calculate_gain_K(x, y_est):
+    ''' This function calculates Kalman gain K from ensemble.
+    
+    Parameters
+    ----------
+    x: <np.array> [n*N]
+        An array of forecasted ensemble states (before updated)
+    y_est: <np.array> [m*N]
+        An array of forecasted ensemble measurement estimates (before updated);
+        (y_est = Hx)
+    
+    Returns
+    ----------
+    K: <np.array> [n*m]
+        Gain K
+    
+    Require
+    ----------
+    numpy
+    '''
+    
+    # Extract number of EnKF states (n) and number of measurements (m)
+    n = np.shape(x)[0]
+    m = np.shape(y_est)[0]
+    
+    # Pxy = cov(x, y.transpose); size = [n*m]; divided by (N-1)
+    Pxy = np.cov(x, y_est)[:n, n:]
+    # Pyy = cov(y, y.transpose); size = [m*m]; divided by (N-1)
+    Pyy = np.cov(y_est)
+    # K = Pxy * (Pyy)-1
+    if m == 1:  # if m = 1
+        K = Pxy / Pyy
+    else:  # if m > 1
+        K = np.dot(Pxx, np.linalg.inv(Pyy))
+
+    return K
+
+
+def calculate_gain_K_whole_field(da_x, da_y_est):
     ''' This function calculates gain K over the whole field.
     
     Parameters
@@ -510,20 +797,19 @@ def calculate_gain_K_whole_field(da_x, da_y):
     da_x: <xr.DataArray>
         Soil moisture states of all ensemble members;
         As returned from get_soil_moisture_and_estimated_meas_all_ensemble;
-        Dimension: [veg_class, snow_band, lat, lon, n, N]
-    da_y: <xr.DataArray>
-        Estimated measurement of all ensemble members (= top-layer soil moisture);
+        Dimension: [lat, lon, n, N]
+    da_y_est: <xr.DataArray>
+        Estimated measurement of all ensemble members;
         As returned from get_soil_moisture_and_estimated_meas_all_ensemble;
-        Dimension: [eg_class, snow_band, lat, lon, m, N]
+        Dimension: [lat, lon, m, N]
         
     Returns
     ----------
     da_K: <xr.DataArray>
         Gain K for the whole field
-        Dimension: [veg_class, snow_band, lat, lon, n, m], 
-        where [n, m] is the Kalman gain K
+        Dimension: [lat, lon, n, m], where [n, m] is the Kalman gain K
     
-    require
+    Require
     ----------
     xarray
     calculate_gain_K
@@ -531,37 +817,28 @@ def calculate_gain_K_whole_field(da_x, da_y):
     '''
 
     # --- Extract dimensions --- #
-    veg_class = da_x['veg_class']
-    snow_band = da_x['snow_band']
     lat_coord = da_x['lat']
     lon_coord = da_x['lon']
     n_coord = da_x['n']
-    m_coord = da_y['m']
+    m_coord = da_y_est['m']
     
     # --- Initialize da_K --- #
-    K = np.empty([len(veg_class), len(snow_band), len(lat_coord), len(lon_coord),
-                  len(n_coord), len(m_coord)])
+    K = np.empty([len(lat_coord), len(lon_coord), len(n_coord), len(m_coord)])
     K[:] = np.nan
     da_K = xr.DataArray(K,
-                        coords=[veg_class, snow_band, lat_coord, lon_coord,
-                                n_coord, m_coord],
-                        dims=['veg_class', 'snow_band', 'lat', 'lon', 'n', 'm'])
+                        coords=[lat_coord, lon_coord, n_coord, m_coord],
+                        dims=['lat', 'lon', 'n', 'm'])
     
     # --- Calculate gain K for the whole field --- #
-    for veg in veg_class:
-            for snow in snow_band:
-                for lat in lat_coord:
-                    for lon in lon_coord:
-                        # Skip inactive tiles
-                        if np.isnan(da_x.loc[veg, snow, lat, lon,
-                                             n_coord[0].values,
-                                             m_coord[0].values]) == True:
-                            continue
-                        # Calculate gain K
-                        K = calculate_gain_K(len(n_coord), len(m_coord),
-                                             da_x.loc[veg, snow, lat, lon, :, :],
-                                             da_y.loc[veg, snow, lat, lon, :, :])
-                        # Fill K in da_K
-                        da_K.loc[veg, snow, lat, lon, :, :] = K
+    for lat in lat_coord:
+        for lon in lon_coord:            
+            # Calculate gain K
+            K = calculate_gain_K(da_x.loc[lat, lon, :, :],
+                                 da_y_est.loc[lat, lon, :, :])
+            # Fill K in da_K
+            da_K.loc[lat, lon, :, :] = K
     
     return da_K
+
+
+
