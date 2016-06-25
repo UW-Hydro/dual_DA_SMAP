@@ -173,7 +173,7 @@ class States(object):
         pass
 
 
-def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, da_meas,
+def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
              da_meas_time_var, vic_exe, vic_global_template,
              vic_model_steps_per_day, output_vic_global_root_dir,
              output_vic_state_root_dir, output_vic_history_root_dir,
@@ -192,7 +192,9 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, da_meas,
         Initial state directory and file name prefix (excluding '.YYMMDD_SSSSS.nc')
     P0: <float>
         Initial state error matrix
-    da_meas: <xr.DataArray> [time*lat*lon]
+    R: <np.array>  [m*m]
+        Measurement error covariance matrix
+    da_meas: <xr.DataArray> [time, lat, lon]
         DataArray of measurements (currently, must be only 1 variable of measurement);
         Measurements should already be truncated (if needed) so that they are all within the
         EnKF run period
@@ -297,10 +299,10 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, da_meas,
     state_dir_before_update = out_state_dir
     
     # Loop over each measurement time point
-    for k in range(n_time):
-        
+    for time in da_meas[da_meas_time_var]:
+
         # Determine current time
-        current_time = pd.to_datetime(da_meas[da_meas_time_var].values[k])
+        current_time = pd.to_datetime(time.values)
         
         # Calculate gain K
         da_x, da_y_est = get_soil_moisture_and_estimated_meas_all_ensemble(
@@ -310,6 +312,10 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, da_meas,
                                 da_tile_frac=da_tile_frac)
         da_K = calculate_gain_K_whole_field(da_x, da_y_est)
 
+        # Update states for each ensemble member
+        da_x_updated = upstate_states_ensemble(da_x, da_y_est, da_K,
+                                               da_meas.loc[time, :, :, :], R)
+        
         return
 
 
@@ -841,4 +847,53 @@ def calculate_gain_K_whole_field(da_x, da_y_est):
     return da_K
 
 
-
+def upstate_states_ensemble(da_x, da_y_est, da_K, da_meas, R):
+    ''' Update the EnKF states for the whole field for each ensemble member.
+    
+    Parameters
+    ----------
+    da_x: <xr.DataArray>
+        Soil moisture states of all ensemble members, before update;
+        Dimension: [lat, lon, n, N]
+    da_y_est: <xr.DataArray>
+        Estimated measurement from pre-updated states of all ensemble members (y = Hx);
+        Dimension: [lat, lon, m, N]
+    da_K: <xr.DataArray>
+        Gain K for the whole field
+        Dimension: [lat, lon, n, m], where [n, m] is the Kalman gain K
+    da_meas: <xr.DataArray> [lat, lon, m]
+        Measurements at current time
+    R: <float> (for m = 1)
+        Measurement error covariance matrix (measurement error ~ N(0, R))
+        
+    Require
+    ----------
+    numpy
+    '''
+    
+    # Extract dimensions
+    N = len(da_x['N'])  # number of ensemble members
+    m = len(da_y_est['m'])
+    n = len(da_x['n'])
+    lat_coord = da_x['lat']
+    lon_coord = da_x['lon']
+    
+    # Initiate updated DataArray for states
+    da_x_updated = da_x.copy()
+    
+    # Loop over each ensemble member and each grid cell
+    for i in range(N):
+        for lat in lat_coord:
+            for lon in lon_coord:
+                # --- Calculate delta = K * (y_meas + v - y_est) for all grid cells --- #
+                # Generate random measurement perturbation
+                v = np.random.multivariate_normal(np.zeros(m), R).reshape((m, 1))  # [m*1]
+                # Extract other data for this grid cell
+                K = da_K.loc[lat, lon, :, :].values  # [n*m]
+                y_meas = da_meas.loc[lat, lon, :].values.reshape((m, 1))  # [m*1]
+                y_est = da_y_est.loc[lat, lon, :, i].values.reshape((m, 1))  # [m*1]
+                delta = np.dot(K, y_meas + v - y_est)  # [n*1]
+                # --- Update states --- #
+                da_x_updated.loc[lat, lon, :, i] += delta.reshape((n))
+                
+    return da_x_updated

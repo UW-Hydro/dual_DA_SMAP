@@ -68,13 +68,22 @@ ds_meas_orig = xr.open_dataset(os.path.join(cfg['CONTROL']['root_dir'],
 da_meas_orig = ds_meas_orig[cfg['EnKF']['meas_var_name']]
 # Only select out the period within the EnKF run period
 da_meas = da_meas_orig.sel(time=slice(cfg['EnKF']['start_time'], cfg['EnKF']['end_time']))
+# Convert da_meas dimension to [time, lat, lon, m] (currently m = 1)
+time = da_meas['time']
+lat = da_meas['lat']
+lon = da_meas['lon']
+data = da_meas.values.reshape((len(time), len(lat), len(lon), 1))
+da_meas = xr.DataArray(data, coords=[time, lat, lon, [0]],
+                       dims=['time', 'lat', 'lon', 'm'])
+# Prepare measurement error covariance matrix R [m*m]
+R = np.array([[cfg['EnKF']['R']]])
 
-
-class_states = EnKF_VIC(N=cfg['EnKF']['N'],
+EnKF_VIC(N=cfg['EnKF']['N'],
          start_time=pd.to_datetime(cfg['EnKF']['start_time']),
          end_time=pd.to_datetime(cfg['EnKF']['end_time']),
          init_state_basepath=os.path.join(dirs['states'], 'state.spinup'),
          P0=cfg['EnKF']['P0'],
+         R=R,
          da_meas=da_meas,
          da_meas_time_var='time',
          vic_exe=vic_exe,
