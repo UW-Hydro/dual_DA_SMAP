@@ -115,7 +115,8 @@ class States(object):
         
     
     def add_gaussian_white_noise_states(self, P):
-        ''' Add Gaussian noise for the whole field.
+        ''' Add a constant Gaussian noise (constant covariance matrix of all states n
+            over all grid cells) for the whole field.
             NOTE: this method does not change self
 
         Parameters
@@ -155,6 +156,67 @@ class States(object):
 
         return ds
     
+    
+    def perturb_soil_moisture_Gaussian(self, global_path, sigma_percent):
+        ''' Perturb each soil moisture state by sigma_percent %, uncorrelated
+            Gaussian noise.
+        
+        Parameters
+        ----------
+        global_path: <str>
+            VIC global parameter file path; can be a template file (here it is only used to
+            extract soil parameter file info)
+        sigma_percent: <float>
+            Percentage of the maximum state value to perturb; sigma_percent will be used
+            as the standard deviation of the Gaussian noise added (e.g., sigma_percent = 5
+            for 5% of maximum soil moisture perturbation)
+        
+        Returns
+        ----------
+        ds: <xr.dataset>
+            A dataset of VIC states, with soil moisture states perturbed, and all the other
+            state variables = those in self.ds
+        
+        Require
+        ----------
+        numpy
+        find_global_param_value
+        '''
+        
+        # Load soil parameter file (as defined in global file)
+        with open(global_path, 'r') as global_file:
+            global_param = global_file.read()
+        soil_nc = find_global_param_value(global_param, 'SOIL')
+        ds_soil = xr.open_dataset(soil_nc, decode_cf=False)
+        
+        # Calculate maximum soil moisture for each layer
+        # Dimension: [nlayer, lat, lon]
+        da_depth = ds_soil['depth']  # [m]
+        da_bulk_density = ds_soil['bulk_density']  # [kg/m3]
+        da_soil_density = ds_soil['soil_density']  # [kg/m3]
+        da_porosity = 1 - da_bulk_density / da_soil_density
+        da_max_moist = da_depth * da_porosity * 1000  # [mm]
+
+        # Perturb for each layer and each grid cell
+        veg_class = self.ds['veg_class']
+        snow_band = self.ds['snow_band']
+        lat = self.ds['lat']
+        lon = self.ds['lon']
+        nlayer = self.ds['nlayer']
+        
+        ds = self.ds.copy()
+        for lt in lat:
+            for lg in lon:
+                for l in nlayer:
+                    noise = np.random.normal(
+                                    loc=0,
+                                    scale=da_max_moist.loc[l, lat, lon].values *\
+                                          sigma_percent / 100.0,
+                                    size=(len(veg_class), len(snow_band)))
+                    ds['Soil_moisture'].loc[:, :, l, lt, lg] += noise
+        
+        return ds
+        
     
     def update_soil_moisture(self, da_K, da_y, da_y_est, R):
         ''' This function updates soil moisture states for the whole field
@@ -241,7 +303,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
              vic_model_steps_per_day, output_vic_global_root_dir,
              output_vic_state_root_dir, output_vic_history_root_dir,
              output_vic_forcing_root_dir, output_vic_log_root_dir,
-             dict_varnames, prec_std):
+             dict_varnames, prec_std, state_perturb_sigma_percent):
     ''' This function runs ensemble kalman filter (EnKF) on VIC (image driver)
 
     Parameters
@@ -287,6 +349,10 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
         e.g., {'PREC': 'prcp'; 'AIR_TEMP': 'tas'}
     prec_std: <float>
         Standard deviation of the precipitation perturbing multiplier
+    state_perturb_sigma_percent: <float>
+        Percentage of max value of each state to perturb (e.g., if
+        state_perturb_sigma_percent = 5, then Gaussian noise with standard deviation
+        = 5% of max soil moisture will be added as perturbation)
 
     Required
     ----------
@@ -410,13 +476,31 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
         out_updated_state_dir = setup_output_dirs(output_vic_state_root_dir,
                                                   mkdirs=[updated_states_dir_name])[updated_states_dir_name]
         # Update states and save to nc files
-        da_x_updated = upstate_states_ensemble(da_x, da_y_est, da_K,
+        da_x_updated = update_states_ensemble(da_x, da_y_est, da_K,
                                                da_meas.loc[time, :, :, :], R,
                                                state_dir_before_update=state_dir_before_update,
                                                current_time=current_time,
                                                out_vic_state_dir=out_updated_state_dir)
         
         # (3) Propagate each ensemble member to the next measurement time point
+        # --- Perturb states --- #
+        # Set up perturbed state subdirectories
+        pert_state_dir_name = 'perturbed.{}_{:05d}'.format(
+                                        current_time.strftime('%Y%m%d'),
+                                        current_time.hour*3600+current_time.second)
+        pert_state_dir = setup_output_dirs(
+                            output_vic_state_root_dir,
+                            mkdirs=[pert_state_dir_name])[pert_state_dir_name]
+        
+        # Perturb states for each ensemble member
+        perturb_soil_moisture_states_ensemble(
+                    N,
+                    states_to_perturb_dir=out_updated_state_dir,
+                    global_path=vic_global_template,
+                    sigma_percent=state_perturb_sigma_percent,
+                    out_states_dir=pert_state_dir)
+        
+        # --- Propagate to the next time point --- #
         propagate_output_dir_name = 'propagate.{}_{:05d}-{}'.format(
                                             current_time.strftime('%Y%m%d'),
                                             current_time.hour*3600+current_time.second,
@@ -437,12 +521,12 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
                        vic_exe=vic_exe,
                        vic_global_template_file=vic_global_template,
                        vic_model_steps_per_day=vic_model_steps_per_day,
-                       init_state_dir=out_updated_state_dir,
+                       init_state_dir=pert_state_dir,  # perturbes states as init state
                        out_state_dir=out_state_dir,
                        out_history_dir=out_history_dir,
                        out_global_dir=out_global_dir,
                        out_log_dir=out_log_dir,
-                       forcing_perturbed_dir=output_vic_forcing_root_dir)
+                       forcing_perturbed_dir=output_vic_forcing_root_dir)  # perturbed forcing
         return
 
 
@@ -989,7 +1073,7 @@ def calculate_gain_K_whole_field(da_x, da_y_est):
     return da_K
 
 
-def upstate_states_ensemble(da_x, da_y_est, da_K, da_meas, R, state_dir_before_update, current_time,
+def update_states_ensemble(da_x, da_y_est, da_K, da_meas, R, state_dir_before_update, current_time,
                             out_vic_state_dir):
     ''' Update the EnKF states for the whole field for each ensemble member.
     
@@ -1138,5 +1222,46 @@ def replace_global_values(gp, replace):
 
     return gpl
 
+
+def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir, global_path,
+                                          sigma_percent, out_states_dir):
+    ''' Perturb all soil_moisture states for each ensemble member
+    
+    Parameters
+    ----------
+    N: <int>
+        Number of ensemble members
+    states_to_perturb_dir: <str>
+        Directory for VIC state files to perturb.
+        File names: state.ens<i>.nc, where <i> is ensemble index 1, ..., N
+    global_path: <str>
+        VIC global parameter file path; can be a template file (here it is only used to
+        extract soil parameter file info)
+    sigma_percent: <float>
+        Percentage of the maximum state value to perturb; sigma_percent will be used
+        as the standard deviation of the Gaussian noise added (e.g., sigma_percent = 5
+        for 5% of maximum soil moisture perturbation)
+    out_states_dir: <str>
+        Directory for output perturbed VIC state files;
+        File names: state.ens<i>.nc, where <i> is ensemble index 1, ..., N
+    
+    Require
+    ----------
+    os
+    Class States
+    '''
+    
+    for i in range(N):
+        # Load in original state file
+        class_states = States(xr.open_dataset(
+                                os.path.join(states_to_perturb_dir,
+                                             'state.ens{}.nc'.format(i+1))))
+        # Perturb
+        ds_perturbed = class_states.perturb_soil_moisture_Gaussian(
+                                global_path, sigma_percent)
+        # Save perturbed state file
+        ds_perturbed.to_netcdf(os.path.join(out_states_dir,
+                                            'state.ens{}.nc'.format(i+1)),
+                               format='NETCDF4_CLASSIC')
 
 
