@@ -6,6 +6,12 @@ import string
 from collections import OrderedDict
 import xarray as xr
 
+from tonic.models.vic.vic import VIC, default_vic_valgrind_error_code
+
+
+class VICReturnCodeError(Exception):
+    pass
+
 
 class States(object):
     ''' This class is a VIC states object
@@ -62,7 +68,7 @@ class States(object):
                                dims=['lat', 'lon', 'n'])
         
         # Extract soil moisture states and convert dimension
-        EnKF_states = self.ds['Soil_moisture'].values.reshape(
+        EnKF_states = self.ds['STATE_SOIL_MOISTURE'].values.reshape(
                                                 [n, len(lat), len(lon)])
         
         # roll the 'n' dimension to after lat and lon, and fill in da
@@ -109,7 +115,7 @@ class States(object):
         EnKF_states_reshape = np.rollaxis(EnKF_states_reshape, 0, 5)
         
         # Fill into VIC states ds
-        ds['Soil_moisture'][:] = EnKF_states_reshape
+        ds['STATE_SOIL_MOISTURE'][:] = EnKF_states_reshape
         
         return ds
         
@@ -213,7 +219,7 @@ class States(object):
                                     scale=da_max_moist.loc[l, lat, lon].values *\
                                           sigma_percent / 100.0,
                                     size=(len(veg_class), len(snow_band)))
-                    ds['Soil_moisture'].loc[:, :, l, lt, lg] += noise
+                    ds['STATE_SOIL_MOISTURE'].loc[:, :, l, lt, lg] += noise
         
         return ds
         
@@ -376,6 +382,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
     pass
     
     # --- Prepare perturbed forcing data for each ensemble member --- #
+    print('\tPrearing perturbed forcings...')
     start_year = start_time.year
     end_year = end_time.year
     for year in range(start_year, end_year+1): 
@@ -388,6 +395,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
                                   out_forcing_dir=output_vic_forcing_root_dir)
     
     # --- Step 1. Initialize ---#
+    print('\tGenerating ensemble initial states at ', start_time)
     # Load initial state file
     ds_states = xr.open_dataset('{}.{}_{:05d}.nc'.format(
                                         init_state_basepath,
@@ -417,6 +425,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
     # Determine VIC run period
     vic_run_start_time = start_time
     vic_run_end_time = pd.to_datetime(da_meas[da_meas_time_var].values[0])
+    print('\tPropagating (run VIC) until the first measurement time point ',
+          vic_run_end_time)
     # Set up output states, history and global files directories
     propagate_output_dir_name = 'propagate.{}_{:05d}-{}'.format(
                         vic_run_start_time.strftime('%Y%m%d'),
@@ -445,7 +455,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
                        out_global_dir=out_global_dir,
                        out_log_dir=out_log_dir,
                        forcing_perturbed_dir=output_vic_forcing_root_dir)
-    
+
     # --- Step 3. Run EnKF --- #
     # Initialize
     state_dir_before_update = out_state_dir
@@ -459,6 +469,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
             next_time = end_time
         else:  # if not the last measurement time
             next_time = pd.to_datetime(da_meas[da_meas_time_var][t+1].values)
+
+        print('\tCalculating for ', current_time, 'to', next_time)
         
         # (1) Calculate gain K
         da_x, da_y_est = get_soil_moisture_and_estimated_meas_all_ensemble(
@@ -531,13 +543,10 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
         # Point state directory to be updated to the propagated one
         state_dir_before_update = out_state_dir
 
-        if t==1:
-            return
-
 
 def generate_VIC_global_file(global_template_path, model_steps_per_day,
                              start_time, end_time, init_state, vic_state_basepath,
-                             vic_history_file_basepath, replace,
+                             vic_history_file_dir, replace,
                              output_global_basepath):
     ''' This function generates a VIC global file from a template file.
     
@@ -557,11 +566,8 @@ def generate_VIC_global_file(global_template_path, model_steps_per_day,
               or "INIT_STATE /path/filename" for an initial state file
     vic_state_basepath: <str>
         Output state name directory and file name prefix
-    vic_history_file_basepath: <str>
-        Output file basepath
-        ".<start_time>_<end_date>.nc" will be appended,
-            where <start_time> is in '%Y%m%d-%H%S',
-                  <end_date> is in '%Y%m%d' (since VIC always runs until the end of a date)
+    vic_history_file_dir: <str>
+        Output history file directory
     replace: <collections.OrderedDict>
         An ordered dictionary of globap parameters to be replaced
     output_global_basepath: <str>
@@ -602,10 +608,7 @@ def generate_VIC_global_file(global_template_path, model_steps_per_day,
                                      statemonth=end_time.month,
                                      stateday=end_time.day,
                                      statesec=end_time.hour*3600+end_time.second,
-                                     result_dir='{}.{}_{}.nc'.format(
-                                            vic_history_file_basepath,
-                                            start_time.strftime('%Y%m%d-%H%S'),
-                                            end_time.strftime('%Y%m%d')))
+                                     result_dir=vic_history_file_dir)
     
     # --- Replace global parameters in replace --- #
     global_param = replace_global_values(global_param, replace)
@@ -657,7 +660,13 @@ def setup_output_dirs(out_basedir, mkdirs=['results', 'state',
 
 
 def check_returncode(returncode, expected=0):
-    '''check return code given by VIC, raise error if appropriate'''
+    '''check return code given by VIC, raise error if appropriate
+    
+    Require
+    ---------
+    tonic.models.vic.vic.default_vic_valgrind_error_code
+    class VICReturnCodeError
+    '''
     if returncode == expected:
         return None
     elif returncode == default_vic_valgrind_error_code:
@@ -716,7 +725,8 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
     for i in range(N):
         # Generate VIC global param file
         replace = OrderedDict([('FORCING1', os.path.join(forcing_perturbed_dir,
-                                                         'forc.ens{}.'.format(i+1)))])
+                                                         'forc.ens{}.'.format(i+1))),
+                               ('OUTFILE', 'history.ens{}'.format(i+1))])
         global_file = generate_VIC_global_file(
                             global_template_path=vic_global_template_file,
                             model_steps_per_day=vic_model_steps_per_day,
@@ -727,16 +737,14 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
                                                          'state.ens{}.nc'.format(i+1))),
                             vic_state_basepath=os.path.join(out_state_dir,
                                                             'state.ens{}'.format(i+1)),
-                            vic_history_file_basepath=os.path.join(
-                                        out_history_dir,
-                                        'history.ens{}'.format(i+1)),
+                            vic_history_file_dir=out_history_dir,
                             replace=replace,
                             output_global_basepath=os.path.join(
                                         out_global_dir,
                                         'global.ens{}'.format(i+1)))
         # Run VIC
-#        returncode = vic_exe.run(global_file, logdir=out_log_dir)
-#        check_returncode(returncode, expected=0)
+        returncode = vic_exe.run(global_file, logdir=out_log_dir)
+        check_returncode(returncode, expected=0)
 
 
 def determine_tile_frac(global_path):
@@ -880,7 +888,8 @@ def get_soil_moisture_and_estimated_meas_all_ensemble(N, state_dir, state_time,
         da_x.loc[:, :, :, i] = class_states.da_EnKF
         # Fill in measurement estimates y
         da_y_est[:, :, :, i] = calculate_y_est_whole_field(
-                                        class_states.ds['Soil_moisture'], da_tile_frac)
+                                        class_states.ds['STATE_SOIL_MOISTURE'],
+                                        da_tile_frac)
         
     return da_x, da_y_est
 
@@ -1253,7 +1262,7 @@ def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir, global_path,
     Require
     ----------
     os
-    Class States
+    class States
     '''
     
     for i in range(N):

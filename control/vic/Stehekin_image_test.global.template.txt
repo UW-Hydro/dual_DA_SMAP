@@ -78,8 +78,9 @@ SNOW_BAND	    1
 #######################################################################
 RESULT_DIR  $result_dir
 OUTPUT_STEPS_PER_DAY $model_steps_per_day  # number of output time steps per 24 hour period
-
 OUTFILE     fluxes
+AGGFREQ     NHOURS 1
+
 OUTVAR      OUT_PREC
 OUTVAR      OUT_RAINF
 OUTVAR      OUT_SNOWF

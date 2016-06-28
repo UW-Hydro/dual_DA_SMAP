@@ -8,7 +8,8 @@ from collections import OrderedDict
 
 from tonic.models.vic.vic import VIC
 from tonic.io import read_config, read_configobj
-from da_utils import EnKF_VIC, setup_output_dirs, generate_VIC_global_file
+from da_utils import (EnKF_VIC, setup_output_dirs, generate_VIC_global_file,
+                      check_returncode)
 
 # ============================================================ #
 # Process command line arguments
@@ -38,14 +39,19 @@ vic_exe = VIC(os.path.join(cfg['CONTROL']['root_dir'], cfg['VIC']['vic_exe']))
 # VIC model spinup
 # VIC will be run for a spinup period to get x0
 # ============================================================ #
-# Determine VIC spinup run period
+# --- Determine VIC spinup run period --- #
 vic_run_start_time = pd.to_datetime(cfg['VIC']['spinup_start_time'])
 vic_run_end_time = pd.to_datetime(cfg['EnKF']['start_time'])
 
-# Generate VIC global param file (no initial state)
-replace = OrderedDict([('FORCING1',
-                        os.path.join(cfg['CONTROL']['root_dir'],
-                                     cfg['FORCINGS']['orig_forcing_nc_basepath']))])
+print('Running spinup time: ', vic_run_start_time, 'to', vic_run_end_time,
+       '...')
+
+# --- Generate VIC global param file (no initial state) --- #
+# Specify forcing file and output history file name
+replace = OrderedDict([('FORCING1', os.path.join(
+                                        cfg['CONTROL']['root_dir'],
+                                        cfg['FORCINGS']['orig_forcing_nc_basepath'])),
+                       ('OUTFILE', 'history.spinup')])
 global_file = generate_VIC_global_file(
                         global_template_path=os.path.join(cfg['CONTROL']['root_dir'],
                                                           cfg['VIC']['vic_global_template']),
@@ -54,20 +60,26 @@ global_file = generate_VIC_global_file(
                         end_time=vic_run_end_time,
                         init_state="# INIT_STATE",
                         vic_state_basepath=os.path.join(dirs['states'], 'state.spinup'),
-                        vic_history_file_basepath=os.path.join(dirs['history'],
-                                                               'history.spinup'),
+                        vic_history_file_dir=dirs['history'],
                         replace=replace,
                         output_global_basepath=os.path.join(dirs['global'],
                                                             'global.spinup'))
 
-# Run VIC
-#returncode = vic_exe.run(global_file, logdir=output_vic_log_dir)
-#check_returncode(returncode, expected=0)
+# --- Prepare log directory --- #
+log_dir = setup_output_dirs(dirs['logs'],
+                            mkdirs=['spinup'])['spinup']
+
+# --- Run VIC --- #
+returncode = vic_exe.run(global_file, logdir=log_dir)
+check_returncode(returncode, expected=0)
 
 # ============================================================ #
 # Prepare and run EnKF
 # ============================================================ #
+print('Preparing for running EnKF...')
+
 # --- Load and process measurement data --- #
+print('\tLoading measurement data...')
 # Load measurement data
 ds_meas_orig = xr.open_dataset(os.path.join(cfg['CONTROL']['root_dir'],
                                             cfg['EnKF']['meas_nc']))
@@ -90,10 +102,14 @@ dict_varnames['PREC'] = cfg['FORCINGS']['PREC']
 # --- Prepare measurement error covariance matrix R [m*m] --- #
 R = np.array([[cfg['EnKF']['R']]])
 
+# --- Run EnKF --- #
+start_time = pd.to_datetime(cfg['EnKF']['start_time'])
+end_time = pd.to_datetime(cfg['EnKF']['end_time'])
+print('Start running EnKF for ', start_time, 'to', end_time, '...')
 
 EnKF_VIC(N=cfg['EnKF']['N'],
-         start_time=pd.to_datetime(cfg['EnKF']['start_time']),
-         end_time=pd.to_datetime(cfg['EnKF']['end_time']),
+         start_time=start_time,
+         end_time=end_time,
          init_state_basepath=os.path.join(dirs['states'], 'state.spinup'),
          P0=cfg['EnKF']['P0'],
          R=R,
