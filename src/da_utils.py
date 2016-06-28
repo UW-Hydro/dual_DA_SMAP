@@ -75,9 +75,10 @@ class States(object):
         return self.da_EnKF
     
     
-    def convert_EnKFstates_sm_to_VICstates(self, da_EnKF):
-        ''' This function converts a EnKF states da (soil moisture states) back to the
-            original VIC states ds (self.ds) - as a returned ds, withouth changing self.ds
+    def convert_new_EnKFstates_sm_to_VICstates(self, da_EnKF):
+        ''' This function converts an EnKF states da (soil moisture states) to the
+            VIC states ds (self.ds), with all the other state variables as original in self.ds
+            - as a returned ds, withouth changing self.ds.
         
         Parameters
         ----------
@@ -150,7 +151,7 @@ class States(object):
         da_perturbed[:] += noise_reshape
         
         # Put the perturbed soil moisture states to back to VIC states ds
-        ds = self.convert_EnKFstates_sm_to_VICstates(da_perturbed)
+        ds = self.convert_new_EnKFstates_sm_to_VICstates(da_perturbed)
 
         return ds
     
@@ -173,11 +174,74 @@ class States(object):
         pass
 
 
+class Forcings(object):
+    ''' This class is a VIC forcing object
+
+    Atributes
+    ---------
+    ds: <xarray.dataset>
+        A dataset of VIC forcings
+    lat_len: <int>
+        Length of lat dimension
+    lon_len: <int>
+        Length of lon dimension
+    time_len: <int>
+        Length of time dimension
+    
+    Methods
+    ---------
+    '''
+    
+    def __init__(self, ds):
+        self.ds = ds
+        self.lat_len = len(ds['lat'])
+        self.lon_len = len(ds['lon'])
+        self.time_len = len(ds['time'])
+        self.clean_up_time()
+    
+    
+    def clean_up_time(self):
+        ''' Clean up time variable'''
+        
+        self.ds['time'] = pd.to_datetime(self.ds['time'].values)
+        
+    
+    def perturb_prec_lognormal(self, varname, std=1):
+        ''' Perturb precipitation forcing data
+        
+        Parameters
+        ----------
+        varname: <str>
+            Precipitation variable name in the 
+        std: <float>
+            Standard deviation of the multiplier (which is log-normal distributed);
+            Note: here sigma is the real standard deviation of the multiplier, not
+            the standard deviation of the underlying normal distribution! (and the
+            real mean of the multiplier is 1)
+        '''
+        
+        # Calculate mu and sigma for the lognormal distribution
+        mu = -0.5 * np.log(std+1)
+        sigma = np.sqrt(np.log(std+1))
+        
+        # Generate random noise for the whole field
+        noise = np.random.lognormal(mu, sigma,
+                                    size=(self.time_len, self.lat_len, self.lon_len))
+        
+        # Add noise to soil moisture field
+        ds_perturbed = self.ds.copy()
+        ds_perturbed[varname][:] *= noise
+        
+        return ds_perturbed
+
+
 def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
              da_meas_time_var, vic_exe, vic_global_template,
+             vic_forcing_orig_basepath,
              vic_model_steps_per_day, output_vic_global_root_dir,
              output_vic_state_root_dir, output_vic_history_root_dir,
-             output_vic_log_root_dir):
+             output_vic_forcing_root_dir, output_vic_log_root_dir,
+             dict_varnames, prec_std):
     ''' This function runs ensemble kalman filter (EnKF) on VIC (image driver)
 
     Parameters
@@ -204,6 +268,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
         VIC run class
     vic_global_template: <str>
         VIC global file template
+    vic_forcing_orig_basepath: <str>
+        VIC original unperturbed forcing netCDF file basepath ('YYYY.nc' will be appended)
     vic_model_steps_per_day: <int>
         VIC model steps per day
     output_vic_global_root_dir: <str>
@@ -212,8 +278,15 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
         Directory for VIC output state files
     output_vic_result_root_dir: <str>
         Directory for VIC output result files
+    output_vic_forcing_root_dir: <str>
+        Directory for VIC perturbed forcing files
     output_vic_log_root_dir: <str>
         Directory for VIC output log files
+    dict_varnames: <dict>
+        A dictionary of forcing names in nc file;
+        e.g., {'PREC': 'prcp'; 'AIR_TEMP': 'tas'}
+    prec_std: <float>
+        Standard deviation of the precipitation perturbing multiplier
 
     Required
     ----------
@@ -236,7 +309,19 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
     # Check whether the time range of da_meas is within run period
     pass
     
-    # --- Initialize ---#
+    # --- Prepare perturbed forcing data for each ensemble member --- #
+    start_year = start_time.year
+    end_year = end_time.year
+    for year in range(start_year, end_year+1): 
+        class_forcings_orig = Forcings(xr.open_dataset(
+                                    '{}{}.nc'.format(vic_forcing_orig_basepath,
+                                                     year)))
+        perturb_forcings_ensemble(N, orig_forcing=class_forcings_orig,
+                                  year=year, dict_varnames=dict_varnames,
+                                  prec_std=prec_std,
+                                  out_forcing_dir=output_vic_forcing_root_dir)
+    
+    # --- Step 1. Initialize ---#
     # Load initial state file
     ds_states = xr.open_dataset('{}.{}_{:05d}.nc'.format(
                                         init_state_basepath,
@@ -262,7 +347,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
                                   'state.ens{}.nc'.format(i+1)),
                      format='NETCDF4_CLASSIC')
     
-    # --- Propagate (run VIC) until the first measurement time point ---#    
+    # --- Step 2. Propagate (run VIC) until the first measurement time point ---#    
     # Determine VIC run period
     vic_run_start_time = start_time
     vic_run_end_time = pd.to_datetime(da_meas[da_meas_time_var].values[0])
@@ -285,26 +370,31 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
                             mkdirs=[propagate_output_dir_name])[propagate_output_dir_name]
     # Propagate all ensemble members
     propagate_ensemble(N, start_time=vic_run_start_time, end_time=vic_run_end_time,
-                       vic_exe = vic_exe,
+                       vic_exe=vic_exe,
                        vic_global_template_file=vic_global_template,
                        vic_model_steps_per_day=vic_model_steps_per_day,
                        init_state_dir=init_state_dir,
                        out_state_dir=out_state_dir,
                        out_history_dir=out_history_dir,
                        out_global_dir=out_global_dir,
-                       out_log_dir=out_log_dir)
+                       out_log_dir=out_log_dir,
+                       forcing_perturbed_dir=output_vic_forcing_root_dir)
     
-    # --- Run EnKF --- #
+    # --- Step 3. Run EnKF --- #
     # Initialize
     state_dir_before_update = out_state_dir
     
     # Loop over each measurement time point
-    for time in da_meas[da_meas_time_var]:
+    for t, time in enumerate(da_meas[da_meas_time_var]):
 
-        # Determine current time
+        # Determine current and next (i.e., next measurement time) time points
         current_time = pd.to_datetime(time.values)
+        if t == len(da_meas[da_meas_time_var])-1:  # if the current time is the last measurement time
+            next_time = end_time
+        else:  # if not the last measurement time
+            next_time = pd.to_datetime(da_meas[da_meas_time_var][t+1].values)
         
-        # Calculate gain K
+        # (1) Calculate gain K
         da_x, da_y_est = get_soil_moisture_and_estimated_meas_all_ensemble(
                                 N,
                                 state_dir=state_dir_before_update,
@@ -312,16 +402,54 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
                                 da_tile_frac=da_tile_frac)
         da_K = calculate_gain_K_whole_field(da_x, da_y_est)
 
-        # Update states for each ensemble member
+        # (2) Update states for each ensemble member
+        # Set up dir for updated states
+        updated_states_dir_name = 'updated.{}_{:05d}'.format(
+                                        current_time.strftime('%Y%m%d'),
+                                        current_time.hour*3600+current_time.second)
+        out_updated_state_dir = setup_output_dirs(output_vic_state_root_dir,
+                                                  mkdirs=[updated_states_dir_name])[updated_states_dir_name]
+        # Update states and save to nc files
         da_x_updated = upstate_states_ensemble(da_x, da_y_est, da_K,
-                                               da_meas.loc[time, :, :, :], R)
+                                               da_meas.loc[time, :, :, :], R,
+                                               state_dir_before_update=state_dir_before_update,
+                                               current_time=current_time,
+                                               out_vic_state_dir=out_updated_state_dir)
         
+        # (3) Propagate each ensemble member to the next measurement time point
+        propagate_output_dir_name = 'propagate.{}_{:05d}-{}'.format(
+                                            current_time.strftime('%Y%m%d'),
+                                            current_time.hour*3600+current_time.second,
+                                            next_time.strftime('%Y%m%d'))
+        out_state_dir = setup_output_dirs(
+                                output_vic_state_root_dir,
+                                mkdirs=[propagate_output_dir_name])[propagate_output_dir_name]
+        out_history_dir = setup_output_dirs(
+                                output_vic_history_root_dir,
+                                mkdirs=[propagate_output_dir_name])[propagate_output_dir_name]
+        out_global_dir = setup_output_dirs(
+                                output_vic_global_root_dir,
+                                mkdirs=[propagate_output_dir_name])[propagate_output_dir_name]
+        out_log_dir = setup_output_dirs(
+                                output_vic_log_root_dir,
+                                mkdirs=[propagate_output_dir_name])[propagate_output_dir_name]
+        propagate_ensemble(N, start_time=current_time, end_time=next_time,
+                       vic_exe=vic_exe,
+                       vic_global_template_file=vic_global_template,
+                       vic_model_steps_per_day=vic_model_steps_per_day,
+                       init_state_dir=out_updated_state_dir,
+                       out_state_dir=out_state_dir,
+                       out_history_dir=out_history_dir,
+                       out_global_dir=out_global_dir,
+                       out_log_dir=out_log_dir,
+                       forcing_perturbed_dir=output_vic_forcing_root_dir)
         return
 
 
 def generate_VIC_global_file(global_template_path, model_steps_per_day,
                              start_time, end_time, init_state, vic_state_basepath,
-                             vic_history_file_basepath, output_global_basepath):
+                             vic_history_file_basepath, replace,
+                             output_global_basepath):
     ''' This function generates a VIC global file from a template file.
     
     Parameters
@@ -345,6 +473,8 @@ def generate_VIC_global_file(global_template_path, model_steps_per_day,
         ".<start_time>_<end_date>.nc" will be appended,
             where <start_time> is in '%Y%m%d-%H%S',
                   <end_date> is in '%Y%m%d' (since VIC always runs until the end of a date)
+    replace: <collections.OrderedDict>
+        An ordered dictionary of globap parameters to be replaced
     output_global_basepath: <str>
         Output global file basepath
         ".<start_time>_<end_date>.nc" will be appended,
@@ -359,6 +489,7 @@ def generate_VIC_global_file(global_template_path, model_steps_per_day,
     Require
     ----------
     string
+    OrderedDict
     '''
     
     # --- Create template string --- #
@@ -387,6 +518,9 @@ def generate_VIC_global_file(global_template_path, model_steps_per_day,
                                             start_time.strftime('%Y%m%d-%H%S'),
                                             end_time.strftime('%Y%m%d')))
     
+    # --- Replace global parameters in replace --- #
+    global_param = replace_global_values(global_param, replace)
+    
     # --- Write global parameter file --- #
     output_global_file = '{}.{}_{}.txt'.format(
                                 output_global_basepath,
@@ -410,7 +544,7 @@ def setup_output_dirs(out_basedir, mkdirs=['results', 'state',
         Output base directory for all output files
     mkdirs: <list>
         A list of subdirectories to make
-        
+
     Require
     ----------
     os
@@ -446,7 +580,8 @@ def check_returncode(returncode, expected=0):
 
 def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_file,
                        vic_model_steps_per_day, init_state_dir, out_state_dir,
-                       out_history_dir, out_global_dir, out_log_dir):
+                       out_history_dir, out_global_dir, out_log_dir,
+                       forcing_perturbed_dir):
     ''' This function propagates (via VIC) an ensemble of states to a certain time point.
     
     Parameters
@@ -478,15 +613,21 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
     out_log_dir: <str>
         Directory of output log files for each ensemble member
         Log file names will be "global.ens<i>.xxx", where <i> is 1, 2, ..., N
+    forcing_perturbed_dir: <str>
+        Perturbed forcing directory. File names are: "forc.ens<i>.<YYYY>.nc",
+        where <i> is 1, 2, ..., N, and <YYYY> is forcing year
         
     Require
     ----------
+    OrderedDict
     generate_VIC_global_file
     '''
     
     # --- Loop over each ensemble member --- #
     for i in range(N):
         # Generate VIC global param file
+        replace = OrderedDict([('FORCING1', os.path.join(forcing_perturbed_dir,
+                                                         'forc.ens{}.'.format(i+1)))])
         global_file = generate_VIC_global_file(
                             global_template_path=vic_global_template_file,
                             model_steps_per_day=vic_model_steps_per_day,
@@ -500,6 +641,7 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
                             vic_history_file_basepath=os.path.join(
                                         out_history_dir,
                                         'history.ens{}'.format(i+1)),
+                            replace=replace,
                             output_global_basepath=os.path.join(
                                         out_global_dir,
                                         'global.ens{}'.format(i+1)))
@@ -837,7 +979,7 @@ def calculate_gain_K_whole_field(da_x, da_y_est):
     
     # --- Calculate gain K for the whole field --- #
     for lat in lat_coord:
-        for lon in lon_coord:            
+        for lon in lon_coord:
             # Calculate gain K
             K = calculate_gain_K(da_x.loc[lat, lon, :, :],
                                  da_y_est.loc[lat, lon, :, :])
@@ -847,7 +989,8 @@ def calculate_gain_K_whole_field(da_x, da_y_est):
     return da_K
 
 
-def upstate_states_ensemble(da_x, da_y_est, da_K, da_meas, R):
+def upstate_states_ensemble(da_x, da_y_est, da_K, da_meas, R, state_dir_before_update, current_time,
+                            out_vic_state_dir):
     ''' Update the EnKF states for the whole field for each ensemble member.
     
     Parameters
@@ -865,7 +1008,23 @@ def upstate_states_ensemble(da_x, da_y_est, da_K, da_meas, R):
         Measurements at current time
     R: <float> (for m = 1)
         Measurement error covariance matrix (measurement error ~ N(0, R))
-        
+    state_dir_before_update: <str>
+        Directory of VIC states before update;
+        State file names are: state.ens<i>.<YYYYMMDD>_<SSSSS>.nc,
+        where <i> is ensemble member index (1, ..., N),
+              <YYYYMMMDD>_<SSSSS> is the current time of the states
+    current_time: <pandas.tslib.Timestamp>
+        Current time of the states
+    output_vic_state_dir: <str>
+        Directory for saving updated state files in VIC format;
+        State file names will be: state.ens<i>.nc, where <i> is ensemble member index (1, ..., N)
+    
+    Returns
+    ----------
+    da_x_updated: <xr.DataArray>
+        Updated soil moisture states;
+        Dimension: [lat, lon, n, N]
+    
     Require
     ----------
     numpy
@@ -896,4 +1055,88 @@ def upstate_states_ensemble(da_x, da_y_est, da_K, da_meas, R):
                 # --- Update states --- #
                 da_x_updated.loc[lat, lon, :, i] += delta.reshape((n))
                 
+        # --- Save updated states to nc files for each ensemble member --- #
+        # Load VIC states before update for this ensemble member          
+        ds = xr.open_dataset(os.path.join(state_dir_before_update,
+                                          'state.ens{}.{}_{:05d}.nc'.format(
+                                                    i+1,
+                                                    current_time.strftime('%Y%m%d'),
+                                                    current_time.hour*3600+current_time.second)))
+        # Convert EnKF states back to VIC states
+        class_states = States(ds)
+        ds_updated = class_states.convert_new_EnKFstates_sm_to_VICstates(da_x_updated.loc[:, :, :, i])
+        # Save VIC states to netCDF file
+        ds_updated.to_netcdf(os.path.join(out_vic_state_dir,
+                                          'state.ens{}.nc'.format(i+1)),
+                             format='NETCDF4_CLASSIC')
+    
     return da_x_updated
+
+
+def perturb_forcings_ensemble(N, orig_forcing, year, dict_varnames, prec_std,
+                              out_forcing_dir):
+    ''' Perturb forcings for all ensemble members
+    
+    Parameters
+    ----------
+    N: <int>
+        Number of ensemble members
+    orig_forcing: <class 'Forcings'>
+        Original (unperturbed) VIC forcings
+    year: <int>
+        Year of forcing
+    dict_varnames: <dict>
+        A dictionary of forcing names in nc file;
+        e.g., {'PREC': 'prcp'; 'AIR_TEMP': 'tas'}
+    prec_std: <float>
+        Standard deviation of the precipitation perturbing multiplier
+    out_forcing_dir: <str>
+        Directory for output perturbed forcings;
+        File names will be: forc.ens<i>.nc, where <i> is ensemble index, 1, ..., N
+    
+    Require
+    ----------
+    os
+    '''
+    
+    # Loop over each ensemble member
+    for i in range(N):
+        # Perturb PREC
+        ds_perturbed = orig_forcing.perturb_prec_lognormal(
+                                            varname=dict_varnames['PREC'],
+                                            std=prec_std)
+        # Save to nc file
+        ds_perturbed.to_netcdf(os.path.join(out_forcing_dir,
+                                            'forc.ens{}.{}.nc'.format(i+1, year)),
+                               format='NETCDF4_CLASSIC')
+
+
+def replace_global_values(gp, replace):
+    '''given a multiline string that represents a VIC global parameter file,
+       loop through the string, replacing values with those found in the
+       replace dictionary'''
+    
+    gpl = []
+    for line in iter(gp.splitlines()):
+        line_list = line.split()
+        if line_list:
+            key = line_list[0]
+            if key in replace:
+                value = replace.pop(key)
+                val = list([str(value)])
+            else:
+                val = line_list[1:]
+            gpl.append('{0: <20} {1}\n'.format(key, ' '.join(val)))
+
+    if replace:
+        for key, val in replace.items():
+            try:
+                value = ' '.join(val)
+            except:
+                value = val
+            gpl.append('{0: <20} {1}\n'.format(key, value))
+
+    return gpl
+
+
+

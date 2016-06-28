@@ -4,6 +4,7 @@ import numpy as np
 import xarray as xr
 import os
 import pandas as pd
+from collections import OrderedDict
 
 from tonic.models.vic.vic import VIC
 from tonic.io import read_config, read_configobj
@@ -25,7 +26,8 @@ np.random.seed(cfg['CONTROL']['seed'])
 # ============================================================ #
 dirs = setup_output_dirs(os.path.join(cfg['CONTROL']['root_dir'],
                                       cfg['OUTPUT']['output_basdir']),
-                         mkdirs=['global', 'history', 'states', 'logs', 'plots'])
+                         mkdirs=['global', 'history', 'states', 'forcings',
+                                 'logs', 'plots'])
 
 # ============================================================ #
 # Prepare VIC exe
@@ -41,6 +43,9 @@ vic_run_start_time = pd.to_datetime(cfg['VIC']['spinup_start_time'])
 vic_run_end_time = pd.to_datetime(cfg['EnKF']['start_time'])
 
 # Generate VIC global param file (no initial state)
+replace = OrderedDict([('FORCING1',
+                        os.path.join(cfg['CONTROL']['root_dir'],
+                                     cfg['FORCINGS']['orig_forcing_nc_basepath']))])
 global_file = generate_VIC_global_file(
                         global_template_path=os.path.join(cfg['CONTROL']['root_dir'],
                                                           cfg['VIC']['vic_global_template']),
@@ -51,6 +56,7 @@ global_file = generate_VIC_global_file(
                         vic_state_basepath=os.path.join(dirs['states'], 'state.spinup'),
                         vic_history_file_basepath=os.path.join(dirs['history'],
                                                                'history.spinup'),
+                        replace=replace,
                         output_global_basepath=os.path.join(dirs['global'],
                                                             'global.spinup'))
 
@@ -75,8 +81,15 @@ lon = da_meas['lon']
 data = da_meas.values.reshape((len(time), len(lat), len(lon), 1))
 da_meas = xr.DataArray(data, coords=[time, lat, lon, [0]],
                        dims=['time', 'lat', 'lon', 'm'])
-# Prepare measurement error covariance matrix R [m*m]
+
+# --- Process VIC forcing names and perturbation parameters --- #
+# Construct forcing variable name dictionary
+dict_varnames = {}
+dict_varnames['PREC'] = cfg['FORCINGS']['PREC']
+
+# --- Prepare measurement error covariance matrix R [m*m] --- #
 R = np.array([[cfg['EnKF']['R']]])
+
 
 EnKF_VIC(N=cfg['EnKF']['N'],
          start_time=pd.to_datetime(cfg['EnKF']['start_time']),
@@ -89,10 +102,13 @@ EnKF_VIC(N=cfg['EnKF']['N'],
          vic_exe=vic_exe,
          vic_global_template=os.path.join(cfg['CONTROL']['root_dir'],
                                           cfg['VIC']['vic_global_template']),
+         vic_forcing_orig_basepath=os.path.join(cfg['CONTROL']['root_dir'],
+                                          cfg['FORCINGS']['orig_forcing_nc_basepath']),
          vic_model_steps_per_day=cfg['VIC']['model_steps_per_day'],
          output_vic_global_root_dir=dirs['global'],
          output_vic_state_root_dir=dirs['states'],
          output_vic_history_root_dir=dirs['history'],
-         output_vic_log_root_dir=dirs['logs'])
-
+         output_vic_forcing_root_dir=dirs['forcings'],
+         output_vic_log_root_dir=dirs['logs'],
+         dict_varnames=dict_varnames, prec_std=cfg['FORCINGS']['prec_std'])
 
