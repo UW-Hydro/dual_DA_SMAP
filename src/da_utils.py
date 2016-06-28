@@ -499,7 +499,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
                     global_path=vic_global_template,
                     sigma_percent=state_perturb_sigma_percent,
                     out_states_dir=pert_state_dir)
-        
+
         # --- Propagate to the next time point --- #
         propagate_output_dir_name = 'propagate.{}_{:05d}-{}'.format(
                                             current_time.strftime('%Y%m%d'),
@@ -527,7 +527,12 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
                        out_global_dir=out_global_dir,
                        out_log_dir=out_log_dir,
                        forcing_perturbed_dir=output_vic_forcing_root_dir)  # perturbed forcing
-        return
+
+        # Point state directory to be updated to the propagated one
+        state_dir_before_update = out_state_dir
+
+        if t==1:
+            return
 
 
 def generate_VIC_global_file(global_template_path, model_steps_per_day,
