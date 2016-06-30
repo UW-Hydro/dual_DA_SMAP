@@ -495,6 +495,9 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
                                                out_vic_state_dir=out_updated_state_dir)
         
         # (3) Propagate each ensemble member to the next measurement time point
+        # --- If current_time == next_time, do not propagate --- #
+        if current_time == next_time:
+            break
         # --- Perturb states --- #
         # Set up perturbed state subdirectories
         pert_state_dir_name = 'perturbed.{}_{:05d}'.format(
@@ -1279,3 +1282,98 @@ def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir, global_path,
                                format='NETCDF4_CLASSIC')
 
 
+def propagate(start_time, end_time, vic_exe, vic_global_template_file,
+                       vic_model_steps_per_day, init_state_nc, out_state_basepath,
+                       out_history_dir, out_history_fileprefix,
+                       out_global_basepath, out_log_dir,
+                       forcing_perturbed_basepath):
+    ''' This function propagates (via VIC) from an initial state (or no initial state)
+        to a certain time point.
+
+    Parameters
+    ----------
+    start_time: <pandas.tslib.Timestamp>
+        Start time of this propagation run
+    end_time: <pandas.tslib.Timestamp>
+        End time of this propagation
+    vic_exe: <class 'VIC'>
+        Tonic VIC class
+    vic_global_template_file: <str>
+        Path of VIC global file template
+    vic_model_steps_per_day: <str>
+        VIC option - model steps per day
+    init_state_nc: <str>
+        Initial state netCDF file; None for no initial state
+    out_state_basepath: <str>
+        Basepath of output states; ".YYYYMMDD_SSSSS.nc" will be appended
+    out_history_dir: <str>
+        Directory of output history files
+    out_history_fileprefix: <str>
+        History file prefix
+    out_global_basepath: <str>
+        Basepath of output global files; "YYYYMMDD-HHS_YYYYMMDD.txt" will be appended
+    out_log_dir: <str>
+        Directory for output log files
+    forcing_perturbed_basepath: <str>
+        Forcing basepath. <YYYY.nc> will be appended
+
+    Require
+    ----------
+    OrderedDict
+    generate_VIC_global_file
+    check_returncode
+    '''
+
+    # Generate VIC global param file
+    replace = OrderedDict([('FORCING1', forcing_perturbed_basepath),
+                           ('OUTFILE', out_history_fileprefix)])
+    global_file = generate_VIC_global_file(
+                        global_template_path=vic_global_template_file,
+                        model_steps_per_day=vic_model_steps_per_day,
+                        start_time=start_time,
+                        end_time=end_time,
+                        init_state='#INIT_STATE' if init_state_nc is None
+                                   else 'INIT_STATE {}'.format(init_state_nc),
+                        vic_state_basepath=out_state_basepath,
+                        vic_history_file_dir=out_history_dir,
+                        replace=replace,
+                        output_global_basepath=out_global_basepath)
+    
+    # Run VIC
+    returncode = vic_exe.run(global_file, logdir=out_log_dir)
+    check_returncode(returncode, expected=0)
+
+
+def perturb_soil_moisture_states(states_to_perturb_nc, global_path,
+                                 sigma_percent, out_states_nc):
+    ''' Perturb all soil_moisture states
+
+    Parameters
+    ----------
+    states_to_perturb_nc: <str>
+        Path of VIC state netCDF file to perturb.
+    global_path: <str>
+        VIC global parameter file path; can be a template file (here it is only used to
+        extract soil parameter file info)
+    sigma_percent: <float>
+        Percentage of the maximum state value to perturb; sigma_percent will be used
+        as the standard deviation of the Gaussian noise added (e.g., sigma_percent = 5
+        for 5% of maximum soil moisture perturbation)
+    out_states_nc: <str>
+        Path of output perturbed VIC state netCDF file
+
+    Require
+    ----------
+    os
+    class States
+    '''
+    
+    # Load in original state file
+    class_states = States(xr.open_dataset(states_to_perturb_nc))
+
+    # Perturb
+    ds_perturbed = class_states.perturb_soil_moisture_Gaussian(
+                                        global_path, sigma_percent)
+    # Save perturbed state file
+    ds_perturbed.to_netcdf(out_states_nc,
+                           format='NETCDF4_CLASSIC')
