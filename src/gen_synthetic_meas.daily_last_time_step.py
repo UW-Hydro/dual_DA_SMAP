@@ -15,7 +15,7 @@ from tonic.models.vic.vic import VIC
 from tonic.io import read_configobj
 
 from da_utils import (Forcings, setup_output_dirs, propagate,
-                      perturb_soil_moisture_states)
+                      perturb_soil_moisture_states, concat_vic_history_files)
 
 # =========================================================== #
 # Load config file
@@ -91,6 +91,9 @@ for year in range(start_year, end_year+1):
                            format='NETCDF4_CLASSIC')
 
 # --- Run VIC with perturbed forcings and soil moisture states --- #
+# Initialize a list of file paths to be concatenated
+list_history_paths = []
+
 # (1) Run VIC until the first measurement time point (no initial state)
 prop_period_stamp = '{}-{}'.format(start_time.strftime('%Y%m%d_%H%S'),
                                    meas_times[0].strftime('%Y%m%d_%H%S'))
@@ -113,6 +116,11 @@ propagate(start_time=start_time, end_time=meas_times[0],
           out_log_dir=log_dir,
           forcing_perturbed_basepath=os.path.join(truth_subdirs['forcings'],
                                                   'forc_perturbed.'))
+# Concat output history file to the list to be concatenated
+list_history_paths.append(os.path.join(truth_subdirs['history'],
+                                       'history.{}-{:05d}.nc'.format(
+                                            start_time.strftime('%Y-%m-%d'),
+                                            start_time.hour*3600+start_time.second)))
 
 # (2) Loop over until each measurement point and run VIC
 for t in range(len(meas_times)):
@@ -128,7 +136,7 @@ for t in range(len(meas_times)):
     if current_time > next_time:
         break
     print('\tRun VIC ', current_time, 'to', next_time, '(perturbed forcings and states)')
-    
+
     # --- Perturb states --- #
     orig_state_nc = os.path.join(
                             truth_subdirs['states'],
@@ -145,7 +153,7 @@ for t in range(len(meas_times)):
             global_path=global_template,
             sigma_percent=cfg['FORCINGS_STATES_PERTURB']['state_perturb_sigma_percent'],
             out_states_nc=perturbed_state_nc)
-    
+
     # --- Propagate to the next time point --- #
     propagate(start_time=current_time, end_time=next_time,
               vic_exe=vic_exe, vic_global_template_file=global_template,
@@ -159,6 +167,25 @@ for t in range(len(meas_times)):
               out_log_dir=log_dir,
               forcing_perturbed_basepath=os.path.join(truth_subdirs['forcings'],
                                                       'forc_perturbed.'))
+    # Concat output history file to the list to be concatenated
+    list_history_paths.append(os.path.join(truth_subdirs['history'],
+                                           'history.{}-{:05d}.nc'.format(
+                                                current_time.strftime('%Y-%m-%d'),
+                                                current_time.hour*3600+current_time.second)))
+
+# (3) Concatenate all history files
+ds_concat = concat_vic_history_files(list_history_paths)
+# Save to history output directory
+first_time = pd.to_datetime(ds_concat['time'][0].values)
+last_time = pd.to_datetime(ds_concat['time'][-1].values)
+hist_concat_nc = os.path.join(truth_subdirs['history'],
+                                 'history.concat.{}_{:05d}-{}_{:05d}.nc'.format(
+                                        first_time.strftime('%Y%m%d'),
+                                        first_time.hour*3600+first_time.second,
+                                        last_time.strftime('%Y%m%d'),
+                                        last_time.hour*3600+last_time.second))
+ds_concat.to_netcdf(hist_concat_nc)
+
 
 ## =========================================================== #
 ## Classes and functions

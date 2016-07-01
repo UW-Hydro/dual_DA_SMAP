@@ -1380,3 +1380,45 @@ def perturb_soil_moisture_states(states_to_perturb_nc, global_path,
     ds_perturbed.to_netcdf(out_states_nc,
                            format='NETCDF4_CLASSIC')
 
+
+def concat_vic_history_files(list_history_nc):
+    ''' Concatenate short-periods of VIC history files into one; if the time period of
+        the next file overlaps that of the current file, the next-file values will be
+        used
+    
+    list_history_nc: <list>
+        A list of history files to be concatenated, in order
+    '''
+    
+    # --- Open all history files --- #
+    list_ds = []
+    for file in list_history_nc:
+        list_ds.append(xr.open_dataset(file))
+    
+    # --- Loop over each history file and concatenate --- #
+    list_ds_to_concat = []  # list of ds to concat, with no overlapping periods
+    for i in range(len(list_ds[:-1])):
+        # Determine and truncate data, if needed
+        times_current = pd.to_datetime(list_ds[i]['time'].values)  # times of current ds
+        times_next = pd.to_datetime(list_ds[i+1]['time'].values)  # times of next ds
+        if times_current[-1] >= times_next[0]:  # if overlap, truncate the current ds
+            # Minus 2 seconds to avoid resolution issue
+            trunc_time_point = times_nest[0] - pd.DateOffset(seconds=2) 
+            ds = list_ds[i].sel(time=slice(None, '{}T{:02d}:{:02d}:{:02d}'.format(
+                                                trunc_time_point.strftime('%Y-%m-%d'),
+                                                trunc_time_point.hour,
+                                                trunc_time_point.minute,
+                                                trunc_time_point.second)))
+        else:  # if no overlap, do not truncate
+            ds = list_ds[i]
+        # Concat to the list
+        list_ds_to_concat.append(ds)
+        
+    # Concat the last period fully to the list
+    list_ds_to_concat.append(list_ds[-1])
+    
+    # Concat all ds's
+    ds_concat = xr.concat(list_ds_to_concat, dim='time')
+    
+    return ds_concat
+    
