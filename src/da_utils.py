@@ -194,6 +194,8 @@ class States(object):
             global_param = global_file.read()
         soil_nc = find_global_param_value(global_param, 'SOIL')
         ds_soil = xr.open_dataset(soil_nc, decode_cf=False)
+        ds_soil.load()
+        ds_soil.close()
         
         # Calculate maximum soil moisture for each layer
         # Dimension: [nlayer, lat, lon]
@@ -1377,3 +1379,4 @@ def perturb_soil_moisture_states(states_to_perturb_nc, global_path,
     # Save perturbed state file
     ds_perturbed.to_netcdf(out_states_nc,
                            format='NETCDF4_CLASSIC')
+

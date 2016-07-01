@@ -116,14 +116,16 @@ propagate(start_time=start_time, end_time=meas_times[0],
 
 # (2) Loop over until each measurement point and run VIC
 for t in range(len(meas_times)):
-    # --- Determine current and next time point --- #
-    current_time = meas_times[t]
+    # --- Determine last, current and next time point --- #
+    last_time = meas_times[t]
+    current_time = last_time +\
+                   pd.DateOffset(hours=24/cfg['VIC']['model_steps_per_day'])
     if t == len(meas_times)-1:  # if the current time is the last measurement time
         next_time = end_time
     else:  # if not the last measurement time
         next_time = meas_times[t+1]
-    # If current_time == next_time, do nothing (we already reach the end of the simulation)
-    if current_time == next_time:
+    # If current_time > next_time, do nothing (we already reach the end of the simulation)
+    if current_time > next_time:
         break
     print('\tRun VIC ', current_time, 'to', next_time, '(perturbed forcings and states)')
     
@@ -131,13 +133,13 @@ for t in range(len(meas_times)):
     orig_state_nc = os.path.join(
                             truth_subdirs['states'],
                             'propagated.state.{}_{:05d}.nc'.format(
-                                    current_time.strftime('%Y%m%d'),
-                                    current_time.hour*3600+current_time.second))
+                                    last_time.strftime('%Y%m%d'),
+                                    last_time.hour*3600+last_time.second))
     perturbed_state_nc = os.path.join(
                             truth_subdirs['states'],
                             'perturbed.state.{}_{:05d}.nc'.format(
-                                    current_time.strftime('%Y%m%d'),
-                                    current_time.hour*3600+current_time.second))
+                                    last_time.strftime('%Y%m%d'),
+                                    last_time.hour*3600+last_time.second))
     perturb_soil_moisture_states(
             states_to_perturb_nc=orig_state_nc,
             global_path=global_template,
@@ -237,5 +239,5 @@ for t in range(len(meas_times)):
 #plt.ylabel('Soil moisture (mm)')
 #plt.title('Surface soil moisture')
 #fig.savefig(cfg['OUTPUT']['output_plot_path'], format='png')
-
-
+#
+#
