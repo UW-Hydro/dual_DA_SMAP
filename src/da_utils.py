@@ -305,6 +305,58 @@ class Forcings(object):
         return ds_perturbed
 
 
+class VarToPerturb(object):
+    ''' This class is a variable to be perturbed
+
+    Atributes
+    ---------
+    da: <xarray.DataArray>
+        A DataArray of the variable to be perturbed
+        Dimension: [time, lat, lon]
+
+    Require
+    ---------
+    numpy
+    '''
+
+    def __init__(self, da):
+        self.da = da  # dimension: [time, lat, lon]
+        self.lat = self.da['lat']
+        self.lon = self.da['lon']
+        self.time = self.da['time']
+
+    def add_gaussian_white_noise(self, da_sigma):
+        ''' Add Gaussian noise for all active grid cells
+
+        Parameters
+        ----------
+        sigma: <xarray.DataArray>
+            Standard deviation of the Gaussian white noise to add, can be spatially different
+            for each grid cell (but temporally constant);
+            Dimension: [lat, lon]
+        
+        Returns
+        ----------
+        da_perturbed: <xarray.DataArray>
+            Perturbed variable for the whole field
+            Dimension: [time, lat, lon]
+        '''
+
+        # Generate random noise for the whole field
+        da_noise = self.da.copy()
+        for lt in self.lat:
+            for lg in self.lon:
+                sigma = da_sigma.loc[lt, lg].values
+                if np.isnan(sigma) == False:  # if active cell
+                    da_noise.loc[:, lt, lg] = np.random.normal(loc=0, scale=sigma, size=len(self.time))
+        # Add noise to the original da and return
+        da_perturbed = self.da + da_noise
+        # Add attrs back
+        da_perturbed.attrs = self.da.attrs
+
+        return da_perturbed
+
+
 def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
              da_meas_time_var, vic_exe, vic_global_template,
              vic_forcing_orig_basepath,
@@ -1421,4 +1473,41 @@ def concat_vic_history_files(list_history_nc):
     ds_concat = xr.concat(list_ds_to_concat, dim='time')
     
     return ds_concat
+
+
+def calculate_max_soil_moist_domain(global_path):
+    ''' Calculates maximum soil moisture for all grid cells and all soil layers (from soil parameters)
     
+    Parameters
+    ----------
+    global_path: <str>
+        VIC global parameter file path; can be a template file (here it is only used to
+        extract soil parameter file info)
+        
+    Returns
+    ----------
+    da_max_moist: <xarray.DataArray>
+        Maximum soil moisture for the whole domain and each soil layer [unit: mm];
+        Dimension: [nlayer, lat, lon]
+    
+    Require
+    ----------
+    xarray
+    find_global_param_value
+    '''
+    
+     # Load soil parameter file (as defined in global file)
+    with open(global_path, 'r') as global_file:
+        global_param = global_file.read()
+    soil_nc = find_global_param_value(global_param, 'SOIL')
+    ds_soil = xr.open_dataset(soil_nc, decode_cf=False)
+    
+    # Calculate maximum soil moisture for each layer
+    # Dimension: [nlayer, lat, lon]
+    da_depth = ds_soil['depth']  # [m]
+    da_bulk_density = ds_soil['bulk_density']  # [kg/m3]
+    da_soil_density = ds_soil['soil_density']  # [kg/m3]
+    da_porosity = 1 - da_bulk_density / da_soil_density
+    da_max_moist = da_depth * da_porosity * 1000  # [mm]
+
+    return da_max_moist 

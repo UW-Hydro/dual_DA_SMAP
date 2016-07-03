@@ -8,6 +8,8 @@ import sys
 import os
 import numpy as np
 import xarray as xr
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import pandas as pd
 
@@ -15,7 +17,8 @@ from tonic.models.vic.vic import VIC
 from tonic.io import read_configobj
 
 from da_utils import (Forcings, setup_output_dirs, propagate,
-                      perturb_soil_moisture_states, concat_vic_history_files)
+                      perturb_soil_moisture_states, concat_vic_history_files,
+                      calculate_max_soil_moist_domain, VarToPerturb)
 
 # =========================================================== #
 # Load config file
@@ -186,85 +189,55 @@ hist_concat_nc = os.path.join(truth_subdirs['history'],
                                         last_time.hour*3600+last_time.second))
 ds_concat.to_netcdf(hist_concat_nc)
 
+# =========================================================== #
+# Simulate synthetic measurement - Extract top-layer soil
+# moisture from "truth" at the end of each day, and add noise
+# =========================================================== #
+# --- Load history file --- #
+ds_hist = xr.open_dataset(hist_concat_nc)
 
-## =========================================================== #
-## Classes and functions
-## =========================================================== #
-#
-#class VarToPerturb(object):
-#    ''' This class is a variable to be perturbed
-#
-#    Atributes
-#    ---------
-#    da: <xarray.DataArray>
-#        A dataarray of the variable to be perturbed
-#
-#    Require
-#    ---------
-#    numpy
-#    '''
-#
-#    def __init__(self, da):
-#        self.da = da
-#
-#    def add_gaussian_white_noise(self, sigma):
-#        ''' Add Gaussian noise for all active grid cells
-#
-#        Parameters
-#        ----------
-#        '''
-#        
-#        # Generate random noise for the whole field
-#        da_noise = self.da.copy()
-#        da_noise[:] = np.random.normal(loc=0, scale=sigma, size=self.da.shape)
-#        # Mask out inactive cells
-#        da_noise = da_noise.where(np.isnan(self.da)==False)
-#        # Add noise to the original da and return
-#        return self.da + da_noise
-#
-## =========================================================== #
-## Extract VIC output soil moisture (layer 1) at the end of
-## each day, and perturb
-## =========================================================== #
-## Load VIC output
-#ds = xr.open_dataset(cfg['OUTPUT']['vic_output_hist_path'])
-#
-## Resample surface sm to daily time step (use the value of the last time step in each day)
-#da_sm1_true = ds['OUT_SOIL_MOIST'].sel(nlayer=0)
-#da_sm1_true_daily = da_sm1_true.resample(dim='time', freq='D', how='last')
-#
-## Reformat time index
-#da_sm1_true_daily['time'] = pd.date_range(
-#        '{}-{:2d}'.format(cfg['TIME_INDEX']['start_date'],
-#                          cfg['TIME_INDEX']['last_hour']),
-#        '{}-{:2d}'.format(cfg['TIME_INDEX']['end_date'],
-#                          cfg['TIME_INDEX']['last_hour']),
-#        freq='D')
-#
-## Add noise
-#VarToPerturb_sm1 = VarToPerturb(da_sm1_true_daily) # create class
-#da_sm1_perturbed = VarToPerturb_sm1.add_gaussian_white_noise(cfg['NOISE_SIM']['sigma']) # add noise
-#
-## Add attributes to the simulated measurements
-#da_sm1_perturbed.attrs['units'] = 'mm'
-#da_sm1_perturbed.attrs['long_name'] = 'Simulated surface soil moisture measurement'
-#
-## =========================================================== #
-## Write the simulated measurement to netCDF file
-## =========================================================== #
-#ds_simulated = xr.Dataset({'simulated_surface_sm': da_sm1_perturbed})
-#ds_simulated.to_netcdf(cfg['OUTPUT']['output_sim_meas'], format='NETCDF4_CLASSIC')
-#
-## =========================================================== #
-## Plot - compare orig. and simulated sm1, daily
-## =========================================================== #
-#fig = plt.figure()
-#plt.plot(da_sm1_true_daily.squeeze(), label='Orig. VIC output')
-#plt.plot(da_sm1_perturbed.squeeze(), label='Simulated meas. (perturbed)')
-#plt.legend()
-#plt.xlabel('Day')
-#plt.ylabel('Soil moisture (mm)')
-#plt.title('Surface soil moisture')
-#fig.savefig(cfg['OUTPUT']['output_plot_path'], format='png')
-#
-#
+# --- Select out times of measurement --- #
+# Extract full times
+orig_times = pd.to_datetime(ds_hist['time'].values)
+# Find indices of measurement time points in orig_times
+list_time_index = []
+for i, time in enumerate(meas_times):
+    tmp = (abs(orig_times - time).days == 0) & (abs(orig_times - time).seconds <2)
+    list_time_index.append(np.where(tmp==True)[0][0])
+# Select times of measurement from the history file
+ds_hist_meas_times = ds_hist.isel(time=list_time_index)
+    
+# --- Select top-layer soil moisture --- #
+da_sm1_true = ds_hist_meas_times['OUT_SOIL_MOIST'].sel(nlayer=0)
+
+# --- Add noise --- #
+# Calculate the standard deviation of noise to be added for each grid cell
+da_soil_max = calculate_max_soil_moist_domain(global_template)  # [nlayer, lat, lon]
+da_soil_max_top_layer = da_soil_max.loc[0, :, :]  # extract top-layer max soil moist
+da_sigma = da_soil_max_top_layer * cfg['SYNTHETIC_MEAS']['sigma_percent'] / 100.0
+# Add noise
+VarToPerturb_sm1 = VarToPerturb(da_sm1_true) # create class
+da_sm1_perturbed = VarToPerturb_sm1.add_gaussian_white_noise(da_sigma)
+
+# --- Save synthetic measurement to netCDF file --- #
+ds_simulated = xr.Dataset({'simulated_surface_sm': da_sm1_perturbed})
+ds_simulated.to_netcdf(os.path.join(dirs['synthetic_meas'],
+                                    'synthetic_meas.{}_{}.nc'.format(start_time.strftime('%Y%m%d'),
+                                                                     end_time.strftime('%Y%m%d'))),
+                       format='NETCDF4_CLASSIC')
+
+# =========================================================== #
+# Plot - compare orig. and simulated sm1, at measurement time
+# points
+# =========================================================== #
+fig = plt.figure()
+plt.plot(da_sm1_true.squeeze(), 'k-', label='Truth (VIC by perturbed forcings and states)')
+plt.plot(da_sm1_perturbed.squeeze(), 'r--', label='Simulated meas. (perturbed truth)')
+plt.legend()
+plt.xlabel('Day')
+plt.ylabel('Soil moisture (mm)')
+plt.title('Top-layer soil moisture')
+fig.savefig(os.path.join(dirs['plots'],
+                         'check_plot.{}_{}.png'.format(start_time.strftime('%Y%m%d'),
+                                                       end_time.strftime('%Y%m%d'))),
+            format='png')
