@@ -117,8 +117,8 @@ propagate(start_time=start_time, end_time=meas_times[0],
           out_history_fileprefix='history',
           out_global_basepath=os.path.join(truth_subdirs['global'], 'global'),
           out_log_dir=log_dir,
-          forcing_perturbed_basepath=os.path.join(truth_subdirs['forcings'],
-                                                  'forc_perturbed.'))
+          forcing_basepath=os.path.join(truth_subdirs['forcings'],
+                                        'forc_perturbed.'))
 # Concat output history file to the list to be concatenated
 list_history_paths.append(os.path.join(truth_subdirs['history'],
                                        'history.{}-{:05d}.nc'.format(
@@ -131,7 +131,7 @@ for t in range(len(meas_times)):
     last_time = meas_times[t]
     current_time = last_time +\
                    pd.DateOffset(hours=24/cfg['VIC']['model_steps_per_day'])
-    if t == len(meas_times)-1:  # if the current time is the last measurement time
+    if t == len(meas_times)-1:  # if this is the last measurement time
         next_time = end_time
     else:  # if not the last measurement time
         next_time = meas_times[t+1]
@@ -168,8 +168,8 @@ for t in range(len(meas_times)):
               out_history_fileprefix='history',
               out_global_basepath=os.path.join(truth_subdirs['global'], 'global'),
               out_log_dir=log_dir,
-              forcing_perturbed_basepath=os.path.join(truth_subdirs['forcings'],
-                                                      'forc_perturbed.'))
+              forcing_basepath=os.path.join(truth_subdirs['forcings'],
+                                            'forc_perturbed.'))
     # Concat output history file to the list to be concatenated
     list_history_paths.append(os.path.join(truth_subdirs['history'],
                                            'history.{}-{:05d}.nc'.format(

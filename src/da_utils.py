@@ -375,7 +375,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
     end_time: <pandas.tslib.Timestamp>
         End time of EnKF run
     init_state_basepath: <str>
-        Initial state directory and file name prefix (excluding '.YYMMDD_SSSSS.nc')
+        Initial state directory and file name prefix (excluding '.YYMMDD_SSSSS.nc');
+        Initial state time must be one time step before start_time
     P0: <float>
         Initial state error matrix
     R: <np.array>  [m*m]
@@ -436,7 +437,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
     pass
     
     # --- Prepare perturbed forcing data for each ensemble member --- #
-    print('\tPrearing perturbed forcings...')
+    print('\tPreparing perturbed forcings...')
     start_year = start_time.year
     end_year = end_time.year
     for year in range(start_year, end_year+1): 
@@ -449,20 +450,21 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
                                   out_forcing_dir=output_vic_forcing_root_dir)
     
     # --- Step 1. Initialize ---#
-    print('\tGenerating ensemble initial states at ', start_time)
+    init_state_time = start_time - pd.DateOffset(hours=24/vic_model_steps_per_day)
+    print('\tGenerating ensemble initial states at ', init_state_time)
     # Load initial state file
     ds_states = xr.open_dataset('{}.{}_{:05d}.nc'.format(
                                         init_state_basepath,
-                                        start_time.strftime('%Y%m%d'),
-                                        start_time.hour*3600+start_time.second))
+                                        init_state_time.strftime('%Y%m%d'),
+                                        init_state_time.hour*3600+init_state_time.second))
     class_states = States(ds_states)
     
     # Determine the number of EnKF states, n
     n = len(class_states.da_EnKF['n'])
     # Set up initial state subdirectories
     init_state_dir_name = 'init.{}_{:05d}'.format(
-                                    start_time.strftime('%Y%m%d'),
-                                    start_time.hour*3600+start_time.second)
+                                    init_state_time.strftime('%Y%m%d'),
+                                    init_state_time.hour*3600+init_state_time.second)
     init_state_dir = setup_output_dirs(
                             output_vic_state_root_dir,
                             mkdirs=[init_state_dir_name])[init_state_dir_name]
@@ -509,7 +511,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
                        out_global_dir=out_global_dir,
                        out_log_dir=out_log_dir,
                        forcing_perturbed_dir=output_vic_forcing_root_dir)
-
+    
     # --- Step 3. Run EnKF --- #
     # Initialize
     state_dir_before_update = out_state_dir
@@ -517,46 +519,46 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
     # Loop over each measurement time point
     for t, time in enumerate(da_meas[da_meas_time_var]):
 
-        # Determine current and next (i.e., next measurement time) time points
-        current_time = pd.to_datetime(time.values)
-        if t == len(da_meas[da_meas_time_var])-1:  # if the current time is the last measurement time
+        # Determine last, current and next measurement time points
+        last_time = pd.to_datetime(time.values)
+        current_time = last_time + pd.DateOffset(hours=24/vic_model_steps_per_day)
+        if t == len(da_meas[da_meas_time_var])-1:  # if this is the last measurement time
             next_time = end_time
         else:  # if not the last measurement time
             next_time = pd.to_datetime(da_meas[da_meas_time_var][t+1].values)
-
         print('\tCalculating for ', current_time, 'to', next_time)
         
         # (1) Calculate gain K
         da_x, da_y_est = get_soil_moisture_and_estimated_meas_all_ensemble(
                                 N,
                                 state_dir=state_dir_before_update,
-                                state_time=current_time, 
+                                state_time=last_time, 
                                 da_tile_frac=da_tile_frac)
         da_K = calculate_gain_K_whole_field(da_x, da_y_est)
 
         # (2) Update states for each ensemble member
         # Set up dir for updated states
         updated_states_dir_name = 'updated.{}_{:05d}'.format(
-                                        current_time.strftime('%Y%m%d'),
-                                        current_time.hour*3600+current_time.second)
+                                        last_time.strftime('%Y%m%d'),
+                                        last_time.hour*3600+last_time.second)
         out_updated_state_dir = setup_output_dirs(output_vic_state_root_dir,
                                                   mkdirs=[updated_states_dir_name])[updated_states_dir_name]
         # Update states and save to nc files
         da_x_updated = update_states_ensemble(da_x, da_y_est, da_K,
                                                da_meas.loc[time, :, :, :], R,
                                                state_dir_before_update=state_dir_before_update,
-                                               current_time=current_time,
+                                               current_time=last_time,
                                                out_vic_state_dir=out_updated_state_dir)
         
         # (3) Propagate each ensemble member to the next measurement time point
-        # --- If current_time == next_time, do not propagate --- #
-        if current_time == next_time:
+        # If current_time > next_time, do not propagate (we already reach the end of the simulation)
+        if current_time > next_time:
             break
         # --- Perturb states --- #
         # Set up perturbed state subdirectories
         pert_state_dir_name = 'perturbed.{}_{:05d}'.format(
-                                        current_time.strftime('%Y%m%d'),
-                                        current_time.hour*3600+current_time.second)
+                                        last_time.strftime('%Y%m%d'),
+                                        last_time.hour*3600+last_time.second)
         pert_state_dir = setup_output_dirs(
                             output_vic_state_root_dir,
                             mkdirs=[pert_state_dir_name])[pert_state_dir_name]
@@ -568,7 +570,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
                     global_path=vic_global_template,
                     sigma_percent=state_perturb_sigma_percent,
                     out_states_dir=pert_state_dir)
-
+        
         # --- Propagate to the next time point --- #
         propagate_output_dir_name = 'propagate.{}_{:05d}-{}'.format(
                                             current_time.strftime('%Y%m%d'),
@@ -596,7 +598,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
                        out_global_dir=out_global_dir,
                        out_log_dir=out_log_dir,
                        forcing_perturbed_dir=output_vic_forcing_root_dir)  # perturbed forcing
-
+        
         # Point state directory to be updated to the propagated one
         state_dir_before_update = out_state_dir
 
@@ -1340,7 +1342,7 @@ def propagate(start_time, end_time, vic_exe, vic_global_template_file,
                        vic_model_steps_per_day, init_state_nc, out_state_basepath,
                        out_history_dir, out_history_fileprefix,
                        out_global_basepath, out_log_dir,
-                       forcing_perturbed_basepath):
+                       forcing_basepath):
     ''' This function propagates (via VIC) from an initial state (or no initial state)
         to a certain time point.
 
@@ -1368,7 +1370,7 @@ def propagate(start_time, end_time, vic_exe, vic_global_template_file,
         Basepath of output global files; "YYYYMMDD-HHS_YYYYMMDD.txt" will be appended
     out_log_dir: <str>
         Directory for output log files
-    forcing_perturbed_basepath: <str>
+    forcing_basepath: <str>
         Forcing basepath. <YYYY.nc> will be appended
 
     Require
@@ -1379,7 +1381,7 @@ def propagate(start_time, end_time, vic_exe, vic_global_template_file,
     '''
 
     # Generate VIC global param file
-    replace = OrderedDict([('FORCING1', forcing_perturbed_basepath),
+    replace = OrderedDict([('FORCING1', forcing_basepath),
                            ('OUTFILE', out_history_fileprefix)])
     global_file = generate_VIC_global_file(
                         global_template_path=vic_global_template_file,
@@ -1510,4 +1512,149 @@ def calculate_max_soil_moist_domain(global_path):
     da_porosity = 1 - da_bulk_density / da_soil_density
     da_max_moist = da_depth * da_porosity * 1000  # [mm]
 
-    return da_max_moist 
+    return da_max_moist
+
+
+def calculate_ensemble_mean_states(list_state_nc, out_state_nc):
+    ''' Calculates ensemble-mean of multiple state files; for state variables that are identical in each
+        ensemble member, their values will stay the same.
+    
+    Parameters
+    ----------
+    list_state_nc: <list>
+        A list of VIC state nc files whose mean to be calculated
+    out_state_nc: <str>
+        Path of output state netCDF file
+    
+    Returns
+    ----------
+    out_state_nc: <str>
+        Path of output state netCDF file (same as input)
+    
+    Require
+    ----------
+    xarray
+    '''
+    
+    # Number of files
+    N = len(list_state_nc)
+    
+    # Calculate ensemble mean
+    list_ds = []
+    for state_nc in list_state_nc:
+        list_ds.append(xr.open_dataset(state_nc))
+    ds_mean = sum(list_ds) / N
+    
+    # Write to output netCDF file
+    ds_mean.to_netcdf(out_state_nc, format='NETCDF4_CLASSIC')
+    
+    return out_state_nc
+
+
+def run_vic_assigned_states(start_time, end_time, vic_exe, init_state_nc, dict_assigned_state_nc,
+                            global_template, vic_forcing_basepath, vic_model_steps_per_day,
+                            output_global_root_dir, output_state_root_dir, output_vic_history_root_dir,
+                            output_vic_log_root_dir):
+    ''' Run VIC with assigned initial states and other assigned state files during the simulation time
+    
+    Parameters
+    ----------
+    start_time: <pandas.tslib.Timestamp>
+        Start time of VIC run
+    end_time: <pandas.tslib.Timestamp>
+        End time of VIC run
+    vic_exe: <class 'VIC'>
+        VIC run class
+    init_state_nc: <str>
+        Path of initial state netCDF file; None for no initial state
+    dict_assigned_state_nc: <OrderedDict>
+        An ordered dictionary of state times and nc files after the start time;
+        Keys: state times in <pandas.tslib.Timestamp>;
+        Items: state netCDF file path in <str>
+    global_template: <str>
+        VIC global file template
+    vic_forcing_basepath: <str>
+        VIC forcing netCDF file basepath ('YYYY.nc' will be appended)
+    vic_model_steps_per_day: <int>
+        VIC model steps per day
+    output_global_root_dir: <str>
+        Directory for VIC global files
+    output_state_root_dir: <str>
+        Directory for VIC output state files
+    output_vic_history_root_dir: <str>
+        Directory for VIC output history files
+    output_vic_log_root_dir: <str>
+        Directory for VIC output log files
+    
+    Returns
+    ----------
+    list_history_files: <list>
+        A list of all output history file paths in order
+    
+    Require
+    ----------
+    OrderedDict
+    generate_VIC_global_file
+    check_returncode
+    '''
+    
+    list_history_files = []  # A list of resulted history file paths
+    
+    # --- Run VIC from start_time to the first assigned state time --- #
+    run_start_time = start_time
+    run_end_time = list(dict_assigned_state_nc.keys())[0]
+    print('\tRunning VIC from ', run_start_time, 'to', run_end_time)
+    propagate(start_time=run_start_time, end_time=run_end_time,
+              vic_exe=vic_exe, vic_global_template_file=global_template,
+              vic_model_steps_per_day=vic_model_steps_per_day,
+              init_state_nc=init_state_nc,
+              out_state_basepath=os.path.join(output_state_root_dir, 'state.tmp'),
+                            # 'tmp' indicates this output state file is not usefull, since it will be replaced
+                            # by assinged states
+              out_history_dir=output_vic_history_root_dir,
+              out_history_fileprefix='history',
+              out_global_basepath=os.path.join(output_global_root_dir, 'global'),
+              out_log_dir=output_vic_log_root_dir,
+              forcing_basepath=vic_forcing_basepath)
+    list_history_files.append(os.path.join(
+                    output_vic_history_root_dir,
+                    'history.{}-{:05d}.nc'.format(
+                            run_start_time.strftime('%Y-%m-%d'),
+                            run_start_time.hour*3600+run_start_time.second)))
+    
+    # --- Run VIC from each assigned state time to the next (or to end_time) --- #
+    for t, time in enumerate(dict_assigned_state_nc.keys()):
+        # --- Determine last, current and next measurement time points --- #
+        last_time = time
+        current_time = last_time + pd.DateOffset(hours=24/vic_model_steps_per_day)
+        if t == len(dict_assigned_state_nc)-1:  # if this is the last measurement time
+            next_time = end_time
+        else:  # if not the last measurement time
+            next_time = list(dict_assigned_state_nc.keys())[t+1]
+        # If current_time > next_time, do not propagate (we already reach the end of the simulation)
+        if current_time > next_time:
+            break
+        print('\tRunning VIC from ', current_time, 'to', next_time)
+        
+        # --- Propagate to the next time from assigned initial states --- #
+        state_nc = dict_assigned_state_nc[last_time]
+        propagate(start_time=current_time, end_time=next_time,
+                  vic_exe=vic_exe, vic_global_template_file=global_template,
+                  vic_model_steps_per_day=vic_model_steps_per_day,
+                  init_state_nc=state_nc,
+                  out_state_basepath=os.path.join(output_state_root_dir, 'state.tmp'),
+                            # 'tmp' indicates this output state file is not usefull, since it will be replaced
+                            # by assinged states
+                  out_history_dir=output_vic_history_root_dir,
+                  out_history_fileprefix='history',
+                  out_global_basepath=os.path.join(output_global_root_dir, 'global'),
+                  out_log_dir=output_vic_log_root_dir,
+                  forcing_basepath=vic_forcing_basepath)
+        list_history_files.append(os.path.join(
+                    output_vic_history_root_dir,
+                    'history.{}-{:05d}.nc'.format(
+                            current_time.strftime('%Y-%m-%d'),
+                            current_time.hour*3600+current_time.second)))
+    
+    return list_history_files
+
