@@ -5,6 +5,8 @@ import xarray as xr
 import os
 import pandas as pd
 from collections import OrderedDict
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from tonic.models.vic.vic import VIC
@@ -185,6 +187,7 @@ out_hist_concat_dir = setup_output_dirs(dirs['history'],
                                         mkdirs=['EnKF_ensemble_concat'])\
                       ['EnKF_ensemble_concat']
 
+dict_ens_hist_concat = {}  # a dictionary of concatenated hist file for each ensemble member
 for i in range(cfg['EnKF']['N']):
     ds_concat = concat_vic_history_files(dict_ens_list_history_files['ens{}'.format(i+1)])
     hist_concat_path = os.path.join(
@@ -196,6 +199,7 @@ for i in range(cfg['EnKF']['N']):
                                 end_time.strftime('%Y%m%d'),
                                 end_time.hour*3600+end_time.second))
     ds_concat.to_netcdf(hist_concat_path, format='NETCDF4_CLASSIC')
+    dict_ens_hist_concat['ens{}'.format(i+1)] = hist_concat_path
 
 
 # ============================================================ #
@@ -282,6 +286,8 @@ ds_concat.to_netcdf(hist_ens_mean_post, format='NETCDF4_CLASSIC')
 # ============================================================ #
 # Plot
 # ============================================================ #
+print('Plotting...')
+
 # Load history files of truth, open-loop, EnKF ensemble mean and all ensemble members
 ds_truth = xr.open_dataset(os.path.join(cfg['CONTROL']['root_dir'],
                                         cfg['EnKF']['truth_hist_nc']))
@@ -323,7 +329,7 @@ for lt in lat:
         # plot EnKF post-processed ens. mean
         da_sm1_EnKF_ens_mean.loc[:, lt, lg].to_series().plot(
                                                 color='b', style='-',
-                                                label='Open-loop', legend=True)
+                                                label='EnKF ens. mean', legend=True)
         # plot each ensemble member
         for i in range(cfg['EnKF']['N']):
             ens_name = 'ens{}'.format(i+1)
