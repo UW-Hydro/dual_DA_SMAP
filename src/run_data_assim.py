@@ -210,7 +210,8 @@ print('Calculating ensemble-mean of the updates states...')
 N=cfg['EnKF']['N']  # number of ensemble members
 
 # --- Calculate ensemble-mean for the initial time point --- #
-init_time = pd.to_datetime(cfg['EnKF']['start_time'])
+init_time = pd.to_datetime(cfg['EnKF']['start_time']) -\
+            pd.DateOffset(hours=24/cfg['VIC']['model_steps_per_day'])
 # Create a list of state file nc paths
 state_dir = os.path.join(dirs['states'], 'init.{}_{:05d}'.format(
                                 init_time.strftime('%Y%m%d'),
