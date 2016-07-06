@@ -415,6 +415,13 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
         state_perturb_sigma_percent = 5, then Gaussian noise with standard deviation
         = 5% of max soil moisture will be added as perturbation)
 
+    Returns
+    ----------
+    dict_ens_list_history_files: <dict>
+        A dictory of lists;
+        Keys: 'ens<i>', where i = 1, 2, ..., N
+        Items: a list of output history files (in order) for this ensemble member
+
     Required
     ----------
     numpy
@@ -478,6 +485,11 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
                      format='NETCDF4_CLASSIC')
     
     # --- Step 2. Propagate (run VIC) until the first measurement time point ---#    
+    # Initialize dictionary of history file paths for each ensemble member
+    dict_ens_list_history_files = {}
+    for i in range(N):
+        dict_ens_list_history_files['ens{}'.format(i+1)] = []
+
     # Determine VIC run period
     vic_run_start_time = start_time
     vic_run_end_time = pd.to_datetime(da_meas[da_meas_time_var].values[0])
@@ -511,6 +523,13 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
                        out_global_dir=out_global_dir,
                        out_log_dir=out_log_dir,
                        forcing_perturbed_dir=output_vic_forcing_root_dir)
+    # Put output history file paths into dictionary
+    for i in range(N):
+        dict_ens_list_history_files['ens{}'.format(i+1)].append(os.path.join(
+                    out_history_dir, 'history.ens{}.{}-{:05d}.nc'.format(
+                            i+1,
+                            vic_run_start_time.strftime('%Y-%m-%d'),
+                            vic_run_start_time.hour*3600+vic_run_start_time.second)))
     
     # --- Step 3. Run EnKF --- #
     # Initialize
@@ -598,9 +617,19 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
                        out_global_dir=out_global_dir,
                        out_log_dir=out_log_dir,
                        forcing_perturbed_dir=output_vic_forcing_root_dir)  # perturbed forcing
+
+        # Put output history file paths into dictionary
+        for i in range(N):
+            dict_ens_list_history_files['ens{}'.format(i+1)].append(os.path.join(
+                    out_history_dir, 'history.ens{}.{}-{:05d}.nc'.format(
+                            i+1,
+                            current_time.strftime('%Y-%m-%d'),
+                            current_time.hour*3600+current_time.second)))
         
         # Point state directory to be updated to the propagated one
         state_dir_before_update = out_state_dir
+
+    return dict_ens_list_history_files
 
 
 def generate_VIC_global_file(global_template_path, model_steps_per_day,

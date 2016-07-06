@@ -117,7 +117,11 @@ propagate(start_time=vic_run_start_time, end_time=vic_run_end_time,
            forcing_basepath=os.path.join(
                                     cfg['CONTROL']['root_dir'],
                                     cfg['FORCINGS']['orig_forcing_nc_basepath']))
-
+hist_openloop_nc = os.path.join(
+                        dirs['history'],
+                        'history.openloop.{}-{:05d}.nc'.format(
+                                vic_run_start_time.strftime('%Y-%m-%d'),
+                                vic_run_start_time.hour*3600+vic_run_start_time.second))
 
 # ============================================================ #
 # Prepare and run EnKF
@@ -153,7 +157,8 @@ start_time = pd.to_datetime(cfg['EnKF']['start_time'])
 end_time = pd.to_datetime(cfg['EnKF']['end_time'])
 print('Start running EnKF for ', start_time, 'to', end_time, '...')
 
-EnKF_VIC(N=cfg['EnKF']['N'],
+dict_ens_list_history_files = EnKF_VIC(
+         N=cfg['EnKF']['N'],
          start_time=start_time,
          end_time=end_time,
          init_state_basepath=os.path.join(dirs['states'], 'state.spinup'),
@@ -174,6 +179,23 @@ EnKF_VIC(N=cfg['EnKF']['N'],
          output_vic_log_root_dir=dirs['logs'],
          dict_varnames=dict_varnames, prec_std=cfg['FORCINGS']['prec_std'],
          state_perturb_sigma_percent=cfg['EnKF']['state_perturb_sigma_percent'])
+
+# --- Concatenate all history files for each ensemble --- #
+out_hist_concat_dir = setup_output_dirs(dirs['history'],
+                                        mkdirs=['EnKF_ensemble_concat'])\
+                      ['EnKF_ensemble_concat']
+
+for i in range(cfg['EnKF']['N']):
+    ds_concat = concat_vic_history_files(dict_ens_list_history_files['ens{}'.format(i+1)])
+    hist_concat_path = os.path.join(
+                            out_hist_concat_dir,
+                            'history.ens{}.concat.{}_{:05d}-{}_{:05d}.nc'.format(
+                                i+1,
+                                start_time.strftime('%Y%m%d'),
+                                start_time.hour*3600+start_time.second,
+                                end_time.strftime('%Y%m%d'),
+                                end_time.hour*3600+end_time.second))
+    ds_concat.to_netcdf(hist_concat_path, format='NETCDF4_CLASSIC')
 
 
 # ============================================================ #
@@ -256,3 +278,70 @@ hist_ens_mean_post = os.path.join(
                                 end_time.hour*3600+end_time.second))
 ds_concat.to_netcdf(hist_ens_mean_post, format='NETCDF4_CLASSIC')
 
+
+# ============================================================ #
+# Plot
+# ============================================================ #
+# Load history files of truth, open-loop, EnKF ensemble mean and all ensemble members
+ds_truth = xr.open_dataset(os.path.join(cfg['CONTROL']['root_dir'],
+                                        cfg['EnKF']['truth_hist_nc']))
+ds_EnKF_ens_mean = xr.open_dataset(hist_ens_mean_post)
+ds_openloop = xr.open_dataset(hist_openloop_nc)
+dict_ens_ds = {}
+for i in range(cfg['EnKF']['N']):
+    ens_name = 'ens{}'.format(i+1)
+    dict_ens_ds[ens_name] =  xr.open_dataset(dict_ens_hist_concat[ens_name])
+
+# Extract top layer soil moisture from all datasets
+da_sm1_truth = ds_truth['OUT_SOIL_MOIST'].sel(nlayer=0)
+da_sm1_EnKF_ens_mean = ds_EnKF_ens_mean['OUT_SOIL_MOIST'].sel(nlayer=0)
+da_sm1_openloop = ds_openloop['OUT_SOIL_MOIST'].sel(nlayer=0)
+dict_ens_da_sm1 = {}
+for i in range(cfg['EnKF']['N']):
+    ens_name = 'ens{}'.format(i+1)
+    dict_ens_da_sm1[ens_name] = dict_ens_ds[ens_name]['OUT_SOIL_MOIST'].sel(nlayer=0)
+
+# Extract lat's and lon's
+lat = da_sm1_openloop['lat'].values
+lon = da_sm1_openloop['lon'].values
+
+# Plot results - time series
+for lt in lat:
+    for lg in lon:
+        if np.isnan(da_sm1_openloop.loc[da_sm1_openloop['time'][0],
+                                        lt, lg].values) == True:  # if inactive cell, skip
+            continue
+        
+        # Create fiture
+        fig = plt.figure(figsize=(12, 6))
+        # plot truth
+        da_sm1_truth.loc[:, lt, lg].to_series().plot(color='k', style='-',
+                                                     label='Truth', legend=True)
+        # plot open-loop
+        da_sm1_openloop.loc[:, lt, lg].to_series().plot(color='r', style='--',
+                                                        label='Open-loop', legend=True)
+        # plot EnKF post-processed ens. mean
+        da_sm1_EnKF_ens_mean.loc[:, lt, lg].to_series().plot(
+                                                color='b', style='-',
+                                                label='Open-loop', legend=True)
+        # plot each ensemble member
+        for i in range(cfg['EnKF']['N']):
+            ens_name = 'ens{}'.format(i+1)
+            if i == 0:
+                legend=True
+            else:
+                legend=False
+            dict_ens_da_sm1[ens_name].loc[:, lt, lg].to_series().plot(
+                        color='grey', style='-', alpha=0.4, label='Ensemble members',
+                        legend=legend)
+        # plot measurement
+        da_meas.loc[:, lt, lg, 0].to_series().plot(
+                        style='ro', label='Measurement',
+                        legend=True)
+        # Make plot looks better
+        plt.xlabel('Time')
+        plt.ylabel('Soil moiture (mm)')
+        plt.title('Top-layer soil moisture, {}, {}, N={}'.format(lt, lg, cfg['EnKF']['N']))
+        # Save figure
+        fig.savefig(os.path.join(dirs['plots'], 'sm1_{}_{}.png'.format(lt, lg)),
+                    format='png')
