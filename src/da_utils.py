@@ -1550,8 +1550,7 @@ def calculate_max_soil_moist_domain(global_path):
 
 
 def calculate_ensemble_mean_states(list_state_nc, out_state_nc):
-    ''' Calculates ensemble-mean of multiple state files; for state variables that are identical in each
-        ensemble member, their values will stay the same.
+    ''' Calculates ensemble-mean of multiple state files
     
     Parameters
     ----------
@@ -1578,6 +1577,13 @@ def calculate_ensemble_mean_states(list_state_nc, out_state_nc):
     for state_nc in list_state_nc:
         list_ds.append(xr.open_dataset(state_nc))
     ds_mean = sum(list_ds) / N
+
+    # Replace some variables with those from the first state file to
+    # prevent precision issues
+    ds_first_state = list_ds[0]
+    ds_mean['layer'] = ds_first_state['layer']
+    ds_mean['dz_node'] = ds_first_state['dz_node']
+    ds_mean['node_depth'] = ds_first_state['node_depth']
     
     # Write to output netCDF file
     ds_mean.to_netcdf(out_state_nc, format='NETCDF4_CLASSIC')

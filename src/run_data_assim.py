@@ -339,7 +339,7 @@ for lt in lat:
             else:
                 legend=False
             dict_ens_da_sm1[ens_name].loc[:, lt, lg].to_series().plot(
-                        color='grey', style='-', alpha=0.4, label='Ensemble members',
+                        color='grey', style='-', alpha=0.3, label='Ensemble members',
                         legend=legend)
         # plot measurement
         da_meas.loc[:, lt, lg, 0].to_series().plot(
