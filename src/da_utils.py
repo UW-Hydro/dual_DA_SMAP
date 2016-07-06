@@ -216,9 +216,12 @@ class States(object):
         for lt in lat:
             for lg in lon:
                 for l in nlayer:
+                    max_moist = da_max_moist.loc[l, lt, lg].values
+                    if np.isnan(max_moist) == True or max_moist <= 0:  # if inactive cell
+                        continue
                     noise = np.random.normal(
                                     loc=0,
-                                    scale=da_max_moist.loc[l, lat, lon].values *\
+                                    scale=da_max_moist.loc[l, lt, lg].values *\
                                           sigma_percent / 100.0,
                                     size=(len(veg_class), len(snow_band)))
                     ds['STATE_SOIL_MOISTURE'].loc[:, :, l, lt, lg] += noise
@@ -344,11 +347,13 @@ class VarToPerturb(object):
 
         # Generate random noise for the whole field
         da_noise = self.da.copy()
+        da_noise[:] = np.nan
         for lt in self.lat:
             for lg in self.lon:
                 sigma = da_sigma.loc[lt, lg].values
-                if np.isnan(sigma) == False:  # if active cell
-                    da_noise.loc[:, lt, lg] = np.random.normal(loc=0, scale=sigma, size=len(self.time))
+                if np.isnan(sigma) == True or sigma <= 0:  # if inactive cell, skip
+                    continue
+                da_noise.loc[:, lt, lg] = np.random.normal(loc=0, scale=sigma, size=len(self.time))
         # Add noise to the original da and return
         da_perturbed = self.da + da_noise
         # Add attrs back
