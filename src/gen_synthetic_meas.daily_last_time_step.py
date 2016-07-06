@@ -230,14 +230,32 @@ ds_simulated.to_netcdf(os.path.join(dirs['synthetic_meas'],
 # Plot - compare orig. and simulated sm1, at measurement time
 # points
 # =========================================================== #
-fig = plt.figure()
-plt.plot(da_sm1_true.squeeze(), 'k-', label='Truth (VIC by perturbed forcings and states)')
-plt.plot(da_sm1_perturbed.squeeze(), 'r--', label='Simulated meas. (perturbed truth)')
-plt.legend()
-plt.xlabel('Day')
-plt.ylabel('Soil moisture (mm)')
-plt.title('Top-layer soil moisture')
-fig.savefig(os.path.join(dirs['plots'],
-                         'check_plot.{}_{}.png'.format(start_time.strftime('%Y%m%d'),
-                                                       end_time.strftime('%Y%m%d'))),
-            format='png')
+# Extrac lat's and lon's
+lat = da_sm1_true['lat'].values
+lon = da_sm1_true['lon'].values
+
+# Plot
+for lt in lat:
+    for lg in lon:
+        if np.isnan(da_sm1_true.loc[da_sm1_true['time'][0],
+                                    lt, lg].values) == True:  # if inactive cell, skip
+            continue
+        
+        # Create figure
+        fig = plt.figure(figsize=(12, 6))
+        # plot truth
+        da_sm1_true.loc[:, lt, lg].to_series().plot(
+                color='k', style='-',
+                label='Truth (VIC by perturbed forcings and states)',
+                legend=True)
+        # plot simulated measurement
+        da_sm1_perturbed.loc[:, lt, lg].to_series().plot(
+                color='r', style='--',
+                label='Simulated meas. (perturbed truth)',
+                legend=True)
+        plt.xlabel('Time')
+        plt.ylabel('Soil moisture (mm)')
+        plt.title('Top-layer soil moisture, {}, {}'.format(lt, lg))
+        fig.savefig(os.path.join(dirs['plots'],
+                                 'check_plot.{}_{}.png'.format(lt, lg)),
+                    format='png')
