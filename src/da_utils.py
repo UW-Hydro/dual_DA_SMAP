@@ -156,6 +156,11 @@ class States(object):
         # Add noise to soil moisture field
         da_perturbed = self.da_EnKF.copy()
         da_perturbed[:] += noise_reshape
+
+        # Reset negative perturbed soil moistures to zero
+        sm_new = da_perturbed.values
+        sm_new[sm_new<0] = 0
+        da_perturbed[:] = sm_new
         
         # Put the perturbed soil moisture states to back to VIC states ds
         ds = self.convert_new_EnKFstates_sm_to_VICstates(da_perturbed)
@@ -226,6 +231,11 @@ class States(object):
                                     size=(len(veg_class), len(snow_band)))
                     ds['STATE_SOIL_MOISTURE'].loc[:, :, l, lt, lg] += noise
         
+        # Reset negative perturbed soil moistures to zero
+        sm_new = ds['STATE_SOIL_MOISTURE'].values
+        sm_new[sm_new<0] = 0
+        ds['STATE_SOIL_MOISTURE'][:] = sm_new
+
         return ds
         
     
