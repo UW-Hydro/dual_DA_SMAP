@@ -5,6 +5,7 @@ import os
 import string
 from collections import OrderedDict
 import xarray as xr
+import multiprocessing as mp
 
 from tonic.models.vic.vic import VIC, default_vic_valgrind_error_code
 
@@ -779,6 +780,28 @@ def check_returncode(returncode, expected=0):
                                  'expected ({1})'.format(returncode, expected))
 
 
+def run_vic_for_multiprocess(vic_exe, global_file, log_dir):
+    '''This function is a simple wrapper for calling "run" method under
+        VIC class in multiprocessing
+
+    Parameters
+    ----------
+    vic_exe: <class VIC>
+        A VIC class object
+    global_file: <str>
+        VIC global file path
+    log_dir: <str>
+        VIC run output log directory
+
+    Require
+    ----------
+    check_returncode
+    '''
+
+    returncode = vic_exe.run(global_file, logdir=log_dir)
+    check_returncode(returncode, expected=0)
+
+
 def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_file,
                        vic_model_steps_per_day, init_state_dir, out_state_dir,
                        out_history_dir, out_global_dir, out_log_dir,
@@ -821,8 +844,12 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
     Require
     ----------
     OrderedDict
+    multiprocessing
     generate_VIC_global_file
     '''
+    
+    # --- Set up multiprocessing --- #
+    pool = mp.Pool(processes=20)
     
     # --- Loop over each ensemble member --- #
     for i in range(N):
@@ -846,8 +873,13 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
                                         out_global_dir,
                                         'global.ens{}'.format(i+1)))
         # Run VIC
-        returncode = vic_exe.run(global_file, logdir=out_log_dir)
-        check_returncode(returncode, expected=0)
+        pool.apply_async(run_vic_for_multiprocess, (vic_exe, global_file, out_log_dir,))
+        #returncode = vic_exe.run(global_file, logdir=out_log_dir)
+        #check_returncode(returncode, expected=0)
+    
+    # --- Finish multiprocessing --- #
+    pool.close()
+    pool.join()
 
 
 def determine_tile_frac(global_path):
@@ -1255,6 +1287,10 @@ def update_states_ensemble(da_x, da_y_est, da_K, da_meas, R, state_dir_before_up
                 delta = np.dot(K, y_meas + v - y_est)  # [n*1]
                 # --- Update states --- #
                 da_x_updated.loc[lat, lon, :, i] += delta.reshape((n))
+                # --- Set negative to zero --- #
+                tmp = da_x_updated.loc[lat, lon, :, i].values
+                tmp[tmp<0] = 0
+                da_x_updated.loc[lat, lon, :, i] = tmp
                 
         # --- Save updated states to nc files for each ensemble member --- #
         # Load VIC states before update for this ensemble member          
