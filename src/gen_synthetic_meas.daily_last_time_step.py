@@ -211,10 +211,9 @@ ds_hist_meas_times = ds_hist.isel(time=list_time_index)
 da_sm1_true = ds_hist_meas_times['OUT_SOIL_MOIST'].sel(nlayer=0)
 
 # --- Add noise --- #
-# Calculate the standard deviation of noise to be added for each grid cell
-da_soil_max = calculate_max_soil_moist_domain(global_template)  # [nlayer, lat, lon]
-da_soil_max_top_layer = da_soil_max.loc[0, :, :]  # extract top-layer max soil moist
-da_sigma = da_soil_max_top_layer * cfg['SYNTHETIC_MEAS']['sigma_percent'] / 100.0
+# Generate the standard deviation of noise to be added for each grid cell
+da_sigma = da_sm1_true[0, :, :].copy()
+da_sigma[:] = cfg['SYNTHETIC_MEAS']['sigma']
 # Add noise
 VarToPerturb_sm1 = VarToPerturb(da_sm1_true) # create class
 da_sm1_perturbed = VarToPerturb_sm1.add_gaussian_white_noise(da_sigma)

@@ -365,8 +365,12 @@ class VarToPerturb(object):
                 if np.isnan(sigma) == True or sigma <= 0:  # if inactive cell, skip
                     continue
                 da_noise.loc[:, lt, lg] = np.random.normal(loc=0, scale=sigma, size=len(self.time))
-        # Add noise to the original da and return
+        # Add noise to the original da
         da_perturbed = self.da + da_noise
+        # Set negative to zero
+        tmp = da_perturbed.values
+        tmp[tmp<0] = 0
+        da_perturbed[:] = tmp
         # Add attrs back
         da_perturbed.attrs = self.da.attrs
 
