@@ -102,7 +102,7 @@ lat = ds_openloop['lat'].values
 lon = ds_openloop['lon'].values
 
 # ------------------------------------------------------------ #
-# Plot results - soil moisture time series
+# Plot results - top-layer soil moisture time series
 # ------------------------------------------------------------ #
 print('Plotting top-layer soil moisture...')
 # Extract top layer soil moisture from all datasets
@@ -150,21 +150,18 @@ for lt in lat:
                         color='grey', style='-', alpha=0.3, label='Ensemble members',
                         legend=legend)
         # plot EnKF post-processed ens. mean
-        da_sm1_EnKF_ens_mean.loc[:, lt, lg].to_series().plot(
-                                                color='b', style='-',
-                                                label='EnKF ens. mean, RMSE={:.2f}'.format(rmse_EnKF_mean),
-                                                legend=True)
+        ts_EnKF_mean.plot(color='b', style='-',
+                          label='EnKF ens. mean, RMSE={:.2f}'.format(rmse_EnKF_mean),
+                          legend=True)
         # plot measurement
-        da_meas.loc[:, lt, lg, 0].to_series().plot(
-                        style='ro', label='Measurement, RMSE={:.2f}'.format(rmse_meas),
-                        legend=True)
+        ts_meas.plot(style='ro', label='Measurement, RMSE={:.2f}'.format(rmse_meas),
+                     legend=True)
         # plot truth
-        da_sm1_truth.loc[:, lt, lg].to_series().plot(color='k', style='-',
-                                                     label='Truth', legend=True)
+        ts_truth.plot(color='k', style='-', label='Truth', legend=True)
         # plot open-loop
-        da_sm1_openloop.loc[:, lt, lg].to_series().plot(color='m', style='--',
-                                                        label='Open-loop, RMSE={:.2f}'.format(rmse_openloop),
-                                                        legend=True)
+        ts_openloop.plot(color='m', style='--',
+                         label='Open-loop, RMSE={:.2f}'.format(rmse_openloop),
+                         legend=True)
         # Make plot looks better
         plt.xlabel('Time')
         plt.ylabel('Soil moiture (mm)')
@@ -195,27 +192,27 @@ for lt in lat:
             ts = dict_ens_da_sm1[ens_name].loc[:, lt, lg].to_series()
             p.line(ts.index, ts.values, color="grey", line_dash="solid", alpha=0.3, legend=legend)
         # plot EnKF post-processed ens. mean
-        ts = da_sm1_EnKF_ens_mean.loc[:, lt, lg].to_series()
+        ts = ts_EnKF_mean
         p.line(ts.index, ts.values, color="blue", line_dash="solid",
                legend="EnKF ens. mean, RMSE={:.2f}".format(rmse_EnKF_mean), line_width=2)
         # plot measurement
-        ts = da_meas.loc[:, lt, lg, 0].to_series()
+        ts = ts_meas
         p.circle(ts.index, ts.values, color="red", fill_color="red",
                  legend="Measurement, RMSE={:.2f}".format(rmse_meas), line_width=2)
         # plot truth
-        ts = da_sm1_truth.loc[:, lt, lg].to_series()
+        ts = ts_truth
         p.line(ts.index, ts.values, color="black", line_dash="solid", legend="Truth", line_width=2)
         # plot open-loop
-        ts = da_sm1_openloop.loc[:, lt, lg].to_series()
+        ts = ts_openloop
         p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
                legend="Open-loop, RMSE={:.2f}".format(rmse_openloop), line_width=2)
         # Save
         save(p)
 
 
-# ============================================================ #
+# ------------------------------------------------------------ #
 # Plot innovation (meas - y_est_before_update)
-# ============================================================ #
+# ------------------------------------------------------------ #
 for lt in lat:
     for lg in lon:
         if np.isnan(da_sm1_openloop.loc[da_sm1_openloop['time'][0],
@@ -253,4 +250,276 @@ for lt in lat:
         p.line(df.index, df['innovation'].values, color="blue", line_dash="solid",
                legend="Innovation (meas - y_est_before_update)", line_width=2)
         save(p)
+
+
+# ------------------------------------------------------------ #
+# Plot results - second-layer soil moisture time series
+# ------------------------------------------------------------ #
+# Extract second-layer soil moisture from all datasets
+da_sm2_truth = ds_truth['OUT_SOIL_MOIST'].sel(nlayer=1)
+da_sm2_EnKF_ens_mean = ds_EnKF_ens_mean['OUT_SOIL_MOIST'].sel(nlayer=1)
+da_sm2_openloop = ds_openloop['OUT_SOIL_MOIST'].sel(nlayer=1)
+dict_ens_da_sm2 = {}
+for i in range(cfg['EnKF']['N']):
+    ens_name = 'ens{}'.format(i+1)
+    dict_ens_da_sm2[ens_name] = dict_ens_ds[ens_name]['OUT_SOIL_MOIST'].sel(nlayer=1)
+# Plot
+for lt in lat:
+    for lg in lon:
+        if np.isnan(da_sm2_openloop.loc[da_sm2_openloop['time'][0],
+                                        lt, lg].values) == True:  # if inactive cell, skip
+            continue
+        
+        # --- RMSE --- #
+        # extract time series
+        ts_truth = da_sm2_truth.loc[:, lt, lg].to_series()
+        ts_EnKF_mean = da_sm2_EnKF_ens_mean.loc[:, lt, lg].to_series()
+        ts_openloop = da_sm2_openloop.loc[:, lt, lg].to_series()
+        # Calculate EnKF_mean vs. truth
+        df_truth_EnKF = pd.concat([ts_truth, ts_EnKF_mean], axis=1, keys=['truth', 'EnKF_mean']).dropna()
+        rmse_EnKF_mean = rmse(df_truth_EnKF, var_true='truth', var_est='EnKF_mean')
+        # Calculate open-loop vs. truth
+        df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
+        rmse_openloop = rmse(df_truth_openloop, var_true='truth', var_est='openloop')
+        
+        # ----- Regular plots ----- #
+        # Create figure
+        fig = plt.figure(figsize=(12, 6))
+        # plot each ensemble member
+        for i in range(cfg['EnKF']['N']):
+            ens_name = 'ens{}'.format(i+1)
+            if i == 0:
+                legend=True
+            else:
+                legend=False
+            dict_ens_da_sm2[ens_name].loc[:, lt, lg].to_series().plot(
+                        color='grey', style='-', alpha=0.3, label='Ensemble members',
+                        legend=legend)
+        # plot EnKF post-processed ens. mean
+        ts_EnKF_mean.plot(color='b', style='-',
+                                      label='EnKF ens. mean, RMSE={:.2f}'.format(rmse_EnKF_mean),
+                                      legend=True)
+        # plot truth
+        ts_truth.plot(color='k', style='-', label='Truth', legend=True)
+        # plot open-loop
+        ts_openloop.plot(color='m', style='--', label='Open-loop, RMSE={:.2f}'.format(rmse_openloop),
+                         legend=True)
+        # Make plot looks better
+        plt.xlabel('Time')
+        plt.ylabel('Soil moiture (mm)')
+        plt.title('Second-layer soil moisture, {}, {}, N={}'.format(lt, lg, cfg['EnKF']['N']))
+        # Save figure
+        fig.savefig(os.path.join(dirs['plots'], 'sm2_{}_{}.png'.format(lt, lg)),
+                    format='png')
+        
+        # ----- Interactive version ----- #
+        # Create figure
+        output_file(os.path.join(dirs['plots'], 'sm2_{}_{}.html'.format(lt, lg)))
+        
+        p = figure(title='Second-layer soil moisture, {}, {}, N={}'.format(lt, lg, cfg['EnKF']['N']),
+                   x_axis_label="Time", y_axis_label="Soil moiture (mm)",
+                   x_axis_type='datetime', width=1000, height=500)
+        # plot each ensemble member
+        for i in range(cfg['EnKF']['N']):
+            ens_name = 'ens{}'.format(i+1)
+            if i == 0:
+                legend="Ensemble members"
+            else:
+                legend=False
+            ts = dict_ens_da_sm2[ens_name].loc[:, lt, lg].to_series()
+            p.line(ts.index, ts.values, color="grey", line_dash="solid", alpha=0.3, legend=legend)
+        # plot EnKF post-processed ens. mean
+        ts = ts_EnKF_mean
+        p.line(ts.index, ts.values, color="blue", line_dash="solid",
+               legend="EnKF ens. mean, RMSE={:.2f}".format(rmse_EnKF_mean), line_width=2)
+        # plot truth
+        ts = ts_truth
+        p.line(ts.index, ts.values, color="black", line_dash="solid", legend="Truth", line_width=2)
+        # plot open-loop
+        ts = ts_openloop
+        p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
+               legend="Open-loop, RMSE={:.2f}".format(rmse_openloop), line_width=2)
+        # Save
+        save(p)
+        
  
+# ------------------------------------------------------------ #
+# Plot results - third-layer soil moisture time series
+# ------------------------------------------------------------ #
+# Extract third-layer soil moisture from all datasets
+da_sm3_truth = ds_truth['OUT_SOIL_MOIST'].sel(nlayer=2)
+da_sm3_EnKF_ens_mean = ds_EnKF_ens_mean['OUT_SOIL_MOIST'].sel(nlayer=2)
+da_sm3_openloop = ds_openloop['OUT_SOIL_MOIST'].sel(nlayer=2)
+dict_ens_da_sm3 = {}
+for i in range(cfg['EnKF']['N']):
+    ens_name = 'ens{}'.format(i+1)
+    dict_ens_da_sm3[ens_name] = dict_ens_ds[ens_name]['OUT_SOIL_MOIST'].sel(nlayer=2)
+# Plot
+for lt in lat:
+    for lg in lon:
+        if np.isnan(da_sm3_openloop.loc[da_sm3_openloop['time'][0],
+                                        lt, lg].values) == True:  # if inactive cell, skip
+            continue
+        
+        # --- RMSE --- #
+        # extract time series
+        ts_truth = da_sm3_truth.loc[:, lt, lg].to_series()
+        ts_EnKF_mean = da_sm3_EnKF_ens_mean.loc[:, lt, lg].to_series()
+        ts_openloop = da_sm3_openloop.loc[:, lt, lg].to_series()
+        # Calculate EnKF_mean vs. truth
+        df_truth_EnKF = pd.concat([ts_truth, ts_EnKF_mean], axis=1, keys=['truth', 'EnKF_mean']).dropna()
+        rmse_EnKF_mean = rmse(df_truth_EnKF, var_true='truth', var_est='EnKF_mean')
+        # Calculate open-loop vs. truth
+        df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
+        rmse_openloop = rmse(df_truth_openloop, var_true='truth', var_est='openloop')
+        
+        # ----- Regular plots ----- #
+        # Create figure
+        fig = plt.figure(figsize=(12, 6))
+        # plot each ensemble member
+        for i in range(cfg['EnKF']['N']):
+            ens_name = 'ens{}'.format(i+1)
+            if i == 0:
+                legend=True
+            else:
+                legend=False
+            dict_ens_da_sm3[ens_name].loc[:, lt, lg].to_series().plot(
+                        color='grey', style='-', alpha=0.3, label='Ensemble members',
+                        legend=legend)
+        # plot EnKF post-processed ens. mean
+        ts_EnKF_mean.plot(color='b', style='-',
+                                      label='EnKF ens. mean, RMSE={:.2f}'.format(rmse_EnKF_mean),
+                                      legend=True)
+        # plot truth
+        ts_truth.plot(color='k', style='-', label='Truth', legend=True)
+        # plot open-loop
+        ts_openloop.plot(color='m', style='--', label='Open-loop, RMSE={:.2f}'.format(rmse_openloop),
+                         legend=True)
+        # Make plot looks better
+        plt.xlabel('Time')
+        plt.ylabel('Soil moiture (mm)')
+        plt.title('Third-layer soil moisture, {}, {}, N={}'.format(lt, lg, cfg['EnKF']['N']))
+        # Save figure
+        fig.savefig(os.path.join(dirs['plots'], 'sm3_{}_{}.png'.format(lt, lg)),
+                    format='png')
+        
+        # ----- Interactive version ----- #
+        # Create figure
+        output_file(os.path.join(dirs['plots'], 'sm3_{}_{}.html'.format(lt, lg)))
+        
+        p = figure(title='Third-layer soil moisture, {}, {}, N={}'.format(lt, lg, cfg['EnKF']['N']),
+                   x_axis_label="Time", y_axis_label="Soil moiture (mm)",
+                   x_axis_type='datetime', width=1000, height=500)
+        # plot each ensemble member
+        for i in range(cfg['EnKF']['N']):
+            ens_name = 'ens{}'.format(i+1)
+            if i == 0:
+                legend="Ensemble members"
+            else:
+                legend=False
+            ts = dict_ens_da_sm3[ens_name].loc[:, lt, lg].to_series()
+            p.line(ts.index, ts.values, color="grey", line_dash="solid", alpha=0.3, legend=legend)
+        # plot EnKF post-processed ens. mean
+        ts = ts_EnKF_mean
+        p.line(ts.index, ts.values, color="blue", line_dash="solid",
+               legend="EnKF ens. mean, RMSE={:.2f}".format(rmse_EnKF_mean), line_width=2)
+        # plot truth
+        ts = ts_truth
+        p.line(ts.index, ts.values, color="black", line_dash="solid", legend="Truth", line_width=2)
+        # plot open-loop
+        ts = ts_openloop
+        p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
+               legend="Open-loop, RMSE={:.2f}".format(rmse_openloop), line_width=2)
+        # Save
+        save(p)
+        
+
+# ------------------------------------------------------------ #
+# Plot results - SWE time series
+# ------------------------------------------------------------ #
+# Extract SWE from all datasets
+da_swe_truth = ds_truth['OUT_SWE']
+da_swe_EnKF_ens_mean = ds_EnKF_ens_mean['OUT_SWE']
+da_swe_openloop = ds_openloop['OUT_SWE']
+dict_ens_da_swe = {}
+for i in range(cfg['EnKF']['N']):
+    ens_name = 'ens{}'.format(i+1)
+    dict_ens_da_swe[ens_name] = dict_ens_ds[ens_name]['OUT_SWE']
+# Plot
+for lt in lat:
+    for lg in lon:
+        if np.isnan(da_swe_openloop.loc[da_swe_openloop['time'][0],
+                                        lt, lg].values) == True:  # if inactive cell, skip
+            continue
+        
+        # --- RMSE --- #
+        # extract time series
+        ts_truth = da_swe_truth.loc[:, lt, lg].to_series()
+        ts_EnKF_mean = da_swe_EnKF_ens_mean.loc[:, lt, lg].to_series()
+        ts_openloop = da_swe_openloop.loc[:, lt, lg].to_series()
+        # Calculate EnKF_mean vs. truth
+        df_truth_EnKF = pd.concat([ts_truth, ts_EnKF_mean], axis=1, keys=['truth', 'EnKF_mean']).dropna()
+        rmse_EnKF_mean = rmse(df_truth_EnKF, var_true='truth', var_est='EnKF_mean')
+        # Calculate open-loop vs. truth
+        df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
+        rmse_openloop = rmse(df_truth_openloop, var_true='truth', var_est='openloop')
+        
+        # ----- Regular plots ----- #
+        # Create figure
+        fig = plt.figure(figsize=(12, 6))
+        # plot each ensemble member
+        for i in range(cfg['EnKF']['N']):
+            ens_name = 'ens{}'.format(i+1)
+            if i == 0:
+                legend=True
+            else:
+                legend=False
+            dict_ens_da_swe[ens_name].loc[:, lt, lg].to_series().plot(
+                        color='grey', style='-', alpha=0.3, label='Ensemble members',
+                        legend=legend)
+        # plot EnKF post-processed ens. mean
+        ts_EnKF_mean.plot(color='b', style='-',
+                                      label='EnKF ens. mean, RMSE={:.2f}'.format(rmse_EnKF_mean),
+                                      legend=True)
+        # plot truth
+        ts_truth.plot(color='k', style='-', label='Truth', legend=True)
+        # plot open-loop
+        ts_openloop.plot(color='m', style='--', label='Open-loop, RMSE={:.2f}'.format(rmse_openloop),
+                         legend=True)
+        # Make plot looks better
+        plt.xlabel('Time')
+        plt.ylabel('SWE (mm)')
+        plt.title('SWE, {}, {}, N={}'.format(lt, lg, cfg['EnKF']['N']))
+        # Save figure
+        fig.savefig(os.path.join(dirs['plots'], 'swe_{}_{}.png'.format(lt, lg)),
+                    format='png')
+        
+        # ----- Interactive version ----- #
+        # Create figure
+        output_file(os.path.join(dirs['plots'], 'swe_{}_{}.html'.format(lt, lg)))
+        
+        p = figure(title='SWE, {}, {}, N={}'.format(lt, lg, cfg['EnKF']['N']),
+                   x_axis_label="Time", y_axis_label="SWE (mm)",
+                   x_axis_type='datetime', width=1000, height=500)
+        # plot each ensemble member
+        for i in range(cfg['EnKF']['N']):
+            ens_name = 'ens{}'.format(i+1)
+            if i == 0:
+                legend="Ensemble members"
+            else:
+                legend=False
+            ts = dict_ens_da_swe[ens_name].loc[:, lt, lg].to_series()
+            p.line(ts.index, ts.values, color="grey", line_dash="solid", alpha=0.3, legend=legend)
+        # plot EnKF post-processed ens. mean
+        ts = ts_EnKF_mean
+        p.line(ts.index, ts.values, color="blue", line_dash="solid",
+               legend="EnKF ens. mean, RMSE={:.2f}".format(rmse_EnKF_mean), line_width=2)
+        # plot truth
+        ts = ts_truth
+        p.line(ts.index, ts.values, color="black", line_dash="solid", legend="Truth", line_width=2)
+        # plot open-loop
+        ts = ts_openloop
+        p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
+               legend="Open-loop, RMSE={:.2f}".format(rmse_openloop), line_width=2)
+        # Save
+        save(p) 
