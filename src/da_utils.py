@@ -1748,3 +1748,29 @@ def run_vic_assigned_states(start_time, end_time, vic_exe, init_state_nc, dict_a
     
     return list_history_files
 
+
+def rmse(df, var_true, var_est):
+    ''' Calculates RMSE of an estimated variable compared to the truth variable
+    
+    Parameters
+    ----------
+    df: <pd.DataFrame>
+        A dataframe containing the two time series
+    var_true: <str>
+        Name of the truth variable in the df
+    var_est: <str>
+        Name of the estimated variable in the df
+    
+    Returns
+    ----------
+    rmse: <float>
+        Root mean square error
+    
+    Require
+    ----------
+    numpy
+    '''
+    
+    rmse = np.sqrt(sum((df[var_est] - df[var_true])**2) / len(df))
+    return rmse
+

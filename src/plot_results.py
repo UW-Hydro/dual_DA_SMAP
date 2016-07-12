@@ -13,6 +13,7 @@ from bokeh.io import reset_output
 import bokeh
 
 from tonic.io import read_config, read_configobj
+from da_utils import rmse
 
 
 # ============================================================ #
@@ -119,6 +120,22 @@ for lt in lat:
                                         lt, lg].values) == True:  # if inactive cell, skip
             continue
         
+        # --- RMSE --- #
+        # extract time series
+        ts_meas = da_meas.loc[:, lt, lg, 0].to_series()
+        ts_truth = da_sm1_truth.loc[:, lt, lg].to_series()
+        ts_EnKF_mean = da_sm1_EnKF_ens_mean.loc[:, lt, lg].to_series()
+        ts_openloop = da_sm1_openloop.loc[:, lt, lg].to_series()
+        # Calculate meas vs. truth
+        df_truth_meas = pd.concat([ts_truth, ts_meas], axis=1, keys=['truth', 'meas']).dropna()
+        rmse_meas = rmse(df_truth_meas, var_true='truth', var_est='meas')
+        # Calculate EnKF_mean vs. truth
+        df_truth_EnKF = pd.concat([ts_truth, ts_EnKF_mean], axis=1, keys=['truth', 'EnKF_mean']).dropna()
+        rmse_EnKF_mean = rmse(df_truth_EnKF, var_true='truth', var_est='EnKF_mean')
+        # Calculate open-loop vs. truth
+        df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
+        rmse_openloop = rmse(df_truth_openloop, var_true='truth', var_est='openloop')
+        
         # ----- Regular plots ----- #
         # Create figure
         fig = plt.figure(figsize=(12, 6))
@@ -135,17 +152,19 @@ for lt in lat:
         # plot EnKF post-processed ens. mean
         da_sm1_EnKF_ens_mean.loc[:, lt, lg].to_series().plot(
                                                 color='b', style='-',
-                                                label='EnKF ens. mean', legend=True)
+                                                label='EnKF ens. mean, RMSE={:.2f}'.format(rmse_EnKF_mean),
+                                                legend=True)
         # plot measurement
         da_meas.loc[:, lt, lg, 0].to_series().plot(
-                        style='ro', label='Measurement',
+                        style='ro', label='Measurement, RMSE={:.2f}'.format(rmse_meas),
                         legend=True)
         # plot truth
         da_sm1_truth.loc[:, lt, lg].to_series().plot(color='k', style='-',
                                                      label='Truth', legend=True)
         # plot open-loop
         da_sm1_openloop.loc[:, lt, lg].to_series().plot(color='m', style='--',
-                                                        label='Open-loop', legend=True)
+                                                        label='Open-loop, RMSE={:.2f}'.format(rmse_openloop),
+                                                        legend=True)
         # Make plot looks better
         plt.xlabel('Time')
         plt.ylabel('Soil moiture (mm)')
@@ -177,122 +196,61 @@ for lt in lat:
             p.line(ts.index, ts.values, color="grey", line_dash="solid", alpha=0.3, legend=legend)
         # plot EnKF post-processed ens. mean
         ts = da_sm1_EnKF_ens_mean.loc[:, lt, lg].to_series()
-        p.line(ts.index, ts.values, color="blue", line_dash="solid", legend="EnKF ens. mean", line_width=2)
+        p.line(ts.index, ts.values, color="blue", line_dash="solid",
+               legend="EnKF ens. mean, RMSE={:.2f}".format(rmse_EnKF_mean), line_width=2)
         # plot measurement
         ts = da_meas.loc[:, lt, lg, 0].to_series()
-        p.circle(ts.index, ts.values, color="red", fill_color="red", legend="Measurement", line_width=2)
+        p.circle(ts.index, ts.values, color="red", fill_color="red",
+                 legend="Measurement, RMSE={:.2f}".format(rmse_meas), line_width=2)
         # plot truth
         ts = da_sm1_truth.loc[:, lt, lg].to_series()
         p.line(ts.index, ts.values, color="black", line_dash="solid", legend="Truth", line_width=2)
         # plot open-loop
         ts = da_sm1_openloop.loc[:, lt, lg].to_series()
-        p.line(ts.index, ts.values, color="magenta", line_dash="dashed", legend="Open-loop", line_width=2)
+        p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
+               legend="Open-loop, RMSE={:.2f}".format(rmse_openloop), line_width=2)
         # Save
         save(p)
+
+
+# ============================================================ #
+# Plot innovation (meas - y_est_before_update)
+# ============================================================ #
+for lt in lat:
+    for lg in lon:
+        if np.isnan(da_sm1_openloop.loc[da_sm1_openloop['time'][0],
+                                        lt, lg].values) == True:  # if inactive cell, skip
+            continue
         
-## ------------------------------------------------------------ #
-## Plot results - surface runoff
-## ------------------------------------------------------------ #
-#print('Plotting surface runoff...')
-#for lt in lat:
-#    for lg in lon:
-#        if np.isnan(da_sm1_openloop.loc[da_sm1_openloop['time'][0],
-#                                        lt, lg].values) == True:  # if inactive cell, skip
-#            continue
-#
-#        print('\t lat {}, lon {}'.format(lt, lg))
-#        # Create figure
-#        fig = plt.figure(figsize=(12, 6))
-#        # plot each ensemble member
-#        for i in range(cfg['EnKF']['N']):
-#            ens_name = 'ens{}'.format(i+1)
-#            if i == 0:
-#                legend=True
-#            else:
-#                legend=False
-#            dict_ens_ds[ens_name]['OUT_RUNOFF'].loc[:, lt, lg].to_series().plot(
-#                        color='grey', style='-', alpha=0.3, label='Ensemble members',
-#                        legend=legend)
-#        # plot EnKF post-processed ens. mean
-#        ds_EnKF_ens_mean['OUT_RUNOFF'].loc[:, lt, lg].to_series().plot(
-#                                                color='b', style='-',
-#                                                label='EnKF ens. mean', legend=True)
-#        # plot measurement
-#        # da_meas.loc[:, lt, lg, 0].to_series().plot(
-#        #                style='ro', label='Measurement',
-#        #                legend=True)
-#        # plot truth
-#        ds_truth['OUT_RUNOFF'].loc[:, lt, lg].to_series().plot(color='k', style='-',
-#                                                     label='Truth', legend=True)
-#        # plot open-loop
-#        ds_openloop['OUT_RUNOFF'].loc[:, lt, lg].to_series().plot(color='m', style='--',
-#                                                        label='Open-loop', legend=True)
-#        # Make plot looks better
-#        plt.xlabel('Time')
-#        plt.ylabel('Runoff (mm)')
-#        plt.title('Surface runoff, {}, {}, N={}'.format(lt, lg, cfg['EnKF']['N']))
-#        # Save figure
-#        fig.savefig(os.path.join(dirs['plots'], 'runoff_{}_{}.png'.format(lt, lg)),
-#                    format='png')
-#        
-#        # Save figure for a shorter period
-#        plt.xlim([pd.datetime(1949, 1, 1), pd.datetime(1949, 1, 10)])
-#        ylim = ds_truth['OUT_RUNOFF'].loc[:, lt, lg].to_series().truncate(before=pd.datetime(1949, 1, 1),
-#                                                                          after=pd.datetime(1949, 1, 10)).max() * 2
-#        plt.ylim([0, ylim])
-#        fig.savefig(os.path.join(dirs['plots'], 'runoff_{}_{}.shorter.png'.format(lt, lg)),
-#                    format='png')
-#        
-## ------------------------------------------------------------ #
-## Plot results - baseflow
-## ------------------------------------------------------------ #
-#print('Plotting baseflow...')
-#for lt in lat:
-#    for lg in lon:
-#        if np.isnan(da_sm1_openloop.loc[da_sm1_openloop['time'][0],
-#                                        lt, lg].values) == True:  # if inactive cell, skip
-#            continue
-#
-#        print('\t lat {}, lon {}'.format(lt, lg))
-#        # Create figure
-#        fig = plt.figure(figsize=(12, 6))
-#        # plot each ensemble member
-#        for i in range(cfg['EnKF']['N']):
-#            ens_name = 'ens{}'.format(i+1)
-#            if i == 0:
-#                legend=True
-#            else:
-#                legend=False
-#            dict_ens_ds[ens_name]['OUT_BASEFLOW'].loc[:, lt, lg].to_series().plot(
-#                        color='grey', style='-', alpha=0.3, label='Ensemble members',
-#                        legend=legend)
-#        # plot EnKF post-processed ens. mean
-#        ds_EnKF_ens_mean['OUT_BASEFLOW'].loc[:, lt, lg].to_series().plot(
-#                                                color='b', style='-',
-#                                                label='EnKF ens. mean', legend=True)
-#        # plot measurement
-#        # da_meas.loc[:, lt, lg, 0].to_series().plot(
-#        #                style='ro', label='Measurement',
-#        #                legend=True)
-#        # plot truth
-#        ds_truth['OUT_BASEFLOW'].loc[:, lt, lg].to_series().plot(color='k', style='-',
-#                                                     label='Truth', legend=True)
-#        # plot open-loop
-#        ds_openloop['OUT_BASEFLOW'].loc[:, lt, lg].to_series().plot(color='m', style='--',
-#                                                        label='Open-loop', legend=True)
-#        # Make plot looks better
-#        plt.xlabel('Time')
-#        plt.ylabel('Baseflow (mm)')
-#        plt.title('Baseflow, {}, {}, N={}'.format(lt, lg, cfg['EnKF']['N']))
-#        # Save figure
-#        fig.savefig(os.path.join(dirs['plots'], 'baseflow_{}_{}.png'.format(lt, lg)),
-#                    format='png')
-#        
-#        # Save figure for a shorter period
-#        plt.xlim([pd.datetime(1949, 5, 10), pd.datetime(1949, 5, 30)])
-#        ylim = ds_truth['OUT_BASEFLOW'].loc[:, lt, lg].to_series().truncate(before=pd.datetime(1949, 5, 10),
-#                                                                          after=pd.datetime(1949, 5, 30)).max() * 2
-#        plt.ylim([0, ylim])
-#        fig.savefig(os.path.join(dirs['plots'], 'baseflow_{}_{}.shorter.png'.format(lt, lg)),
-#                    format='png')
-#        
+        # Calculate mean y_est_before_update
+        times = dict_ens_da_sm1['ens1']['time']
+        data = np.empty([len(times), cfg['EnKF']['N']])
+        for i in range(cfg['EnKF']['N']):
+            data[:,i] = dict_ens_da_sm1['ens{}'.format(i+1)].loc[:, lt, lg].to_series().values
+        y_est = np.mean(data, axis=1)
+        s_y_est = pd.Series(y_est, index=times)
+        
+        # Put together with measurement
+        s_meas = da_meas.loc[:, lt, lg, 0].to_series()
+        df = pd.concat([s_y_est, s_meas], axis=1, keys=['y_est', 'meas']).dropna()
+        df['innovation'] = df['meas'] - df['y_est']
+        
+        # Plot innovation - regular plots
+        fig = plt.figure(figsize=(12, 6))
+        df['innovation'].plot(color='g', style='-',
+                              label='Innovation (meas - y_est_before_update)', legend=True)
+        plt.xlabel('Time')
+        plt.ylabel('Innovation (mm)')
+        plt.title('Innovation, {}, {}, N={}'.format(lt, lg, cfg['EnKF']['N']))
+        fig.savefig(os.path.join(dirs['plots'], 'innov_{}_{}.png'.format(lt, lg)),
+                    format='png')
+        
+        # Plot innovation - interactive
+        output_file(os.path.join(dirs['plots'], 'innov_{}_{}.html'.format(lt, lg)))
+        p = figure(title='Innovation, {}, {}, N={}'.format(lt, lg, cfg['EnKF']['N']),
+                   x_axis_label="Time", y_axis_label="Innovation (mm)",
+                   x_axis_type='datetime', width=1000, height=500)
+        p.line(df.index, df['innovation'].values, color="blue", line_dash="solid",
+               legend="Innovation (meas - y_est_before_update)", line_width=2)
+        save(p)
+ 
