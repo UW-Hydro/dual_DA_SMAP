@@ -8,6 +8,9 @@ from collections import OrderedDict
 import pandas as pd
 import numpy as np
 import sys
+from bokeh.plotting import figure, output_file, save
+from bokeh.io import reset_output
+import bokeh
 
 from tonic.io import read_config, read_configobj
 
@@ -93,6 +96,14 @@ for i in range(cfg['EnKF']['N']):
 # ============================================================ #
 # Plot EnKF results
 # ============================================================ #
+# Extract lat's and lon's
+lat = ds_openloop['lat'].values
+lon = ds_openloop['lon'].values
+
+# ------------------------------------------------------------ #
+# Plot results - soil moisture time series
+# ------------------------------------------------------------ #
+print('Plotting top-layer soil moisture...')
 # Extract top layer soil moisture from all datasets
 da_sm1_truth = ds_truth['OUT_SOIL_MOIST'].sel(nlayer=0)
 da_sm1_EnKF_ens_mean = ds_EnKF_ens_mean['OUT_SOIL_MOIST'].sel(nlayer=0)
@@ -101,22 +112,14 @@ dict_ens_da_sm1 = {}
 for i in range(cfg['EnKF']['N']):
     ens_name = 'ens{}'.format(i+1)
     dict_ens_da_sm1[ens_name] = dict_ens_ds[ens_name]['OUT_SOIL_MOIST'].sel(nlayer=0)
-
-# Extract lat's and lon's
-lat = da_sm1_openloop['lat'].values
-lon = da_sm1_openloop['lon'].values
-
-# ------------------------------------------------------------ #
-# Plot results - soil moisture time series
-# ------------------------------------------------------------ #
-print('Plotting top-layer soil moisture...')
+# Plot
 for lt in lat:
     for lg in lon:
         if np.isnan(da_sm1_openloop.loc[da_sm1_openloop['time'][0],
                                         lt, lg].values) == True:  # if inactive cell, skip
             continue
-
-        print('\t lat {}, lon {}'.format(lt, lg))
+        
+        # ----- Regular plots ----- #
         # Create figure
         fig = plt.figure(figsize=(12, 6))
         # plot each ensemble member
@@ -156,109 +159,140 @@ for lt in lat:
         fig.savefig(os.path.join(dirs['plots'], 'sm1_{}_{}.shorter.png'.format(lt, lg)),
                     format='png')
         
-# ------------------------------------------------------------ #
-# Plot results - surface runoff
-# ------------------------------------------------------------ #
-print('Plotting surface runoff...')
-for lt in lat:
-    for lg in lon:
-        if np.isnan(da_sm1_openloop.loc[da_sm1_openloop['time'][0],
-                                        lt, lg].values) == True:  # if inactive cell, skip
-            continue
-
-        print('\t lat {}, lon {}'.format(lt, lg))
+        # ----- Interactive version ----- #
         # Create figure
-        fig = plt.figure(figsize=(12, 6))
+        output_file(os.path.join(dirs['plots'], 'sm1_{}_{}.html'.format(lt, lg)))
+        
+        p = figure(title='Top-layer soil moisture, {}, {}, N={}'.format(lt, lg, cfg['EnKF']['N']),
+                   x_axis_label="Time", y_axis_label="Soil moiture (mm)",
+                   x_axis_type='datetime', width=1000, height=500)
         # plot each ensemble member
         for i in range(cfg['EnKF']['N']):
             ens_name = 'ens{}'.format(i+1)
             if i == 0:
-                legend=True
+                legend="Ensemble members"
             else:
                 legend=False
-            dict_ens_ds[ens_name]['OUT_RUNOFF'].loc[:, lt, lg].to_series().plot(
-                        color='grey', style='-', alpha=0.3, label='Ensemble members',
-                        legend=legend)
+            ts = dict_ens_da_sm1[ens_name].loc[:, lt, lg].to_series()
+            p.line(ts.index, ts.values, color="grey", line_dash="solid", alpha=0.3, legend=legend)
         # plot EnKF post-processed ens. mean
-        ds_EnKF_ens_mean['OUT_RUNOFF'].loc[:, lt, lg].to_series().plot(
-                                                color='b', style='-',
-                                                label='EnKF ens. mean', legend=True)
+        ts = da_sm1_EnKF_ens_mean.loc[:, lt, lg].to_series()
+        p.line(ts.index, ts.values, color="blue", line_dash="solid", legend="EnKF ens. mean", line_width=2)
         # plot measurement
-        # da_meas.loc[:, lt, lg, 0].to_series().plot(
-        #                style='ro', label='Measurement',
-        #                legend=True)
+        ts = da_meas.loc[:, lt, lg, 0].to_series()
+        p.circle(ts.index, ts.values, color="red", fill_color="red", legend="Measurement", line_width=2)
         # plot truth
-        ds_truth['OUT_RUNOFF'].loc[:, lt, lg].to_series().plot(color='k', style='-',
-                                                     label='Truth', legend=True)
+        ts = da_sm1_truth.loc[:, lt, lg].to_series()
+        p.line(ts.index, ts.values, color="black", line_dash="solid", legend="Truth", line_width=2)
         # plot open-loop
-        ds_openloop['OUT_RUNOFF'].loc[:, lt, lg].to_series().plot(color='m', style='--',
-                                                        label='Open-loop', legend=True)
-        # Make plot looks better
-        plt.xlabel('Time')
-        plt.ylabel('Runoff (mm)')
-        plt.title('Surface runoff, {}, {}, N={}'.format(lt, lg, cfg['EnKF']['N']))
-        # Save figure
-        fig.savefig(os.path.join(dirs['plots'], 'runoff_{}_{}.png'.format(lt, lg)),
-                    format='png')
+        ts = da_sm1_openloop.loc[:, lt, lg].to_series()
+        p.line(ts.index, ts.values, color="magenta", line_dash="dashed", legend="Open-loop", line_width=2)
+        # Save
+        save(p)
         
-        # Save figure for a shorter period
-        plt.xlim([pd.datetime(1949, 1, 1), pd.datetime(1949, 1, 10)])
-        ylim = ds_truth['OUT_RUNOFF'].loc[:, lt, lg].to_series().truncate(before=pd.datetime(1949, 1, 1),
-                                                                          after=pd.datetime(1949, 1, 10)).max() * 2
-        plt.ylim([0, ylim])
-        fig.savefig(os.path.join(dirs['plots'], 'runoff_{}_{}.shorter.png'.format(lt, lg)),
-                    format='png')
-        
-# ------------------------------------------------------------ #
-# Plot results - baseflow
-# ------------------------------------------------------------ #
-print('Plotting baseflow...')
-for lt in lat:
-    for lg in lon:
-        if np.isnan(da_sm1_openloop.loc[da_sm1_openloop['time'][0],
-                                        lt, lg].values) == True:  # if inactive cell, skip
-            continue
-
-        print('\t lat {}, lon {}'.format(lt, lg))
-        # Create figure
-        fig = plt.figure(figsize=(12, 6))
-        # plot each ensemble member
-        for i in range(cfg['EnKF']['N']):
-            ens_name = 'ens{}'.format(i+1)
-            if i == 0:
-                legend=True
-            else:
-                legend=False
-            dict_ens_ds[ens_name]['OUT_BASEFLOW'].loc[:, lt, lg].to_series().plot(
-                        color='grey', style='-', alpha=0.3, label='Ensemble members',
-                        legend=legend)
-        # plot EnKF post-processed ens. mean
-        ds_EnKF_ens_mean['OUT_BASEFLOW'].loc[:, lt, lg].to_series().plot(
-                                                color='b', style='-',
-                                                label='EnKF ens. mean', legend=True)
-        # plot measurement
-        # da_meas.loc[:, lt, lg, 0].to_series().plot(
-        #                style='ro', label='Measurement',
-        #                legend=True)
-        # plot truth
-        ds_truth['OUT_BASEFLOW'].loc[:, lt, lg].to_series().plot(color='k', style='-',
-                                                     label='Truth', legend=True)
-        # plot open-loop
-        ds_openloop['OUT_BASEFLOW'].loc[:, lt, lg].to_series().plot(color='m', style='--',
-                                                        label='Open-loop', legend=True)
-        # Make plot looks better
-        plt.xlabel('Time')
-        plt.ylabel('Baseflow (mm)')
-        plt.title('Baseflow, {}, {}, N={}'.format(lt, lg, cfg['EnKF']['N']))
-        # Save figure
-        fig.savefig(os.path.join(dirs['plots'], 'baseflow_{}_{}.png'.format(lt, lg)),
-                    format='png')
-        
-        # Save figure for a shorter period
-        plt.xlim([pd.datetime(1949, 5, 10), pd.datetime(1949, 5, 30)])
-        ylim = ds_truth['OUT_BASEFLOW'].loc[:, lt, lg].to_series().truncate(before=pd.datetime(1949, 5, 10),
-                                                                          after=pd.datetime(1949, 5, 30)).max() * 2
-        plt.ylim([0, ylim])
-        fig.savefig(os.path.join(dirs['plots'], 'baseflow_{}_{}.shorter.png'.format(lt, lg)),
-                    format='png')
-        
+## ------------------------------------------------------------ #
+## Plot results - surface runoff
+## ------------------------------------------------------------ #
+#print('Plotting surface runoff...')
+#for lt in lat:
+#    for lg in lon:
+#        if np.isnan(da_sm1_openloop.loc[da_sm1_openloop['time'][0],
+#                                        lt, lg].values) == True:  # if inactive cell, skip
+#            continue
+#
+#        print('\t lat {}, lon {}'.format(lt, lg))
+#        # Create figure
+#        fig = plt.figure(figsize=(12, 6))
+#        # plot each ensemble member
+#        for i in range(cfg['EnKF']['N']):
+#            ens_name = 'ens{}'.format(i+1)
+#            if i == 0:
+#                legend=True
+#            else:
+#                legend=False
+#            dict_ens_ds[ens_name]['OUT_RUNOFF'].loc[:, lt, lg].to_series().plot(
+#                        color='grey', style='-', alpha=0.3, label='Ensemble members',
+#                        legend=legend)
+#        # plot EnKF post-processed ens. mean
+#        ds_EnKF_ens_mean['OUT_RUNOFF'].loc[:, lt, lg].to_series().plot(
+#                                                color='b', style='-',
+#                                                label='EnKF ens. mean', legend=True)
+#        # plot measurement
+#        # da_meas.loc[:, lt, lg, 0].to_series().plot(
+#        #                style='ro', label='Measurement',
+#        #                legend=True)
+#        # plot truth
+#        ds_truth['OUT_RUNOFF'].loc[:, lt, lg].to_series().plot(color='k', style='-',
+#                                                     label='Truth', legend=True)
+#        # plot open-loop
+#        ds_openloop['OUT_RUNOFF'].loc[:, lt, lg].to_series().plot(color='m', style='--',
+#                                                        label='Open-loop', legend=True)
+#        # Make plot looks better
+#        plt.xlabel('Time')
+#        plt.ylabel('Runoff (mm)')
+#        plt.title('Surface runoff, {}, {}, N={}'.format(lt, lg, cfg['EnKF']['N']))
+#        # Save figure
+#        fig.savefig(os.path.join(dirs['plots'], 'runoff_{}_{}.png'.format(lt, lg)),
+#                    format='png')
+#        
+#        # Save figure for a shorter period
+#        plt.xlim([pd.datetime(1949, 1, 1), pd.datetime(1949, 1, 10)])
+#        ylim = ds_truth['OUT_RUNOFF'].loc[:, lt, lg].to_series().truncate(before=pd.datetime(1949, 1, 1),
+#                                                                          after=pd.datetime(1949, 1, 10)).max() * 2
+#        plt.ylim([0, ylim])
+#        fig.savefig(os.path.join(dirs['plots'], 'runoff_{}_{}.shorter.png'.format(lt, lg)),
+#                    format='png')
+#        
+## ------------------------------------------------------------ #
+## Plot results - baseflow
+## ------------------------------------------------------------ #
+#print('Plotting baseflow...')
+#for lt in lat:
+#    for lg in lon:
+#        if np.isnan(da_sm1_openloop.loc[da_sm1_openloop['time'][0],
+#                                        lt, lg].values) == True:  # if inactive cell, skip
+#            continue
+#
+#        print('\t lat {}, lon {}'.format(lt, lg))
+#        # Create figure
+#        fig = plt.figure(figsize=(12, 6))
+#        # plot each ensemble member
+#        for i in range(cfg['EnKF']['N']):
+#            ens_name = 'ens{}'.format(i+1)
+#            if i == 0:
+#                legend=True
+#            else:
+#                legend=False
+#            dict_ens_ds[ens_name]['OUT_BASEFLOW'].loc[:, lt, lg].to_series().plot(
+#                        color='grey', style='-', alpha=0.3, label='Ensemble members',
+#                        legend=legend)
+#        # plot EnKF post-processed ens. mean
+#        ds_EnKF_ens_mean['OUT_BASEFLOW'].loc[:, lt, lg].to_series().plot(
+#                                                color='b', style='-',
+#                                                label='EnKF ens. mean', legend=True)
+#        # plot measurement
+#        # da_meas.loc[:, lt, lg, 0].to_series().plot(
+#        #                style='ro', label='Measurement',
+#        #                legend=True)
+#        # plot truth
+#        ds_truth['OUT_BASEFLOW'].loc[:, lt, lg].to_series().plot(color='k', style='-',
+#                                                     label='Truth', legend=True)
+#        # plot open-loop
+#        ds_openloop['OUT_BASEFLOW'].loc[:, lt, lg].to_series().plot(color='m', style='--',
+#                                                        label='Open-loop', legend=True)
+#        # Make plot looks better
+#        plt.xlabel('Time')
+#        plt.ylabel('Baseflow (mm)')
+#        plt.title('Baseflow, {}, {}, N={}'.format(lt, lg, cfg['EnKF']['N']))
+#        # Save figure
+#        fig.savefig(os.path.join(dirs['plots'], 'baseflow_{}_{}.png'.format(lt, lg)),
+#                    format='png')
+#        
+#        # Save figure for a shorter period
+#        plt.xlim([pd.datetime(1949, 5, 10), pd.datetime(1949, 5, 30)])
+#        ylim = ds_truth['OUT_BASEFLOW'].loc[:, lt, lg].to_series().truncate(before=pd.datetime(1949, 5, 10),
+#                                                                          after=pd.datetime(1949, 5, 30)).max() * 2
+#        plt.ylim([0, ylim])
+#        fig.savefig(os.path.join(dirs['plots'], 'baseflow_{}_{}.shorter.png'.format(lt, lg)),
+#                    format='png')
+#        
