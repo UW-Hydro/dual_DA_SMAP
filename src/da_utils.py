@@ -573,7 +573,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
                                 state_dir=state_dir_before_update,
                                 state_time=last_time, 
                                 da_tile_frac=da_tile_frac)
-        da_K = calculate_gain_K_whole_field(da_x, da_y_est)
+        da_K = calculate_gain_K_whole_field(da_x, da_y_est, R)
 
         # (2) Update states for each ensemble member
         # Set up dir for updated states
@@ -1136,7 +1136,7 @@ def find_global_param_value(gp, param_name, second_param=False):
                 return line_list[1], line_list[2]
 
 
-def calculate_gain_K(x, y_est):
+def calculate_gain_K(x, y_est, R):
     ''' This function calculates Kalman gain K from ensemble.
     
     Parameters
@@ -1146,6 +1146,8 @@ def calculate_gain_K(x, y_est):
     y_est: <np.array> [m*N]
         An array of forecasted ensemble measurement estimates (before updated);
         (y_est = Hx)
+    R: <np.array> [m*m]
+        Measurement error covariance matrix
     
     Returns
     ----------
@@ -1167,14 +1169,14 @@ def calculate_gain_K(x, y_est):
     Pyy = np.cov(y_est)
     # K = Pxy * (Pyy)-1
     if m == 1:  # if m = 1
-        K = Pxy / Pyy
+        K = Pxy / (Pyy + R)
     else:  # if m > 1
-        K = np.dot(Pxx, np.linalg.inv(Pyy))
+        K = np.dot(Pxx, np.linalg.inv(Pyy+R))
 
     return K
 
 
-def calculate_gain_K_whole_field(da_x, da_y_est):
+def calculate_gain_K_whole_field(da_x, da_y_est, R):
     ''' This function calculates gain K over the whole field.
     
     Parameters
@@ -1187,6 +1189,8 @@ def calculate_gain_K_whole_field(da_x, da_y_est):
         Estimated measurement of all ensemble members;
         As returned from get_soil_moisture_and_estimated_meas_all_ensemble;
         Dimension: [lat, lon, m, N]
+    R: <np.array> [m*m]
+        Measurement error covariance matrix
         
     Returns
     ----------
@@ -1219,7 +1223,7 @@ def calculate_gain_K_whole_field(da_x, da_y_est):
         for lon in lon_coord:
             # Calculate gain K
             K = calculate_gain_K(da_x.loc[lat, lon, :, :],
-                                 da_y_est.loc[lat, lon, :, :])
+                                 da_y_est.loc[lat, lon, :, :], R)
             # Fill K in da_K
             da_K.loc[lat, lon, :, :] = K
     
