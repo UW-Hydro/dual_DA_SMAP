@@ -1605,43 +1605,120 @@ def calculate_max_soil_moist_domain(global_path):
 
 def calculate_ensemble_mean_states(list_state_nc, out_state_nc):
     ''' Calculates ensemble-mean of multiple state files
-    
+
     Parameters
     ----------
     list_state_nc: <list>
         A list of VIC state nc files whose mean to be calculated
     out_state_nc: <str>
         Path of output state netCDF file
-    
+
     Returns
     ----------
     out_state_nc: <str>
         Path of output state netCDF file (same as input)
-    
+
     Require
     ----------
     xarray
     '''
-    
-    # Number of files
+
+    # --- Number of files --- #
     N = len(list_state_nc)
-    
-    # Calculate ensemble mean
+
+    # --- Calculate ensemble mean (or median) for each state variable --- #
     list_ds = []
     for state_nc in list_state_nc:
         list_ds.append(xr.open_dataset(state_nc))
-    ds_mean = sum(list_ds) / N
+    ds_mean = list_ds[0].copy()
+    # STATE_SOIL_MOISTURE - mean
+    ds_mean['STATE_SOIL_MOISTURE'] = (sum(list_ds) / N)['STATE_SOIL_MOISTURE']
+    # STATE_SOIL_ICE - mean
+    ds_mean['STATE_SOIL_ICE'] = (sum(list_ds) / N)['STATE_SOIL_ICE']
+    # STATE_CANOPY_WATER - mean
+    ds_mean['STATE_CANOPY_WATER'] = (sum(list_ds) / N)['STATE_CANOPY_WATER']
+    # STATE_SNOW_AGE - median, integer
+    list_var = []
+    for ds in list_ds:
+        list_var.append(ds['STATE_SNOW_AGE'].values)
+    ar_var = np.asarray(list_var)
+    ds_mean['STATE_SNOW_AGE'][:] = np.nanmedian(ar_var, axis=0).round()
+    # STATE_SNOW_MELT_STATE - median, integer
+    list_var = []
+    for ds in list_ds:
+        list_var.append(ds['STATE_SNOW_MELT_STATE'].values)
+    ar_var = np.asarray(list_var)
+    ds_mean['STATE_SNOW_MELT_STATE'][:] = np.nanmedian(ar_var, axis=0).round()
+    # STATE_SNOW_COVERAGE - median
+    list_var = []
+    for ds in list_ds:
+        list_var.append(ds['STATE_SNOW_COVERAGE'].values)
+    ar_var = np.asarray(list_var)
+    ds_mean['STATE_SNOW_COVERAGE'][:] = np.nanmedian(ar_var, axis=0)
+    # STATE_SNOW_WATER_EQUIVALENT - median
+    list_var = []
+    for ds in list_ds:
+        list_var.append(ds['STATE_SNOW_WATER_EQUIVALENT'].values)
+    ar_var = np.asarray(list_var)
+    ds_mean['STATE_SNOW_WATER_EQUIVALENT'][:] = np.nanmedian(ar_var, axis=0)
+    # STATE_SNOW_SURF_TEMP - median
+    list_var = []
+    for ds in list_ds:
+        list_var.append(ds['STATE_SNOW_SURF_TEMP'].values)
+    ar_var = np.asarray(list_var)
+    ds_mean['STATE_SNOW_SURF_TEMP'][:] = np.nanmedian(ar_var, axis=0)
+    # STATE_SNOW_SURF_WATER - median
+    list_var = []
+    for ds in list_ds:
+        list_var.append(ds['STATE_SNOW_SURF_WATER'].values)
+    ar_var = np.asarray(list_var)
+    ds_mean['STATE_SNOW_SURF_WATER'][:] = np.nanmedian(ar_var, axis=0)
+    # STATE_SNOW_PACK_TEMP - median
+    list_var = []
+    for ds in list_ds:
+        list_var.append(ds['STATE_SNOW_PACK_TEMP'].values)
+    ar_var = np.asarray(list_var)
+    ds_mean['STATE_SNOW_PACK_TEMP'][:] = np.nanmedian(ar_var, axis=0)
+    # STATE_SNOW_PACK_WATER - median
+    list_var = []
+    for ds in list_ds:
+        list_var.append(ds['STATE_SNOW_PACK_WATER'].values)
+    ar_var = np.asarray(list_var)
+    ds_mean['STATE_SNOW_PACK_WATER'][:] = np.nanmedian(ar_var, axis=0)
+    # STATE_SNOW_DENSITY - median
+    list_var = []
+    for ds in list_ds:
+        list_var.append(ds['STATE_SNOW_DENSITY'].values)
+    ar_var = np.asarray(list_var)
+    ds_mean['STATE_SNOW_DENSITY'][:] = np.nanmedian(ar_var, axis=0)
+    # STATE_SNOW_COLD_CONTENT - median
+    list_var = []
+    for ds in list_ds:
+        list_var.append(ds['STATE_SNOW_COLD_CONTENT'].values)
+    ar_var = np.asarray(list_var)
+    ds_mean['STATE_SNOW_COLD_CONTENT'][:] = np.nanmedian(ar_var, axis=0)
+    # STATE_SNOW_CANOPY - median
+    list_var = []
+    for ds in list_ds:
+        list_var.append(ds['STATE_SNOW_CANOPY'].values)
+    ar_var = np.asarray(list_var)
+    ds_mean['STATE_SNOW_CANOPY'][:] = np.nanmedian(ar_var, axis=0)
+    # STATE_SOIL_NODE_TEMP - mean
+    ds_mean['STATE_SOIL_NODE_TEMP'] = (sum(list_ds) / N)['STATE_SOIL_NODE_TEMP']
+    # STATE_FOLIAGE_TEMPERATURE - mean
+    ds_mean['STATE_FOLIAGE_TEMPERATURE'] = (sum(list_ds) / N)['STATE_FOLIAGE_TEMPERATURE']
+    # STATE_ENERGY_LONGUNDEROUT - mean
+    ds_mean['STATE_ENERGY_LONGUNDEROUT'] = (sum(list_ds) / N)['STATE_ENERGY_LONGUNDEROUT']
+    # STATE_ENERGY_SNOW_FLUX - median
+    list_var = []
+    for ds in list_ds:
+        list_var.append(ds['STATE_ENERGY_SNOW_FLUX'].values)
+    ar_var = np.asarray(list_var)
+    ds_mean['STATE_ENERGY_SNOW_FLUX'][:] = np.nanmedian(ar_var, axis=0)
 
-    # Replace some variables with those from the first state file to
-    # prevent precision issues
-    ds_first_state = list_ds[0]
-    ds_mean['layer'] = ds_first_state['layer']
-    ds_mean['dz_node'] = ds_first_state['dz_node']
-    ds_mean['node_depth'] = ds_first_state['node_depth']
-    
     # Write to output netCDF file
     ds_mean.to_netcdf(out_state_nc, format='NETCDF4_CLASSIC')
-    
+
     return out_state_nc
 
 
