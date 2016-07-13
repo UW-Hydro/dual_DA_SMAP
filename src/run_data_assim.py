@@ -207,7 +207,7 @@ for i in range(cfg['EnKF']['N']):
 # ============================================================ #
 print('Calculating ensemble-mean of the updates states...')
 
-N=cfg['EnKF']['N']  # number of ensemble members
+N = cfg['EnKF']['N']  # number of ensemble members
 
 # --- Calculate ensemble-mean for the initial time point --- #
 init_time = pd.to_datetime(cfg['EnKF']['start_time']) -\

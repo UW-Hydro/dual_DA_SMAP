@@ -522,4 +522,187 @@ for lt in lat:
         p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
                legend="Open-loop, RMSE={:.2f}".format(rmse_openloop), line_width=2)
         # Save
+        save(p)
+
+
+# ------------------------------------------------------------ #
+# Plot results - surface runoff time series
+# ------------------------------------------------------------ #
+# Extract SWE from all datasets
+da_runoff_truth = ds_truth['OUT_RUNOFF']
+da_runoff_EnKF_ens_mean = ds_EnKF_ens_mean['OUT_RUNOFF']
+da_runoff_openloop = ds_openloop['OUT_RUNOFF']
+dict_ens_da_runoff = {}
+for i in range(cfg['EnKF']['N']):
+    ens_name = 'ens{}'.format(i+1)
+    dict_ens_da_runoff[ens_name] = dict_ens_ds[ens_name]['OUT_RUNOFF']
+# Plot
+for lt in lat:
+    for lg in lon:
+        if np.isnan(da_runoff_openloop.loc[da_runoff_openloop['time'][0],
+                                           lt, lg].values) == True:  # if inactive cell, skip
+            continue
+        
+        # --- RMSE --- #
+        # extract time series
+        ts_truth = da_runoff_truth.loc[:, lt, lg].to_series()
+        ts_EnKF_mean = da_runoff_EnKF_ens_mean.loc[:, lt, lg].to_series()
+        ts_openloop = da_runoff_openloop.loc[:, lt, lg].to_series()
+        # Calculate EnKF_mean vs. truth
+        df_truth_EnKF = pd.concat([ts_truth, ts_EnKF_mean], axis=1, keys=['truth', 'EnKF_mean']).dropna()
+        rmse_EnKF_mean = rmse(df_truth_EnKF, var_true='truth', var_est='EnKF_mean')
+        # Calculate open-loop vs. truth
+        df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
+        rmse_openloop = rmse(df_truth_openloop, var_true='truth', var_est='openloop')
+        
+        # ----- Regular plots ----- #
+        # Create figure
+        fig = plt.figure(figsize=(12, 6))
+        # plot each ensemble member
+        for i in range(cfg['EnKF']['N']):
+            ens_name = 'ens{}'.format(i+1)
+            if i == 0:
+                legend=True
+            else:
+                legend=False
+            dict_ens_da_runoff[ens_name].loc[:, lt, lg].to_series().plot(
+                        color='grey', style='-', alpha=0.3, label='Ensemble members',
+                        legend=legend)
+        # plot EnKF post-processed ens. mean
+        ts_EnKF_mean.plot(color='b', style='-',
+                                      label='EnKF ens. mean, RMSE={:.2f}'.format(rmse_EnKF_mean),
+                                      legend=True)
+        # plot truth
+        ts_truth.plot(color='k', style='-', label='Truth', legend=True)
+        # plot open-loop
+        ts_openloop.plot(color='m', style='--', label='Open-loop, RMSE={:.2f}'.format(rmse_openloop),
+                         legend=True)
+        # Make plot looks better
+        plt.xlabel('Time')
+        plt.ylabel('Runoff (mm)')
+        plt.title('Surface runoff, {}, {}, N={}'.format(lt, lg, cfg['EnKF']['N']))
+        # Save figure
+        fig.savefig(os.path.join(dirs['plots'], 'runoff_{}_{}.png'.format(lt, lg)),
+                    format='png')
+        
+        # ----- Interactive version ----- #
+        # Create figure
+        output_file(os.path.join(dirs['plots'], 'runoff_{}_{}.html'.format(lt, lg)))
+        
+        p = figure(title='Surface runoff, {}, {}, N={}'.format(lt, lg, cfg['EnKF']['N']),
+                   x_axis_label="Time", y_axis_label="Runoff (mm)",
+                   x_axis_type='datetime', width=1000, height=500)
+        # plot each ensemble member
+        for i in range(cfg['EnKF']['N']):
+            ens_name = 'ens{}'.format(i+1)
+            if i == 0:
+                legend="Ensemble members"
+            else:
+                legend=False
+            ts = dict_ens_da_runoff[ens_name].loc[:, lt, lg].to_series()
+            p.line(ts.index, ts.values, color="grey", line_dash="solid", alpha=0.3, legend=legend)
+        # plot EnKF post-processed ens. mean
+        ts = ts_EnKF_mean
+        p.line(ts.index, ts.values, color="blue", line_dash="solid",
+               legend="EnKF ens. mean, RMSE={:.2f}".format(rmse_EnKF_mean), line_width=2)
+        # plot truth
+        ts = ts_truth
+        p.line(ts.index, ts.values, color="black", line_dash="solid", legend="Truth", line_width=2)
+        # plot open-loop
+        ts = ts_openloop
+        p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
+               legend="Open-loop, RMSE={:.2f}".format(rmse_openloop), line_width=2)
+        # Save
         save(p) 
+
+
+# ------------------------------------------------------------ #
+# Plot results - baseflow time series
+# ------------------------------------------------------------ #
+# Extract baseflow from all datasets
+da_baseflow_truth = ds_truth['OUT_BASEFLOW']
+da_baseflow_EnKF_ens_mean = ds_EnKF_ens_mean['OUT_BASEFLOW']
+da_baseflow_openloop = ds_openloop['OUT_BASEFLOW']
+dict_ens_da_baseflow = {}
+for i in range(cfg['EnKF']['N']):
+    ens_name = 'ens{}'.format(i+1)
+    dict_ens_da_baseflow[ens_name] = dict_ens_ds[ens_name]['OUT_BASEFLOW']
+# Plot
+for lt in lat:
+    for lg in lon:
+        if np.isnan(da_baseflow_openloop.loc[da_baseflow_openloop['time'][0],
+                                             lt, lg].values) == True:  # if inactive cell, skip
+            continue
+        
+        # --- RMSE --- #
+        # extract time series
+        ts_truth = da_baseflow_truth.loc[:, lt, lg].to_series()
+        ts_EnKF_mean = da_baseflow_EnKF_ens_mean.loc[:, lt, lg].to_series()
+        ts_openloop = da_baseflow_openloop.loc[:, lt, lg].to_series()
+        # Calculate EnKF_mean vs. truth
+        df_truth_EnKF = pd.concat([ts_truth, ts_EnKF_mean], axis=1, keys=['truth', 'EnKF_mean']).dropna()
+        rmse_EnKF_mean = rmse(df_truth_EnKF, var_true='truth', var_est='EnKF_mean')
+        # Calculate open-loop vs. truth
+        df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
+        rmse_openloop = rmse(df_truth_openloop, var_true='truth', var_est='openloop')
+        
+        # ----- Regular plots ----- #
+        # Create figure
+        fig = plt.figure(figsize=(12, 6))
+        # plot each ensemble member
+        for i in range(cfg['EnKF']['N']):
+            ens_name = 'ens{}'.format(i+1)
+            if i == 0:
+                legend=True
+            else:
+                legend=False
+            dict_ens_da_baseflow[ens_name].loc[:, lt, lg].to_series().plot(
+                        color='grey', style='-', alpha=0.3, label='Ensemble members',
+                        legend=legend)
+        # plot EnKF post-processed ens. mean
+        ts_EnKF_mean.plot(color='b', style='-',
+                                      label='EnKF ens. mean, RMSE={:.2f}'.format(rmse_EnKF_mean),
+                                      legend=True)
+        # plot truth
+        ts_truth.plot(color='k', style='-', label='Truth', legend=True)
+        # plot open-loop
+        ts_openloop.plot(color='m', style='--', label='Open-loop, RMSE={:.2f}'.format(rmse_openloop),
+                         legend=True)
+        # Make plot looks better
+        plt.xlabel('Time')
+        plt.ylabel('Baseflow (mm)')
+        plt.title('Baseflow, {}, {}, N={}'.format(lt, lg, cfg['EnKF']['N']))
+        # Save figure
+        fig.savefig(os.path.join(dirs['plots'], 'baseflow_{}_{}.png'.format(lt, lg)),
+                    format='png')
+        
+        # ----- Interactive version ----- #
+        # Create figure
+        output_file(os.path.join(dirs['plots'], 'baseflow_{}_{}.html'.format(lt, lg)))
+        
+        p = figure(title='Baseflow, {}, {}, N={}'.format(lt, lg, cfg['EnKF']['N']),
+                   x_axis_label="Time", y_axis_label="Baseflow (mm)",
+                   x_axis_type='datetime', width=1000, height=500)
+        # plot each ensemble member
+        for i in range(cfg['EnKF']['N']):
+            ens_name = 'ens{}'.format(i+1)
+            if i == 0:
+                legend="Ensemble members"
+            else:
+                legend=False
+            ts = dict_ens_da_baseflow[ens_name].loc[:, lt, lg].to_series()
+            p.line(ts.index, ts.values, color="grey", line_dash="solid", alpha=0.3, legend=legend)
+        # plot EnKF post-processed ens. mean
+        ts = ts_EnKF_mean
+        p.line(ts.index, ts.values, color="blue", line_dash="solid",
+               legend="EnKF ens. mean, RMSE={:.2f}".format(rmse_EnKF_mean), line_width=2)
+        # plot truth
+        ts = ts_truth
+        p.line(ts.index, ts.values, color="black", line_dash="solid", legend="Truth", line_width=2)
+        # plot open-loop
+        ts = ts_openloop
+        p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
+               legend="Open-loop, RMSE={:.2f}".format(rmse_openloop), line_width=2)
+        # Save
+        save(p)
+
