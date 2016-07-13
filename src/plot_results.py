@@ -112,13 +112,14 @@ da_sm1_openloop = ds_openloop['OUT_SOIL_MOIST'].sel(nlayer=0)
 dict_ens_da_sm1 = {}
 for i in range(cfg['EnKF']['N']):
     ens_name = 'ens{}'.format(i+1)
-    dict_ens_da_sm1[ens_name] = dict_ens_ds[ens_name]['OUT_SOIL_MOIST'].sel(nlayer=0)
 # Plot
 for lt in lat:
     for lg in lon:
         if np.isnan(da_sm1_openloop.loc[da_sm1_openloop['time'][0],
                                         lt, lg].values) == True:  # if inactive cell, skip
             continue
+
+        print(lt, lg)
         
         # --- RMSE --- #
         # extract time series
@@ -135,7 +136,7 @@ for lt in lat:
         # Calculate open-loop vs. truth
         df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
         rmse_openloop = rmse(df_truth_openloop, var_true='truth', var_est='openloop')
-        
+
         # ----- Regular plots ----- #
         # Create figure
         fig = plt.figure(figsize=(12, 6))
@@ -149,10 +150,28 @@ for lt in lat:
             dict_ens_da_sm1[ens_name].loc[:, lt, lg].to_series().plot(
                         color='grey', style='-', alpha=0.3, label='Ensemble members',
                         legend=legend)
+        # plot ensemble mean and standard deviation
+        times = dict_ens_da_sm1['ens1']['time']
+        data = np.empty([len(times), cfg['EnKF']['N']])
+        columns = []
+        for i in range(cfg['EnKF']['N']):
+            data[:,i] = dict_ens_da_sm1['ens{}'.format(i+1)].loc[:, lt, lg].to_series().values
+            columns.append('ens{}'.format(i+1))
+        df = pd.DataFrame(data, index=times, columns=columns)  # put all ensemble results into a df
+        # --- ensemble mean --- #
+        s_mean = df.mean(axis=1)
+        s_mean.plot(color='cyan', style='-',
+                    label='Ensemble mean', legend=True)
+        # --- ensemble standard deviation --- #
+        s_std = df.std(axis=1)
+        (s_mean + s_std).plot(color='cyan', style='--',
+                              label='Ensemble std', legend=True)
+        (s_mean - s_std).plot(color='cyan', style='--',
+                              legend=False)
         # plot EnKF post-processed ens. mean
         ts_EnKF_mean.plot(color='b', style='-',
                           label='EnKF ens. mean, RMSE={:.2f}'.format(rmse_EnKF_mean),
-                          legend=True)
+                          legend=True)    
         # plot measurement
         ts_meas.plot(style='ro', label='Measurement, RMSE={:.2f}'.format(rmse_meas),
                      legend=True)
@@ -169,16 +188,15 @@ for lt in lat:
         # Save figure
         fig.savefig(os.path.join(dirs['plots'], 'sm1_{}_{}.png'.format(lt, lg)),
                     format='png')
-        
         # Save figure for a shorter period
         plt.xlim([pd.datetime(1949, 5, 10), pd.datetime(1949, 5, 30)])
         fig.savefig(os.path.join(dirs['plots'], 'sm1_{}_{}.shorter.png'.format(lt, lg)),
                     format='png')
-        
+
         # ----- Interactive version ----- #
         # Create figure
         output_file(os.path.join(dirs['plots'], 'sm1_{}_{}.html'.format(lt, lg)))
-        
+
         p = figure(title='Top-layer soil moisture, {}, {}, N={}'.format(lt, lg, cfg['EnKF']['N']),
                    x_axis_label="Time", y_axis_label="Soil moiture (mm)",
                    x_axis_type='datetime', width=1000, height=500)
@@ -191,6 +209,17 @@ for lt in lat:
                 legend=False
             ts = dict_ens_da_sm1[ens_name].loc[:, lt, lg].to_series()
             p.line(ts.index, ts.values, color="grey", line_dash="solid", alpha=0.3, legend=legend)
+        # plot ensemble mean and standard deviation
+        # --- ensemble mean --- #
+        ts = s_mean
+        p.line(ts.index, ts.values, color="cyan", line_dash="solid",
+               legend="Ensemble mean", line_width=1)
+        ts = s_mean + s_std
+        p.line(ts.index, ts.values, color="cyan", line_dash="dashed",
+               legend="Ensemble std", line_width=1)
+        ts = s_mean - s_std
+        p.line(ts.index, ts.values, color="cyan", line_dash="dashed",
+               legend=False, line_width=1)
         # plot EnKF post-processed ens. mean
         ts = ts_EnKF_mean
         p.line(ts.index, ts.values, color="blue", line_dash="solid",
