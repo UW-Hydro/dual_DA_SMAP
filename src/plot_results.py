@@ -218,37 +218,67 @@ for lt in lat:
         if np.isnan(da_sm1_openloop.loc[da_sm1_openloop['time'][0],
                                         lt, lg].values) == True:  # if inactive cell, skip
             continue
-        
+
         # Calculate mean y_est_before_update
         times = dict_ens_da_sm1['ens1']['time']
         data = np.empty([len(times), cfg['EnKF']['N']])
+        columns = []
         for i in range(cfg['EnKF']['N']):
             data[:,i] = dict_ens_da_sm1['ens{}'.format(i+1)].loc[:, lt, lg].to_series().values
+            columns.append('ens{}'.format(i+1))
+        df_y_est_ens = pd.DataFrame(data, index=times, columns=columns)  # put y_est for all ensembles into a df
         y_est = np.mean(data, axis=1)
         s_y_est = pd.Series(y_est, index=times)
-        
+
         # Put together with measurement
         s_meas = da_meas.loc[:, lt, lg, 0].to_series()
         df = pd.concat([s_y_est, s_meas], axis=1, keys=['y_est', 'meas']).dropna()
         df['innovation'] = df['meas'] - df['y_est']
         
+        # Calculate statistics
+        # --- Mean --- #
+        innov_mean = df['innovation'].mean()
+        # --- Normalized variance --- #
+        # extract meas time points only
+        df_y_est_ens = pd.concat([df_y_est_ens, s_meas], axis=1).dropna()
+        df_y_est_ens = df_y_est_ens.drop(labels=0, axis=1)
+        # for each time point, Pyy = cov(y, y.transpose); divided by (N-1)
+        Pyy = np.cov(df_y_est_ens.values).diagonal()  # [n_times], one value for each time point
+        # calculate normalized innovation time series
+        df['innov_normalized'] = df['innovation'] / np.sqrt(Pyy + cfg['EnKF']['R'])
+        innov_var_norm = df['innov_normalized'].var()
+        
         # Plot innovation - regular plots
         fig = plt.figure(figsize=(12, 6))
         df['innovation'].plot(color='g', style='-',
-                              label='Innovation (meas - y_est_before_update)', legend=True)
+                              label='Innovation (meas - y_est_before_update)\n'
+                                    'mean={:.2f} var_norm={:.2f}'.format(
+                                            innov_mean, innov_var_norm),
+                              legend=True)
         plt.xlabel('Time')
         plt.ylabel('Innovation (mm)')
         plt.title('Innovation, {}, {}, N={}'.format(lt, lg, cfg['EnKF']['N']))
         fig.savefig(os.path.join(dirs['plots'], 'innov_{}_{}.png'.format(lt, lg)),
                     format='png')
-        
+
+        # Plot innovation autocorrolation (ACF)
+        fig = plt.figure(figsize=(12, 6))
+        pd.tools.plotting.autocorrelation_plot(df['innovation'])
+        plt.xlabel('Lag (day)')
+        plt.title('Innovation ACF, {}, {}, N={}'.format(lt, lg, cfg['EnKF']['N']))
+        fig.savefig(os.path.join(dirs['plots'], 'innov_acf_{}_{}.png'.format(lt, lg)),
+                    format='png')
+
         # Plot innovation - interactive
         output_file(os.path.join(dirs['plots'], 'innov_{}_{}.html'.format(lt, lg)))
         p = figure(title='Innovation, {}, {}, N={}'.format(lt, lg, cfg['EnKF']['N']),
                    x_axis_label="Time", y_axis_label="Innovation (mm)",
                    x_axis_type='datetime', width=1000, height=500)
         p.line(df.index, df['innovation'].values, color="blue", line_dash="solid",
-               legend="Innovation (meas - y_est_before_update)", line_width=2)
+               legend="Innovation (meas - y_est_before_update)\n"
+                      "mean={:.2f} var_norm={:.2f}".format(
+                            innov_mean, innov_var_norm),
+               line_width=2)
         save(p)
 
 
