@@ -765,3 +765,95 @@ for lt in lat:
         # Save
         save(p)
 
+
+# ------------------------------------------------------------ #
+# Plot results - precipitation time series
+# ------------------------------------------------------------ #
+print('Plotting precipitation...')
+# Extract prec from all datasets
+da_prec_truth = ds_truth['OUT_PREC']
+da_prec_EnKF_ens_mean = ds_EnKF_ens_mean['OUT_PREC']
+da_prec_openloop = ds_openloop['OUT_PREC']
+dict_ens_da_prec = {}
+for i in range(cfg['EnKF']['N']):
+    ens_name = 'ens{}'.format(i+1)
+    dict_ens_da_prec[ens_name] = dict_ens_ds[ens_name]['OUT_PREC']
+# Plot
+for lt in lat:
+    for lg in lon:
+        if np.isnan(da_prec_openloop.loc[da_prec_openloop['time'][0],
+                                             lt, lg].values) == True:  # if inactive cell, skip
+            continue
+            
+        # --- RMSE --- #
+        # extract time series
+        ts_truth = da_prec_truth.loc[:, lt, lg].to_series()
+        ts_EnKF_mean = da_prec_EnKF_ens_mean.loc[:, lt, lg].to_series()
+        ts_openloop = da_prec_openloop.loc[:, lt, lg].to_series()
+        # Calculate EnKF_mean vs. truth
+        df_truth_EnKF = pd.concat([ts_truth, ts_EnKF_mean], axis=1, keys=['truth', 'EnKF_mean']).dropna()
+        rmse_EnKF_mean = rmse(df_truth_EnKF, var_true='truth', var_est='EnKF_mean')
+        # Calculate open-loop vs. truth
+        df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
+        rmse_openloop = rmse(df_truth_openloop, var_true='truth', var_est='openloop')
+
+        # ----- Regular plots ----- #
+        # Create figure
+        fig = plt.figure(figsize=(12, 6))
+        # plot each ensemble member
+        for i in range(cfg['EnKF']['N']):
+            ens_name = 'ens{}'.format(i+1)
+            if i == 0:
+                legend=True
+            else:
+                legend=False
+            dict_ens_da_prec[ens_name].loc[:, lt, lg].to_series().plot(
+                        color='grey', style='-', alpha=0.3, label='Ensemble members',
+                        legend=legend)
+        # plot EnKF post-processed ens. mean
+        ts_EnKF_mean.plot(color='b', style='-',
+                                      label='EnKF ens. mean, RMSE={:.2f}'.format(rmse_EnKF_mean),
+                                      legend=True)
+        # plot truth
+        ts_truth.plot(color='k', style='-', label='Truth', legend=True)
+        # plot open-loop
+        ts_openloop.plot(color='m', style='--', label='Open-loop, RMSE={:.2f}'.format(rmse_openloop),
+                         legend=True)
+        # Make plot looks better
+        plt.xlabel('Time')
+        plt.ylabel('Precipitation (mm)')
+        plt.title('Precipitation, {}, {}, N={}'.format(lt, lg, cfg['EnKF']['N']))
+        # Save figure
+        fig.savefig(os.path.join(dirs['plots'], 'prec_{}_{}.png'.format(lt, lg)),
+                    format='png')
+
+        # ----- Interactive version ----- #
+        # Create figure
+        output_file(os.path.join(dirs['plots'], 'prec_{}_{}.html'.format(lt, lg)))
+
+        p = figure(title='Precipitation, {}, {}, N={}'.format(lt, lg, cfg['EnKF']['N']),
+                   x_axis_label="Time", y_axis_label="Precipitation (mm)",
+                   x_axis_type='datetime', width=1000, height=500)
+        # plot each ensemble member
+        for i in range(cfg['EnKF']['N']):
+            ens_name = 'ens{}'.format(i+1)
+            if i == 0:
+                legend="Ensemble members"
+            else:
+                legend=False
+            ts = dict_ens_da_prec[ens_name].loc[:, lt, lg].to_series()
+            p.line(ts.index, ts.values, color="grey", line_dash="solid", alpha=0.3, legend=legend)
+        # plot EnKF post-processed ens. mean
+        ts = ts_EnKF_mean
+        p.line(ts.index, ts.values, color="blue", line_dash="solid",
+               legend="EnKF ens. mean, RMSE={:.2f}".format(rmse_EnKF_mean), line_width=2)
+        # plot truth
+        ts = ts_truth
+        p.line(ts.index, ts.values, color="black", line_dash="solid", legend="Truth", line_width=2)
+        # plot open-loop
+        ts = ts_openloop
+        p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
+               legend="Open-loop, RMSE={:.2f}".format(rmse_openloop), line_width=2)
+        # Save
+        save(p)
+
