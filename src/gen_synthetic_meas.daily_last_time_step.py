@@ -158,6 +158,13 @@ for t in range(len(meas_times)):
             out_states_nc=perturbed_state_nc)
 
     # --- Propagate to the next time point --- #
+    # Prepare log directories
+    prop_period_stamp = '{}-{}'.format(current_time.strftime('%Y%m%d_%H%S'),
+                                       next_time.strftime('%Y%m%d_%H%S'))
+    log_dir = setup_output_dirs(
+                    truth_subdirs['logs'],
+                    mkdirs=['propagate.{}'.format(prop_period_stamp)])\
+              ['propagate.{}'.format(prop_period_stamp)]
     propagate(start_time=current_time, end_time=next_time,
               vic_exe=vic_exe, vic_global_template_file=global_template,
               vic_model_steps_per_day=cfg['VIC']['model_steps_per_day'],
