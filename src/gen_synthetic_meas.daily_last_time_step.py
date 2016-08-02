@@ -49,6 +49,9 @@ dirs = setup_output_dirs(os.path.join(cfg['CONTROL']['root_dir'],
 truth_subdirs = setup_output_dirs(dirs['truth'],
                                   mkdirs=['global', 'history', 'states',
                                           'forcings', 'logs'])
+meas_subdirs = setup_output_dirs(
+                    dirs['synthetic_meas'],
+                    mkdirs=['indep_prec_meas'])
 
 # Construct time points for synthetic measurement (daily, last hour)
 meas_times = pd.date_range(
@@ -74,23 +77,41 @@ print('Simulating \"truth\" - run VIC with perturbed forcings and states...')
 # --- Create class VIC --- #
 vic_exe = VIC(os.path.join(cfg['CONTROL']['root_dir'], cfg['VIC']['exe']))
 
-# --- Prepare perturbed forcing data --- #
+# --- Prepare perturbed forcing data - "true" forcing --- #
+# --- Also, simulate an independent set of synthetic precipitation
+# measurement by adding noise to "true" precipitation --- #
 print('\tPreparing perturbed forcing data...')
 start_year = start_time.year
 end_year = end_time.year
 for year in range(start_year, end_year+1):
+    # --- Prepare perturbed forcing - "true" forcing --- #
     # Construct Forcings class
     class_forcings_orig = Forcings(xr.open_dataset(
                 os.path.join(cfg['CONTROL']['root_dir'],
                              '{}{}.nc'.format(cfg['VIC']['orig_forcing_nc_basepath'],
                                               year))))
     # Perturb precipitaiton
-    ds_perturbed = class_forcings_orig.perturb_prec_lognormal(
+    ds_true = class_forcings_orig.perturb_prec_lognormal(
                                 varname=dict_varnames['PREC'],
                                 std=cfg['FORCINGS_STATES_PERTURB']['prec_std'])
     # Save to nc file
-    ds_perturbed.to_netcdf(os.path.join(truth_subdirs['forcings'],
-                                        'forc_perturbed.{}.nc'.format(year)),
+    ds_true.to_netcdf(os.path.join(truth_subdirs['forcings'],
+                                   'forc_perturbed.{}.nc'.format(year)),
+                      format='NETCDF4_CLASSIC')
+
+    # --- Simulate independent precipitaiton measurement --- #
+    # Construct Forcings class
+    class_forcings_true = Forcings(ds_true)
+    # Perturbe precipitation
+    ds_perturbed = class_forcings_true.perturb_prec_lognormal(
+                                varname=dict_varnames['PREC'],
+                                std=cfg['FORCINGS_STATES_PERTURB']['prec_std'])
+    da_prec_perturbed = ds_perturbed[dict_varnames['PREC']]
+    # Save to nc file
+    ds_simulated = xr.Dataset({'simulated_indep_prec_meas': da_prec_perturbed})
+    ds_simulated.to_netcdf(os.path.join(
+                                meas_subdirs['indep_prec_meas'],
+                                'indep_prec.{}.nc'.format(year)),
                            format='NETCDF4_CLASSIC')
 
 # --- Run VIC with perturbed forcings and soil moisture states --- #
