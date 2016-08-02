@@ -1,13 +1,13 @@
 function [increment_sum,increment_sum_hold,sum_rain,sum_rain_sp,sum_rain_sp_hold,sum_rain_indep] =...
-    analysis(window_size,ist,filter_flag,transform_flag,API_model_flag,NUMEN,Q_fixed,P_inflation_fixed,...
+    analysis(API_mean, API_range, window_size,ist,filter_flag,transform_flag,API_model_flag,NUMEN,Q_fixed,P_inflation_fixed,...
     logn_var_constant,upper_bound_API,rain_observed,rain_observed_hold,rain_indep,rain_true,sm_observed,...
     ERS_observed,ta_observed,ta_observed_climatology,PET_observed,PET_observed_climatology,EVI_observed,...
     slope_parameter_API,location_flag)
 
 % Very important hardwire!
 % Should really move this
-API_mean = 0.60; % HARDWIRE FOR AUSTRALIA
-API_range = 0.15;
+%API_mean = 0.60; % HARDWIRE FOR AUSTRALIA
+%API_range = 0.15;
 
 lag = 0.00; %lag=zero gives the correct seasonality
 API_estimate_flag = 0;
@@ -86,6 +86,7 @@ for k=2:ist
     DOY(k) = 365*((k+31)*0.002739726 - floor((k+31)*0.002739726));
     if (rain_observed(k) < 0);rain_observed(k) = 0;end
 
+    % Calculate API coefficient gamma (Yixin)
     API_COEFF_HOLD(k) = API_mean + API_range*cos(2*pi*(DOY(k)-lag)/365);
     if (API_model_flag == 0); API_COEFF(k) = API_mean; end;
     if (API_model_flag == 1); API_COEFF(k) = API_mean + API_range*cos(2*pi*(DOY(k)-lag)/365); end;
@@ -103,6 +104,7 @@ for k=2:ist
     if (API_COEFF(k) > 1);API_COEFF(k) = 1;end;
     if (API_COEFF(k) < 0);API_COEFF(k) = 0;end;
 
+    % Run API model for one time step with no Kalman filter update (Yixin)
     API_model(k) = API_COEFF(k)*API_model(k-1) + rain_observed(k);
     if (API_model(k) > upper_bound_API); API_model(k) = upper_bound_API; end;
 
@@ -245,15 +247,19 @@ while (converge_flag == 0)
     if (filter_flag==1 || filter_flag==5)
         for k=2:ist
 
+            % Propagate API (Yixin)
             API_filter(k) = API_COEFF(k) * API_filter(k-1) + rain_observed(k);
             API_filter_f(k) = API_filter(k); %FOR RTS ONLY
             if (API_filter(k) > upper_bound_API); API_filter(k) = upper_bound_API; end;
             
+            % Propagate error covariance matrix P (Yixin)
             P(k) = P(k-1)*API_COEFF(k)*API_COEFF(k) + Q + P_inflation*rain_observed(k)^2;
             Pf(k) = P(k); %FOR RTS ONLY             
             
+            % Calculate gain K (Yixin)
             K(k) = P(k)/(P(k) + R_API(k));
 
+            % Update API and P; if no sm measurement at this time point, skip (Yixin)
             if (sm_observed(k) < 0)% && ERS_observed (k) < -999999
                 increment(k)=-999;
                 innovation1(k)=-999;
@@ -290,7 +296,8 @@ while (converge_flag == 0)
     if (filter_flag== 2 || filter_flag == 6)
         randn(10000);
         for k=2:ist
-
+            
+            % Propagate ensemble (Yixin)
             if (API_estimate_flag == 1)
                 API_COEFF_E(k,:) = 0.95*API_COEFF_E(k-1,:) + 0.005*randn(1,NUMEN);
                 API_COEFF_V(k,:) = ones*API_COEFF(k) +  API_COEFF_E(k,:);
@@ -300,11 +307,13 @@ while (converge_flag == 0)
 
             mult_factor = exp(randn(1,NUMEN)*sqrt(log(logn_var + 1)) - log(logn_var + 1)/2);
             API_filter_EnKF(k,:) = API_COEFF_V(k,:).*API_filter_EnKF(k-1,:) + mult_factor*rain_observed(k) + sqrt(Q)*randn(1,NUMEN) + sqrt(P_inflation)*rain_observed(k)*randn(1,NUMEN);
-
+            
+            % Calculate gain K and update (if no sm observation, skip - Yixin)
             if (sm_observed(k) < 0)
                 increment(k)=-999;
                 innovation1(k)=-999;
             else
+                % Calculate gain K
                 P(k) = var(API_filter_EnKF(k,:));
                 K(k) = P(k)/(P(k) + R_API(k));
 
@@ -324,7 +333,7 @@ while (converge_flag == 0)
                 innovation1(k)  = (sm_observed_trans(k) - background)/sqrt(P(k) + R_API(k));
                 innovation_cross_sum = innovation_cross_sum + innovation1(k)*innovation_last;
                 innovation_last = innovation1(k);
-                increment(k) = K(k)*(sm_observed_trans(k) - background);
+                increment(k) = K(k)*(sm_observed_trans(k) - background);  % mean increment (Yixin)
                 hold_state = API_filter_EnKF(k,:);
                 hold_perturbation = sqrt(R_API(k))*randn(1,NUMEN);
 
@@ -333,7 +342,8 @@ while (converge_flag == 0)
                 %analysis = background + increment(k);
                 %perturbations = deltas + K_EnSRF(k)*-deltas;
                 %API_filter_EnKF(k,:) = analysis + perturbations;%En_SRF
-
+                
+                % Update ensemble
                 API_filter_EnKF(k,:) = hold_state + K(k)*(sm_observed_trans(k) + hold_perturbation - hold_state);
                 API_COEFF_E(k,:) = API_COEFF_E(k,:) + K_API_COEFF(k)*(sm_observed_trans(k) + hold_perturbation - hold_state);
             end

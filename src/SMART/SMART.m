@@ -1,74 +1,92 @@
-function SMART(filter_flag,transform_flag,API_model_flag,lambda_flag,NUMEN,Q_fixed,P_inflation,upper_bound_API,logn_var,slope_parameter_API,location_flag,window_size)
+function SMART(varargin)
 
-%Argument definitions:
-%WARNING...some of these choice are not fully implemented
-%filter_flag 1)KF, 2)EnKF, 3)DI, 4)PART, 5)RTS, 6) EnKS, 7) PART - DIRECT RAINFALL
-%transform_flag 1) CDF, 2) seasonal 1&2, 3) bias 1&2, 4) seasonal CDF 
-%API_model_flag 0) static 1) simple sine model, 2) Ta climatology, 3) PET climatologoy, 4) Ta-variation, 5) PET variation
-%lambda_flag 0) optimized, 1) PERSIANN, 2) 0.60 
-%NUMEN - number of ensembles used in EnKF or EnKS analysis...not used if filter_flag  = 1 or 3
-%Q_fixed - if = 999 than whiten tune, otherwise it sets Q
-%P_inflation
-%logn_var...not sued if filter_flag = 1 or 3....setting to zero means all rainfall error is additive
-%slope parameter API - not used if API_model_flag = 0
-%location flag 0) CONUS, 1) AMMA, 2) Global 3) Australia 31 4) Australia 240 5) Australia, 0.25-degree continental
-%window size - time scale at which rainfall correction is applied 3 to 10 days is recommended
+%% Process input arguments
+p = inputParser;
+% 'addParamValue' in old releases; 'addParameter' in new releases
+% WARNING...some of these choice are not fully implemented
+p.addParamValue('input_dataset', []);  % the input .mat file path; containing: 3 prec datasets; 2 soil moisture datasets; lidx; dnum
+p.addParamValue('output_dataset', []);  % output .mat file path; containing corrected rainfall data
+p.addParamValue('start_date', []);  % start date of simulation and data
+p.addParamValue('end_date', []);  % end date of simulation and data
+p.addParamValue('filter_flag', []);  % filter_flag 1)KF, 2)EnKF, 3)DI, 4)PART, 5)RTS, 6) EnKS, 7) PART - DIRECT RAINFALL
+p.addParamValue('transform_flag', []);  % transform_flag 1) CDF, 2) seasonal 1&2, 3) bias 1&2, 4) seasonal CDF 
+p.addParamValue('API_model_flag', []);  % API_model_flag 0) static 1) simple sine model, 2) Ta climatology, 3) PET climatologoy, 4) Ta-variation, 5) PET variation
+p.addParamValue('lambda_flag', []);  % lambda_flag 0) optimized, 1) PERSIANN, 2) 0.60
+p.addParamValue('NUMEN', []);  % NUMEN - number of ensembles used in EnKF or EnKS analysis...not used if filter_flag  = 1 or 3
+p.addParamValue('Q_fixed', []);  % Q_fixed - if = 999 than whiten tune, otherwise it sets Q
+p.addParamValue('P_inflation', []);
+p.addParamValue('upper_bound_API', []);  % set to 99999 if do not want to set max soil moisture
+p.addParamValue('logn_var', []);  % logn_var - variance of multiplicative ensemble perturbations...not sued if filter_flag = 1 or 3....setting to zero means all rainfall error is additive
+p.addParamValue('slope_parameter_API', []);  % slope parameter API - not used if API_model_flag = 0
+p.addParamValue('location_flag', []);  % location flag 0) CONUS, 1) AMMA, 2) Global 3) Australia 31 4) Australia 240 5) Australia, 0.25-degree continental
+p.addParamValue('window_size', []);  % window size - time scale at which rainfall correction is applied 3 to 10 days is recommended
+p.addParamValue('API_mean', []);
+p.addParamValue('API_range', []);
+p.parse(varargin{:});
+% Assign input arguments to variables
+input_dataset = p.Results.input_dataset;
+output_dataset = p.Results.output_dataset;
+start_date = p.Results.start_date;
+end_date = p.Results.end_date;
+filter_flag = p.Results.filter_flag;
+transform_flag = p.Results.transform_flag;
+API_model_flag = p.Results.API_model_flag;
+lambda_flag = p.Results.lambda_flag;
+NUMEN = p.Results.NUMEN;
+Q_fixed = p.Results.Q_fixed;
+P_inflation = p.Results.P_inflation;
+upper_bound_API = p.Results.upper_bound_API;
+logn_var = p.Results.logn_var;
+slope_parameter_API = p.Results.slope_parameter_API;
+location_flag = p.Results.location_flag;
+window_size = p.Results.window_size;
+API_mean = p.Results.API_mean;
+API_range = p.Results.API_range;
 
 % Turn on/off diagnostic data dump
-dump_flag = 0;
+dump_flag = 1; % 0;
 
 %% Australia - 0.25 Degree Continental Scale
 if (location_flag == 5)
-    load SMART_Input_SMOS_RE02_20100101_20131231.mat;
-    dnum1 = dnum; % Save date number of input in a new dnum1
+    load ./SMART_Input_my_test.mat;
+    % Yixin dnum1 = dnum; % Save date number of input in a new dnum1
     numpixels = numel(lidx); % Number of land pixels of 0.25-deg Australia = 11125
     
-    % Time period
-    % Start
-    yyyy1 = 2010;
-    mm1 = 01;
-    dd1 = 01;
-    % End
-    yyyy2 = 2013;
-    mm2 = 12;
-    dd2 = 31;
+    numpixels = 2;  %%% Yixin test
     
-    dnum1 = datenum(yyyy1,mm1,dd1);
-    dnum2 = datenum(yyyy2,mm2,dd2);
+    dnum1 = datenum(start_date);
+    dnum2 = datenum(end_date);
     dnum = (dnum1:dnum2);
-    nd = numel(dnum);
+    nd = numel(dnum);  % number of days Yixin
     ist = nd;
     window_ist = floor(ist/window_size);
     
-    RAIN_1 = AUS25KM_3B42RT';%Satellite-based precipitation
-    RAIN_2 = AUS25KM_3B42'; %Calibration target
-    RAIN_3 = AUS25KM_AWAP'; %Used as benchmark
-    SMOBS_A = AUS25KM_SMOS_A'; %Soil Moisture - Ascending
-    SMOBS_D = AUS25KM_SMOS_D'; %Soil Moisture - Descending
+    RAIN_1 = prec_orig'; % Satellite-based precipitation
+    RAIN_2 = prec_for_tuning_lambda'; % Calibration target
+    RAIN_3 = prec_true'; % Used as benchmark
+    SMOBS_A = sm_ascend'; % Soil Moisture - Ascending
+    SMOBS_D = sm_descend'; % Soil Moisture - Descending
     
-    clear AUS25KM_3B42RT AUS25KM_3B42 AUS25KM_AWAP AUS25KM_SMOS_A AUS25KM_SMOS_B;
+    clear prec_orig prec_for_tuning_lambda prec_true sm_ascend sm_descend;
     
-    RAIN_1(find(isnan(RAIN_1)))=-999;
-    RAIN_2(find(isnan(RAIN_2)))=-999;
-    RAIN_3(find(isnan(RAIN_3)))=-999;   
-    SMOBS_A(find(isnan(SMOBS_A)))=-999;
-    SMOBS_D(find(isnan(SMOBS_D)))=-999;
-    
+    RAIN_1(find(isnan(RAIN_1))) = -999;
+    RAIN_2(find(isnan(RAIN_2))) = -999;
+    RAIN_3(find(isnan(RAIN_3))) = -999;   
+    SMOBS_A(find(isnan(SMOBS_A))) = -999;
+    SMOBS_D(find(isnan(SMOBS_D))) = -999;
 end
+
 %% 1. SMOS RE02 ASC-DSC composite
 
 % Initialize corrected rainfall
 RAIN_SMART_SMOS = zeros(window_ist,1);
 
-% Summary statistics
-outfn = ['SMART_AUS_SMOS_ASCDSC_' num2str(window_size) 'd.txt'];
-output=fopen(outfn,'w');
+for j=1:numpixels % space loop
 
-for j=1:numpixels %space loop
-
-    rain_observed = RAIN_1(:,j); %Satellite rainfall here
+    % Extract data for this pixel
+    rain_observed = RAIN_1(:,j); % Satellite rainfall here
     rain_indep = RAIN_2(:,j); % Independent rainfall here/calibration target
-    rain_true = RAIN_3(:,j); %RAIN_2(:,j); % AWAP rainfall
+    rain_true = RAIN_3(:,j); % RAIN_2(:,j); % AWAP rainfall
     sma_observed = SMOBS_A(:,j);
     smd_observed = SMOBS_D(:,j);
 
@@ -106,6 +124,9 @@ for j=1:numpixels %space loop
         ERS_observed(1:ist) = -1;
         
         % Naive merging ascending and descending SM below to a daily product
+        % If one of ascending and descending data is available at a certain
+        % day, take it; if both are available on the same day, take the
+        % mean (Yixin)
         for k=1:ist
             if (sma_observed(k) >= 0 && smd_observed(k) >= 0); 
                 sm_observed(k) =  0.5*(smd_observed(k) + sma_observed(k)); 
@@ -119,7 +140,7 @@ for j=1:numpixels %space loop
         % Run the filter to calculate increments....time loop is in this
         % function
         [increment_sum,increment_sum_hold,sum_rain,sum_rain_sp,sum_rain_sp_hold,sum_rain_sp2] = ...
-            analysis(window_size,ist,filter_flag,transform_flag,API_model_flag,NUMEN,Q_fixed,P_inflation,...
+            analysis(API_mean, API_range, window_size,ist,filter_flag,transform_flag,API_model_flag,NUMEN,Q_fixed,P_inflation,...
             logn_var,upper_bound_API,rain_observed,rain_observed_hold,rain_indep,rain_true,sm_observed,ERS_observed,...
             ta_observed,ta_observed_climatology,PET_observed,PET_observed_climatology,EVI_observed,slope_parameter_API,location_flag);
         
@@ -131,148 +152,11 @@ for j=1:numpixels %space loop
         % This is the corrected rainfall...below we evaluate it via
         % comparisons to an independent rainfall product
         RAIN_SMART_SMOS(:,j) = sum_rain_corrected(:);
-        
-        mask_sum_rain = sum_rain >= 0; %need benchmark to be there
-        mask_sum_rain_sp = sum_rain_sp_hold >= 0; %need sat precip to be there (at least one)...
-        mask_sm = increment_sum_hold ~= -999; %need sat sm to be there (at least one)...      
-        mask_time_total = mask_sm.*mask_sum_rain_sp; %create mask for both sat sm and sat precip present
-        mask_time_total = mask_time_total.*mask_sum_rain; %create final total mask for also masking for the benchmark to be present            
-        sum_rain_subset = sum_rain(mask_time_total > 0 ); %apply mask
-        sum_rain_sp_subset = sum_rain_sp(mask_time_total > 0); %apply mask
-        sum_rain_corrected_subset = sum_rain_corrected(mask_time_total > 0); %apply mask
-        
-        hold1=mean(sum_rain_corrected_subset);
-        hold2=mean(sum_rain_sp_subset);
-        sum_rain_corrected_subset=sum_rain_corrected_subset.*(hold2/hold1); %STANDARD INCLUDES THIS...need this b/c of bias that develops..so we force no mean change from uncorrected....this should probably be taken into account when calibrating lambda....
-
-        %TO DUMP ALL QUALIFYING N_DAY PERIODS FOR DIAGNOSTIC ANALYSIS...see "dump flag" set above
-        if (dump_flag  == 1)
-            for k=1:numel(sum_rain_subset)
-                fprintf(output,'%f %f %f \n',sum_rain_subset(k),sum_rain_sp_subset(k),sum_rain_corrected_subset(k));
-            end
-        end
-        
-        A=corrcoef(sum_rain_subset,sum_rain_sp_subset);
-        if numel(A)==1
-            A=[A,0;0,A];
-        end
-        B=corrcoef(sum_rain_subset,sum_rain_corrected_subset);
-        if numel(B)==1
-            B=[B,0;0,B]; 
-        end
-        C=sqrt(mean((sum_rain_subset-sum_rain_sp_subset).^2));
-        D=sqrt(mean((sum_rain_subset-sum_rain_corrected_subset).^2));
-        E=mean(sum_rain_subset);
-        F=mean(sum_rain_sp_subset);
-        G=mean(sum_rain_corrected_subset);
-        H=var(sum_rain_subset);
-        I=var(sum_rain_sp_subset);
-        J=var(sum_rain_corrected_subset);
-
-        % Define rain event thresholds....
-	    %sum_rain_nonzero_sort = sort(sum_rain_sp(sum_rain_sp > 2));  % USED THIS IN OLD RUNS
-        sum_rain_nonzero_sort = sort(sum_rain_subset(sum_rain_subset > 2)); %THIS IS STANDARD 
-        number_total = numel(sum_rain_nonzero_sort);
-
-        FAR_corr(1:12)=0;
-        POD_corr(1:12)=0;
-        CSI_corr(1:12)=0;
-        HR_corr(1:12)=0;
-        E_CSI_corr(1:12)=0;
-        FAR(1:12)=0;
-        POD(1:12)=0;
-        CSI(1:12)=0;
-        HR(1:12)=0;
-        E_CSI(1:12)=0;
-        event_threshold(1:12)=0;
-        
-        %HARDWIRE TO SHUT OFF TREND OUTPUT
-        trend_true = 0;
-        trend_sp = 0;
-        trend_corrected = 0;
-
-        percentile(1)=0.00;
-        percentile(2)=0.10;
-        percentile(3)=0.20;
-        percentile(4)=0.30;
-        percentile(5)=0.40;
-        percentile(6)=0.50;
-        percentile(7)=0.60;
-        percentile(8)=0.70;
-        percentile(9)=0.80;
-        percentile(10)=0.90;
-        percentile(11)=0.95;
-        percentile(12)=0.99;
-
-        % THIS IS THE ACTUAL METRIC CALCULATION
-        if (numel(sum_rain_nonzero_sort) > 0)
-            for k=1:12
-                event_threshold(k) =  sum_rain_nonzero_sort(floor(number_total*percentile(k))+1);
-                floor(number_total*percentile(k))+1;
-                number_hit_corr =   numel(find(sum_rain_corrected_subset((sum_rain_subset >= event_threshold(k))) >= event_threshold(k)));
-                number_false_corr = numel(find(sum_rain_corrected_subset((sum_rain_subset < event_threshold(k)))  >= event_threshold(k)));
-                number_miss_corr =  numel(find(sum_rain_corrected_subset((sum_rain_subset >= event_threshold(k)))  < event_threshold(k)));
-                number_hit_no_corr = numel(find(sum_rain_corrected_subset((sum_rain_subset < event_threshold(k)))  < event_threshold(k)));
-
-                FAR_corr(k) =       number_false_corr/(number_hit_corr + number_false_corr);
-                if (isnan(FAR_corr(k))); FAR_corr(k) = 0; end; %STANDARD
-                POD_corr(k) =       number_hit_corr/(number_miss_corr + number_hit_corr);
-                CSI_corr(k) =       number_hit_corr/(number_miss_corr + number_false_corr + number_hit_corr);
-                HR_corr(k) =        (number_hit_corr + number_hit_no_corr)/(numel(sum_rain_subset));
-                A_R_corr =          (number_hit_corr + number_false_corr)*(number_hit_corr+number_miss_corr) / numel(sum_rain_subset);
-                E_CSI_corr(k) =     (number_hit_corr - A_R_corr)/(number_miss_corr + number_false_corr + number_hit_corr - A_R_corr);
-
-                number_hit =        numel(find(sum_rain_sp_subset((sum_rain_subset >= event_threshold(k))) >= event_threshold(k)));
-                number_false =      numel(find(sum_rain_sp_subset((sum_rain_subset < event_threshold(k))) >= event_threshold(k)));
-                number_miss =       numel(find(sum_rain_sp_subset((sum_rain_subset >= event_threshold(k))) < event_threshold(k)));
-                number_hit_no =     numel(find(sum_rain_sp_subset((sum_rain_subset < event_threshold(k))) < event_threshold(k)));
-
-                FAR(k) =            number_false/(number_hit + number_false);
-                if (isnan(FAR(k))); FAR(k) = 0; end; %STANDARD
-                POD(k) =            number_hit/(number_miss + number_hit);
-                CSI(k) =            number_hit/(number_miss + number_false + number_hit);
-                HR(k) =             (number_hit + number_hit_no)/(numel(sum_rain_subset));
-                A_R =               (number_hit + number_false)*(number_hit+number_miss) / numel(sum_rain_subset);
-                E_CSI(k) =          (number_hit - A_R)/(number_miss + number_false + number_hit - A_R);
-            end
-        else
-            for k=1:12
-                FAR(k) = 0;
-                POD(k) = 0;
-                CSI(k) = 0;
-                FAR_corr(k) = 0;
-                POD_corr(k) = 0;
-                CSI_corr(k) = 0;
-            end
-        end
-
-        CORR_API_SM=0;
-        % output to file
-        if (dump_flag == 0)
-            %fprintf(output,'%f %f %f %f ',A(1,2)^2,B(1,2)^2,C,D);
-            fprintf(output,'%f %f %f %f ',A(1,2)^2,B(1,2)^2,C,optimized_fraction);
-            for k=1:12
-                fprintf(output, '%f %f %f %f %f %f ',FAR(k),FAR_corr(k),POD(k),POD_corr(k),CSI(k),CSI_corr(k));
-            end
-            fprintf(output,'%f %f %f %f %f %f %f %f %f %f %f %f \n',E,F,G,H,I,J,optimized_fraction,CORR_API_SM,mean(EVI_observed),trend_true,trend_sp,trend_corrected);
-            
-            % output to screen
-            fprintf(1,'%f %f %f %f \n',A(1,2),B(1,2),C,D);
-        end
-   else
-       %output to file
-       if (dump_flag == 0)
-           fprintf(output,'-1 -1 -1 -1 ');
-           for k=1:12
-               fprintf(output, '-1 -1 -1 -1 -1 -1 ');
-           end
-           fprintf(output,'-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 \n');
-           
-           fprintf(1,'-1 -1 -1 -1 -1 \n ');
-       end
+    else
+        RAIN_SMART_SMOS(:,j) = -1;
     end
-   %disp(['############ AMSR-E ############# j = ' num2str(j)]);  
 end
 
-fclose(output);
+save(output_dataset, 'RAIN_SMART_SMOS');
+
 
