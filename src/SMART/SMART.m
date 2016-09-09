@@ -4,7 +4,7 @@ function SMART(varargin)
 p = inputParser;
 % 'addParamValue' in old releases; 'addParameter' in new releases
 % WARNING...some of these choice are not fully implemented
-p.addParamValue('input_dataset', []);  % the input .mat file path; containing: 3 prec datasets; 2 soil moisture datasets; lidx; dnum
+p.addParamValue('input_dataset', []);  % the input .mat file path; containing: 3 prec datasets; 2 soil moisture datasets;
 p.addParamValue('output_dataset', []);  % output .mat file path; containing corrected rainfall data
 p.addParamValue('start_date', []);  % start date of simulation and data
 p.addParamValue('end_date', []);  % end date of simulation and data
@@ -50,9 +50,8 @@ dump_flag = 1; % 0;
 if (location_flag == 5)
     load ./SMART_Input_my_test.mat;
     % Yixin dnum1 = dnum; % Save date number of input in a new dnum1
-    numpixels = numel(lidx); % Number of land pixels of 0.25-deg Australia = 11125
-    
-    numpixels = 2;  %%% Yixin test
+    % Yixin: get number of pixels from data matrix instead
+    % numpixels = numel(lidx); % Number of land pixels of 0.25-deg Australia = 11125
     
     dnum1 = datenum(start_date);
     dnum2 = datenum(end_date);
@@ -61,13 +60,17 @@ if (location_flag == 5)
     ist = nd;
     window_ist = floor(ist/window_size);
     
-    RAIN_1 = prec_orig'; % Satellite-based precipitation
+    RAIN_1 = prec_orig'; % Satellite-based precipitation [ntime * npixel]
     RAIN_2 = prec_for_tuning_lambda'; % Calibration target
     RAIN_3 = prec_true'; % Used as benchmark
     SMOBS_A = sm_ascend'; % Soil Moisture - Ascending
     SMOBS_D = sm_descend'; % Soil Moisture - Descending
-    
+   
     clear prec_orig prec_for_tuning_lambda prec_true sm_ascend sm_descend;
+
+    % Get number of pixels
+    size_data = size(RAIN_1);
+    numpixels = size_data(2);
     
     RAIN_1(find(isnan(RAIN_1))) = -999;
     RAIN_2(find(isnan(RAIN_2))) = -999;
