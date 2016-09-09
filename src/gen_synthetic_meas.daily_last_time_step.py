@@ -148,7 +148,8 @@ list_history_paths.append(os.path.join(truth_subdirs['history'],
 
 # (2) Loop over until each measurement point and run VIC
 for t in range(len(meas_times)):
-    # --- Determine last, current and next time point --- #
+    # --- Determine last, current and next time point (all these are time
+    # points at the beginning of a time step)--- #
     last_time = meas_times[t]
     current_time = last_time +\
                    pd.DateOffset(hours=24/cfg['VIC']['model_steps_per_day'])
@@ -162,16 +163,17 @@ for t in range(len(meas_times)):
     print('\tRun VIC ', current_time, 'to', next_time, '(perturbed forcings and states)')
 
     # --- Perturb states --- #
+    state_time = last_time + pd.DateOffset(days=1/cfg['VIC']['model_steps_per_day'])
     orig_state_nc = os.path.join(
                             truth_subdirs['states'],
                             'propagated.state.{}_{:05d}.nc'.format(
-                                    last_time.strftime('%Y%m%d'),
-                                    last_time.hour*3600+last_time.second))
+                                    state_time.strftime('%Y%m%d'),
+                                    state_time.hour*3600+state_time.second))
     perturbed_state_nc = os.path.join(
                             truth_subdirs['states'],
                             'perturbed.state.{}_{:05d}.nc'.format(
-                                    last_time.strftime('%Y%m%d'),
-                                    last_time.hour*3600+last_time.second))
+                                    state_time.strftime('%Y%m%d'),
+                                    state_time.hour*3600+state_time.second))
     perturb_soil_moisture_states(
             states_to_perturb_nc=orig_state_nc,
             global_path=global_template,
@@ -229,6 +231,7 @@ ds_hist = xr.open_dataset(hist_concat_nc)
 orig_times = pd.to_datetime(ds_hist['time'].values)
 # Find indices of measurement time points in orig_times
 list_time_index = []
+
 for i, time in enumerate(meas_times):
     tmp = (abs(orig_times - time).days == 0) & (abs(orig_times - time).seconds <2)
     list_time_index.append(np.where(tmp==True)[0][0])

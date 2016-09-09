@@ -5,6 +5,7 @@ import os
 import string
 from collections import OrderedDict
 import xarray as xr
+import datetime as dt
 import multiprocessing as mp
 
 from tonic.models.vic.vic import VIC, default_vic_valgrind_error_code
@@ -198,7 +199,7 @@ class States(object):
         # Load soil parameter file (as defined in global file)
         with open(global_path, 'r') as global_file:
             global_param = global_file.read()
-        soil_nc = find_global_param_value(global_param, 'SOIL')
+        soil_nc = find_global_param_value(global_param, 'PARAMETERS')
         ds_soil = xr.open_dataset(soil_nc, decode_cf=False)
         ds_soil.load()
         ds_soil.close()
@@ -693,6 +694,7 @@ def generate_VIC_global_file(global_template_path, model_steps_per_day,
     ----------
     string
     OrderedDict
+    pandas
     '''
     
     # --- Create template string --- #
@@ -702,6 +704,8 @@ def generate_VIC_global_file(global_template_path, model_steps_per_day,
     s = string.Template(global_param)
     
     # --- Fill in global parameter options --- #
+    state_time = end_time + pd.DateOffset(days=1/model_steps_per_day)
+
     global_param = s.safe_substitute(model_steps_per_day=model_steps_per_day,
                                      startyear=start_time.year,
                                      startmonth=start_time.month,
@@ -712,10 +716,10 @@ def generate_VIC_global_file(global_template_path, model_steps_per_day,
                                      endday=end_time.day,
                                      init_state=init_state,
                                      statename=vic_state_basepath,
-                                     stateyear=end_time.year, # save state at end_time
-                                     statemonth=end_time.month,
-                                     stateday=end_time.day,
-                                     statesec=end_time.hour*3600+end_time.second,
+                                     stateyear=state_time.year, # save state at the end of end_time time step (end_time is the beginning of that time step)
+                                     statemonth=state_time.month,
+                                     stateday=state_time.day,
+                                     statesec=state_time.hour*3600+state_time.second,
                                      result_dir=vic_history_file_dir)
     
     # --- Replace global parameters in replace --- #
@@ -1589,7 +1593,7 @@ def calculate_max_soil_moist_domain(global_path):
      # Load soil parameter file (as defined in global file)
     with open(global_path, 'r') as global_file:
         global_param = global_file.read()
-    soil_nc = find_global_param_value(global_param, 'SOIL')
+    soil_nc = find_global_param_value(global_param, 'PARAMETERS')
     ds_soil = xr.open_dataset(soil_nc, decode_cf=False)
     
     # Calculate maximum soil moisture for each layer
