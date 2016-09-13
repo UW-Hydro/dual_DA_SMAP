@@ -384,7 +384,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
              vic_model_steps_per_day, output_vic_global_root_dir,
              output_vic_state_root_dir, output_vic_history_root_dir,
              output_vic_forcing_root_dir, output_vic_log_root_dir,
-             dict_varnames, prec_std, state_perturb_sigma_percent):
+             dict_varnames, prec_std, state_perturb_sigma_percent, nproc):
     ''' This function runs ensemble kalman filter (EnKF) on VIC (image driver)
 
     Parameters
@@ -435,6 +435,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
         Percentage of max value of each state to perturb (e.g., if
         state_perturb_sigma_percent = 5, then Gaussian noise with standard deviation
         = 5% of max soil moisture will be added as perturbation)
+    nproc: <int>
+        Number of processors to use
 
     Returns
     ----------
@@ -478,7 +480,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
                                   out_forcing_dir=output_vic_forcing_root_dir)
     
     # --- Step 1. Initialize ---#
-    init_state_time = start_time - pd.DateOffset(hours=24/vic_model_steps_per_day)
+    init_state_time = start_time
     print('\tGenerating ensemble initial states at ', init_state_time)
     # Load initial state file
     ds_states = xr.open_dataset('{}.{}_{:05d}.nc'.format(
@@ -543,7 +545,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
                        out_history_dir=out_history_dir,
                        out_global_dir=out_global_dir,
                        out_log_dir=out_log_dir,
-                       forcing_perturbed_dir=output_vic_forcing_root_dir)
+                       forcing_perturbed_dir=output_vic_forcing_root_dir,
+                       nproc=nproc)
     # Put output history file paths into dictionary
     for i in range(N):
         dict_ens_list_history_files['ens{}'.format(i+1)].append(os.path.join(
@@ -572,23 +575,23 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
         da_x, da_y_est = get_soil_moisture_and_estimated_meas_all_ensemble(
                                 N,
                                 state_dir=state_dir_before_update,
-                                state_time=last_time, 
+                                state_time=current_time, 
                                 da_tile_frac=da_tile_frac)
         da_K = calculate_gain_K_whole_field(da_x, da_y_est, R)
 
         # (2) Update states for each ensemble member
         # Set up dir for updated states
         updated_states_dir_name = 'updated.{}_{:05d}'.format(
-                                        last_time.strftime('%Y%m%d'),
-                                        last_time.hour*3600+last_time.second)
+                                        current_time.strftime('%Y%m%d'),
+                                        current_time.hour*3600+current_time.second)
         out_updated_state_dir = setup_output_dirs(output_vic_state_root_dir,
                                                   mkdirs=[updated_states_dir_name])[updated_states_dir_name]
         # Update states and save to nc files
         da_x_updated = update_states_ensemble(da_x, da_y_est, da_K,
-                                               da_meas.loc[time, :, :, :], R,
-                                               state_dir_before_update=state_dir_before_update,
-                                               current_time=last_time,
-                                               out_vic_state_dir=out_updated_state_dir)
+                                              da_meas.loc[time, :, :, :], R,
+                                              state_dir_before_update=state_dir_before_update,
+                                              current_time=current_time,
+                                              out_vic_state_dir=out_updated_state_dir)
         
         # (3) Propagate each ensemble member to the next measurement time point
         # If current_time > next_time, do not propagate (we already reach the end of the simulation)
@@ -597,8 +600,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
         # --- Perturb states --- #
         # Set up perturbed state subdirectories
         pert_state_dir_name = 'perturbed.{}_{:05d}'.format(
-                                        last_time.strftime('%Y%m%d'),
-                                        last_time.hour*3600+last_time.second)
+                                        current_time.strftime('%Y%m%d'),
+                                        current_time.hour*3600+current_time.second)
         pert_state_dir = setup_output_dirs(
                             output_vic_state_root_dir,
                             mkdirs=[pert_state_dir_name])[pert_state_dir_name]
@@ -637,7 +640,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
                        out_history_dir=out_history_dir,
                        out_global_dir=out_global_dir,
                        out_log_dir=out_log_dir,
-                       forcing_perturbed_dir=output_vic_forcing_root_dir)  # perturbed forcing
+                       forcing_perturbed_dir=output_vic_forcing_root_dir,  # perturbed forcing
+                       nproc=nproc)
 
         # Put output history file paths into dictionary
         for i in range(N):
@@ -668,7 +672,7 @@ def generate_VIC_global_file(global_template_path, model_steps_per_day,
     start_time: <pandas.tslib.Timestamp>
         Model run start time
     end_time: <pandas.tslib.Timestamp>
-        Model run end time
+        Model run end time (the beginning of the last time step)
     init_state: <str>
         A full line of initial state option in the global file.
         E.g., "# INIT_STATE"  for no initial state;
@@ -813,7 +817,7 @@ def run_vic_for_multiprocess(vic_exe, global_file, log_dir):
 def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_file,
                        vic_model_steps_per_day, init_state_dir, out_state_dir,
                        out_history_dir, out_global_dir, out_log_dir,
-                       forcing_perturbed_dir):
+                       forcing_perturbed_dir, nproc):
     ''' This function propagates (via VIC) an ensemble of states to a certain time point.
     
     Parameters
@@ -848,6 +852,8 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
     forcing_perturbed_dir: <str>
         Perturbed forcing directory. File names are: "forc.ens<i>.<YYYY>.nc",
         where <i> is 1, 2, ..., N, and <YYYY> is forcing year
+    nproc: <int>
+        Number of processors to use
         
     Require
     ----------
@@ -917,22 +923,25 @@ def determine_tile_frac(global_path):
             global_param = global_file.read()
             
     # Extract Cv from vegparam file (as defined in the global file)
-    vegparam_nc = find_global_param_value(global_param, 'VEGPARAM')   
-    da_Cv = xr.open_dataset(vegparam_nc, decode_cf=False)['Cv']  # dim: [veg_class, lat, lon]
+    param_nc = find_global_param_value(global_param, 'PARAMETERS')   
+    ds_param = xr.open_dataset(param_nc, decode_cf=False)
+    da_Cv = ds_param['Cv']  # dim: [veg_class, lat, lon]
     lat = da_Cv['lat']
     lon = da_Cv['lon']
     
-    # Extract snowband info from the global file
+    # Extract snowband info from the global and param files
+    SNOW_BAND = find_global_param_value(global_param, 'SNOW_BAND')
+    if SNOW_BAND.upper() == 'TRUE':
+        n_snowband = len(ds_param['snow_band'])
+    else:
+        n_snowband = 1
     # Dimension of da_AreaFract: [snowband, lat, lon]
-    n_snowband = int(find_global_param_value(global_param, 'SNOW_BAND'))
     if n_snowband == 1:  # if only one snowband
         data = np.ones([1, len(lat), len(lon)])
         da_AreaFract = xr.DataArray(data, coords=[[0], lat, lon],
                                     dims=['snow_band', 'lat', 'lon'])
     else:  # if more than one snowband
-        tmp, snowband_nc = find_global_param_value(global_param, 'SNOW_BAND',
-                                                          second_param=True)
-        da_AreaFract = xr.open_dataset(snowband_nc, decode_cf=False)['AreaFract']
+        da_AreaFract = ds_param['AreaFract']
 
     # Initialize the final DataArray
     veg_class = da_Cv['veg_class']
@@ -987,8 +996,9 @@ def get_soil_moisture_and_estimated_meas_all_ensemble(N, state_dir, state_time,
     '''
     
     # --- Extract dimensions from the first ensemble member --- #
-    state_name = 'state.ens1.{}_{}.nc'.format(state_time.strftime('%Y%m%d'),
-                                              state_time.hour*3600+state_time.second)
+    state_name = 'state.ens1.{}_{:05d}.nc'.format(
+                                state_time.strftime('%Y%m%d'),
+                                state_time.hour*3600+state_time.second)
     ds = xr.open_dataset(os.path.join(state_dir, state_name))
     # nlayer
     nlayer = ds['nlayer']
@@ -1020,9 +1030,10 @@ def get_soil_moisture_and_estimated_meas_all_ensemble(N, state_dir, state_time,
     # --- Loop over each ensemble member --- #
     for i in range(N):
         # --- Load state file --- #
-        state_name = 'state.ens{}.{}_{}.nc'.format(i+1,
-                                                   state_time.strftime('%Y%m%d'),
-                                                   state_time.hour*3600+state_time.second)
+        state_name = 'state.ens{}.{}_{:05d}.nc'.format(
+                                    i+1,
+                                    state_time.strftime('%Y%m%d'),
+                                    state_time.hour*3600+state_time.second)
         ds = xr.open_dataset(os.path.join(state_dir, state_name))
         class_states = States(ds)
         

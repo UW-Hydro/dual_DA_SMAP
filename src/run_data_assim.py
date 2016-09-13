@@ -1,4 +1,11 @@
 
+''' This script performs EnKF assimilation of soil moisture into VIC states,
+    based on original precipitation forcing.
+
+    Usage:
+        $ python run_data_assim.py config_file nproc
+'''
+
 import sys
 import numpy as np
 import xarray as xr
@@ -96,8 +103,7 @@ print('Running open-loop: ', vic_run_start_time, 'to', vic_run_end_time,
 
 # --- Run VIC (unperturbed forcings and states) --- #
 # Identify initial state time (must be one time step before start_time)
-init_state_time = vic_run_start_time -\
-                  pd.DateOffset(hours=24/cfg['VIC']['model_steps_per_day'])
+init_state_time = vic_run_start_time
 # Prepare log sub-directory
 out_log_dir = setup_output_dirs(dirs['logs'], mkdirs=['openloop'])['openloop']
 propagate(start_time=vic_run_start_time, end_time=vic_run_end_time,
@@ -180,7 +186,8 @@ dict_ens_list_history_files = EnKF_VIC(
          output_vic_forcing_root_dir=dirs['forcings'],
          output_vic_log_root_dir=dirs['logs'],
          dict_varnames=dict_varnames, prec_std=cfg['FORCINGS']['prec_std'],
-         state_perturb_sigma_percent=cfg['EnKF']['state_perturb_sigma_percent'])
+         state_perturb_sigma_percent=cfg['EnKF']['state_perturb_sigma_percent'],
+         nproc=sys.argv[2])
 
 # --- Concatenate all history files for each ensemble --- #
 out_hist_concat_dir = setup_output_dirs(dirs['history'],
@@ -201,154 +208,3 @@ for i in range(cfg['EnKF']['N']):
     ds_concat.to_netcdf(hist_concat_path, format='NETCDF4_CLASSIC')
     dict_ens_hist_concat['ens{}'.format(i+1)] = hist_concat_path
 
-
-# ============================================================ #
-# Calculate the ensemble-mean of the updated states
-# ============================================================ #
-print('Calculating ensemble-mean of the updates states...')
-
-N = cfg['EnKF']['N']  # number of ensemble members
-
-# --- Calculate ensemble-mean for the initial time point --- #
-init_time = pd.to_datetime(cfg['EnKF']['start_time']) -\
-            pd.DateOffset(hours=24/cfg['VIC']['model_steps_per_day'])
-# Create a list of state file nc paths
-state_dir = os.path.join(dirs['states'], 'init.{}_{:05d}'.format(
-                                init_time.strftime('%Y%m%d'),
-                                init_time.hour*3600+init_time.second))
-list_state_nc = []
-for i in range(N):
-    list_state_nc.append(os.path.join(state_dir, 'state.ens{}.nc'.format(i+1)))
-# Calculate ensemble-mean states
-init_state_mean_nc = calculate_ensemble_mean_states(list_state_nc,
-                                               out_state_nc=os.path.join(state_dir, 'state.ens_mean.nc'))
-
-# Loop over each measurement time point of updates states
-dict_assigned_state_nc = OrderedDict()  #  An ordered dict of state times and nc files after the initial time
-for t, time in enumerate(pd.to_datetime(da_meas['time'].values)):
-    state_time = pd.to_datetime(time)
-    # Create a list of state file nc paths
-    state_dir = os.path.join(dirs['states'], 'updated.{}_{:05d}'.format(
-                                state_time.strftime('%Y%m%d'),
-                                state_time.hour*3600+state_time.second))
-    list_state_nc = []
-    for i in range(N):
-        list_state_nc.append(os.path.join(state_dir, 'state.ens{}.nc'.format(i+1)))
-    # Calculate ensemble-mean states
-    dict_assigned_state_nc[time] = calculate_ensemble_mean_states(
-                                        list_state_nc,
-                                        out_state_nc=os.path.join(state_dir, 'state.ens_mean.nc'))
-
-
-# ============================================================ #
-# Post-process fluxes - run VIC with ensemble-mean updated
-# states from EnKF start_time to EnKF end_time
-# ============================================================ #
-print('Post-process - run VIC with ensemble-mean updated states...')
-# Set up output sub-directories
-out_global_dir = setup_output_dirs(dirs['global'], mkdirs=['postprocess_ens_mean_updated_states'])\
-                                                    ['postprocess_ens_mean_updated_states']
-out_state_dir = setup_output_dirs(dirs['states'], mkdirs=['postprocess_ens_mean_updated_states_tmp'])\
-                                                    ['postprocess_ens_mean_updated_states_tmp']
-out_history_dir = setup_output_dirs(dirs['history'], mkdirs=['postprocess_ens_mean_updated_states'])\
-                                                    ['postprocess_ens_mean_updated_states']
-out_log_dir = setup_output_dirs(dirs['logs'], mkdirs=['postprocess_ens_mean_updated_states'])\
-                                                    ['postprocess_ens_mean_updated_states']
-
-# Run VIC with assinged states
-list_history_files = run_vic_assigned_states(
-                        start_time=start_time, end_time=end_time,
-                        vic_exe=vic_exe, init_state_nc=init_state_mean_nc,
-                        dict_assigned_state_nc=dict_assigned_state_nc,
-                        global_template=os.path.join(cfg['CONTROL']['root_dir'],
-                                                     cfg['VIC']['vic_global_template']),
-                        vic_forcing_basepath=os.path.join(
-                                    cfg['CONTROL']['root_dir'],
-                                    cfg['FORCINGS']['orig_forcing_nc_basepath']),  # Original (unperturbed) forcing
-                        vic_model_steps_per_day=cfg['VIC']['model_steps_per_day'],
-                        output_global_root_dir=out_global_dir,
-                        output_state_root_dir=out_state_dir,
-                        output_vic_history_root_dir=out_history_dir,
-                        output_vic_log_root_dir=out_log_dir)
-
-# Concatenate all history files
-ds_concat = concat_vic_history_files(list_history_files)
-out_history_postprocess_dir = out_history_dir
-hist_ens_mean_post = os.path.join(
-                        out_history_postprocess_dir,
-                        'history.concat.{}_{:05d}-{}_{:05d}.nc'.format(
-                                start_time.strftime('%Y%m%d'),
-                                start_time.hour*3600+start_time.second,
-                                end_time.strftime('%Y%m%d'),
-                                end_time.hour*3600+end_time.second))
-ds_concat.to_netcdf(hist_ens_mean_post, format='NETCDF4_CLASSIC')
-
-
-# ============================================================ #
-# Plot
-# ============================================================ #
-print('Plotting...')
-
-# Load history files of truth, open-loop, EnKF ensemble mean and all ensemble members
-ds_truth = xr.open_dataset(os.path.join(cfg['CONTROL']['root_dir'],
-                                        cfg['EnKF']['truth_hist_nc']))
-ds_EnKF_ens_mean = xr.open_dataset(hist_ens_mean_post)
-ds_openloop = xr.open_dataset(hist_openloop_nc)
-dict_ens_ds = {}
-for i in range(cfg['EnKF']['N']):
-    ens_name = 'ens{}'.format(i+1)
-    dict_ens_ds[ens_name] =  xr.open_dataset(dict_ens_hist_concat[ens_name])
-
-# Extract top layer soil moisture from all datasets
-da_sm1_truth = ds_truth['OUT_SOIL_MOIST'].sel(nlayer=0)
-da_sm1_EnKF_ens_mean = ds_EnKF_ens_mean['OUT_SOIL_MOIST'].sel(nlayer=0)
-da_sm1_openloop = ds_openloop['OUT_SOIL_MOIST'].sel(nlayer=0)
-dict_ens_da_sm1 = {}
-for i in range(cfg['EnKF']['N']):
-    ens_name = 'ens{}'.format(i+1)
-    dict_ens_da_sm1[ens_name] = dict_ens_ds[ens_name]['OUT_SOIL_MOIST'].sel(nlayer=0)
-
-# Extract lat's and lon's
-lat = da_sm1_openloop['lat'].values
-lon = da_sm1_openloop['lon'].values
-
-# Plot results - time series
-for lt in lat:
-    for lg in lon:
-        if np.isnan(da_sm1_openloop.loc[da_sm1_openloop['time'][0],
-                                        lt, lg].values) == True:  # if inactive cell, skip
-            continue
-        
-        # Create fiture
-        fig = plt.figure(figsize=(12, 6))
-        # plot truth
-        da_sm1_truth.loc[:, lt, lg].to_series().plot(color='k', style='-',
-                                                     label='Truth', legend=True)
-        # plot open-loop
-        da_sm1_openloop.loc[:, lt, lg].to_series().plot(color='r', style='--',
-                                                        label='Open-loop', legend=True)
-        # plot EnKF post-processed ens. mean
-        da_sm1_EnKF_ens_mean.loc[:, lt, lg].to_series().plot(
-                                                color='b', style='-',
-                                                label='EnKF ens. mean', legend=True)
-        # plot each ensemble member
-        for i in range(cfg['EnKF']['N']):
-            ens_name = 'ens{}'.format(i+1)
-            if i == 0:
-                legend=True
-            else:
-                legend=False
-            dict_ens_da_sm1[ens_name].loc[:, lt, lg].to_series().plot(
-                        color='grey', style='-', alpha=0.3, label='Ensemble members',
-                        legend=legend)
-        # plot measurement
-        da_meas.loc[:, lt, lg, 0].to_series().plot(
-                        style='ro', label='Measurement',
-                        legend=True)
-        # Make plot looks better
-        plt.xlabel('Time')
-        plt.ylabel('Soil moiture (mm)')
-        plt.title('Top-layer soil moisture, {}, {}, N={}'.format(lt, lg, cfg['EnKF']['N']))
-        # Save figure
-        fig.savefig(os.path.join(dirs['plots'], 'sm1_{}_{}.png'.format(lt, lg)),
-                    format='png')
