@@ -28,27 +28,27 @@ input_dataset = p.Results.input_dataset;
 output_dataset = p.Results.output_dataset;
 start_date = p.Results.start_date;
 end_date = p.Results.end_date;
-filter_flag = p.Results.filter_flag;
-transform_flag = p.Results.transform_flag;
-API_model_flag = p.Results.API_model_flag;
-lambda_flag = p.Results.lambda_flag;
-NUMEN = p.Results.NUMEN;
-Q_fixed = p.Results.Q_fixed;
-P_inflation = p.Results.P_inflation;
-upper_bound_API = p.Results.upper_bound_API;
-logn_var = p.Results.logn_var;
-slope_parameter_API = p.Results.slope_parameter_API;
-location_flag = p.Results.location_flag;
-window_size = p.Results.window_size;
-API_mean = p.Results.API_mean;
-API_range = p.Results.API_range;
+filter_flag = str2num(p.Results.filter_flag);
+transform_flag = str2num(p.Results.transform_flag);
+API_model_flag = str2num(p.Results.API_model_flag);
+lambda_flag = str2num(p.Results.lambda_flag);
+NUMEN = str2num(p.Results.NUMEN);
+Q_fixed = str2num(p.Results.Q_fixed);
+P_inflation = str2num(p.Results.P_inflation);
+upper_bound_API = str2num(p.Results.upper_bound_API);
+logn_var = str2num(p.Results.logn_var);
+slope_parameter_API = str2num(p.Results.slope_parameter_API);
+location_flag = str2num(p.Results.location_flag);
+window_size = str2num(p.Results.window_size);
+API_mean = str2num(p.Results.API_mean);
+API_range = str2num(p.Results.API_range);
 
 % Turn on/off diagnostic data dump
 dump_flag = 1; % 0;
 
 %% Australia - 0.25 Degree Continental Scale
 if (location_flag == 5)
-    load ./SMART_Input_my_test.mat;
+    load(input_dataset);
     % Yixin dnum1 = dnum; % Save date number of input in a new dnum1
     % Yixin: get number of pixels from data matrix instead
     % numpixels = numel(lidx); % Number of land pixels of 0.25-deg Australia = 11125
