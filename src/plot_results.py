@@ -112,6 +112,7 @@ da_sm1_openloop = ds_openloop['OUT_SOIL_MOIST'].sel(nlayer=0)
 dict_ens_da_sm1 = {}
 for i in range(cfg['EnKF']['N']):
     ens_name = 'ens{}'.format(i+1)
+    dict_ens_da_sm1[ens_name] = dict_ens_ds[ens_name]['OUT_SOIL_MOIST'].sel(nlayer=0)
 # Plot
 for lt in lat:
     for lg in lon:
