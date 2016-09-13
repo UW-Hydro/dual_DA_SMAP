@@ -1859,3 +1859,52 @@ def rmse(df, var_true, var_est):
     rmse = np.sqrt(sum((df[var_est] - df[var_true])**2) / len(df))
     return rmse
 
+
+def load_nc_and_concat_var_years(basepath, start_year, end_year, dict_vars):
+    ''' Loads in netCDF files end with 'YYYY.nc', and for each variable needed,
+        concat all years together and return a DataArray
+        
+        Parameters
+        ----------
+        basepath: <str>
+            Basepath of all netCDF files; 'YYYY.nc' will be appended;
+            Time dimension name in the nc files must be 'time'
+        start_year: <int>
+            First year to load
+        end_year: <int>
+            Last year to load
+        dict_vars: <dict>
+            A dict of desired variables and corresponding varname in the
+            netCDF files (e.g., {'prec': 'prcp'; 'temp': 'tair'}). The keys in
+            dict_vars will be used as keys in the output dict.
+
+        Returns
+        ----------
+        dict_da: <dict>
+            A dict of concatenated xr.DataArrays.
+            Keys: desired variables (using the same keys as in input
+                  'dict_vars')
+            Elements: <xr.DataArray>
+    '''
+
+    dict_list = {}
+    for var in dict_vars.keys():
+        dict_list[var] = []
+
+    # Loop over each year
+    for year in range(start_year, end_year+1):
+        # Load data for this year
+        ds = xr.open_dataset(basepath + '{}.nc'.format(year))
+        # Extract each variable needed and put in a list
+        for var, varname in dict_vars.items():
+            da = ds[varname]
+            # Put data of this year in a list
+            dict_list[var].append(da)
+
+    # Concat all years for all variables
+    dict_da = {}
+    for var in dict_vars.keys():
+        dict_da[var] = xr.concat(dict_list[var], dim='time')
+
+    return dict_da
+
