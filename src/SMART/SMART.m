@@ -109,11 +109,11 @@ for j=1:numpixels % space loop
     water_fraction = 0;
  
     % Spatial mask to eliminate pixels lacking data
-    if (water_fraction < 25 && sum(rain_indep(rain_indep > 0))...
-            > 20 && sum(rain_true(rain_true > 0)) > 20 ...
-            && sum(rain_observed(rain_observed > 0)) > 20 ...
-            && sqrt(var(sma_observed((sma_observed >=0))))...
-            > 0*1e-3 && sqrt(var(smd_observed((smd_observed >=0)))) > 0*1e-3) %&& sqrt(var(ERSa_observed((ERSa_observed >=0)))) > 0*1e-3 && sqrt(var(ERSd_observed((ERSd_observed >=0)))) > 0*1e-3)
+%    if (water_fraction < 25 && sum(rain_indep(rain_indep > 0))...
+%            > 20 && sum(rain_true(rain_true > 0)) > 20 ...
+%            && sum(rain_observed(rain_observed > 0)) > 20 ...
+%            && sqrt(var(sma_observed((sma_observed >=0))))...
+%            > 0*1e-3 && sqrt(var(smd_observed((smd_observed >=0)))) > 0*1e-3) %&& sqrt(var(ERSa_observed((ERSa_observed >=0)))) > 0*1e-3 && sqrt(var(ERSd_observed((ERSd_observed >=0)))) > 0*1e-3)
 
         rain_observed_hold = rain_observed;
         rain_observed_hold(rain_observed_hold < 0) = -99999; % set to -9999 to throw out windows with missing days (STANDARD)....set to 0 to keep them in the analysis with a default value of zero.
@@ -155,9 +155,9 @@ for j=1:numpixels % space loop
         % This is the corrected rainfall...below we evaluate it via
         % comparisons to an independent rainfall product
         RAIN_SMART_SMOS(:,j) = sum_rain_corrected(:);
-    else
-        RAIN_SMART_SMOS(:,j) = -1;
-    end
+%    else
+%        RAIN_SMART_SMOS(:,j) = -1;
+%    end
 end
 
 save(output_dataset, 'RAIN_SMART_SMOS');
