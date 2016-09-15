@@ -28,12 +28,19 @@ cfg = read_configobj(sys.argv[1])
 # ============================================================ #
 print('Loading data...')
 
-# --- Determine the output directories --- #
+# --- Determine data and output plots directories --- #
 dirs = OrderedDict()
-out_basedir = os.path.join(cfg['CONTROL']['root_dir'],
-                           cfg['OUTPUT']['output_basdir'])
-dirs['history'] = os.path.join(out_basedir, 'history')
-dirs['plots'] = os.path.join(out_basedir, 'plots')
+# EnKF output history dir
+out_basedir_EnKF = os.path.join(cfg['CONTROL']['root_dir'],
+                                cfg['OUTPUT']['output_EnKF_basedir'])
+dirs['history_EnKF'] = os.path.join(out_basedir_EnKF, 'history')
+# EnKF-postprocess output history dir
+out_basedir_postprocess = os.path.join(
+                                cfg['CONTROL']['root_dir'],
+                                cfg['OUTPUT']['output_postprocess_basedir'])
+dirs['history_post'] = os.path.join(out_basedir_postprocess, 'history')
+# Output plots dir (under postprocess dir)
+dirs['plots'] = os.path.join(out_basedir_postprocess, 'plots')
 
 # --- Load truth history file --- #
 print('\tLoading truth')
@@ -60,7 +67,7 @@ print('\tLoading open-loop')
 start_time = pd.to_datetime(cfg['EnKF']['start_time'])
 end_time = pd.to_datetime(cfg['EnKF']['end_time'])
 hist_openloop_nc = os.path.join(
-                        dirs['history'],
+                        dirs['history_EnKF'],
                         'history.openloop.{}-{:05d}.nc'.format(
                                 start_time.strftime('%Y-%m-%d'),
                                 start_time.hour*3600+start_time.second))
@@ -69,8 +76,7 @@ ds_openloop = xr.open_dataset(hist_openloop_nc)
 # --- Load EnKF post-processed ensemble mean results --- #
 print('\tLoading ensemble mean')
 hist_ens_mean_post = os.path.join(
-                        dirs['history'],
-                        'postprocess_ens_mean_updated_states',
+                        dirs['history_post'],
                         'history.concat.{}_{:05d}-{}_{:05d}.nc'.format(
                                 start_time.strftime('%Y%m%d'),
                                 start_time.hour*3600+start_time.second,
@@ -83,7 +89,7 @@ print('\tLoading each ensemble member')
 dict_ens_ds = {}
 for i in range(cfg['EnKF']['N']):
     fname = os.path.join(
-                    dirs['history'],
+                    dirs['history_EnKF'],
                     'EnKF_ensemble_concat',
                     'history.ens{}.concat.{}_{:05d}-{}_{:05d}.nc'.format(
                                 i+1,
