@@ -17,7 +17,8 @@ from scipy.io import savemat
 
 from tonic.io import read_configobj
 
-from da_utils import load_nc_and_concat_var_years, setup_output_dirs
+from da_utils import (load_nc_and_concat_var_years, setup_output_dirs,
+                      da_3D_to_2D_for_SMART)
 
 
 # ============================================================ #
@@ -131,29 +132,13 @@ for var in ['sm_ascend', 'sm_descend']:
 # ============================================================ #
 # Convert data to dimension [npixel_active, nday]
 # ============================================================ #
-
-# Extract ndays, nlat and nlon
-ndays = len(dict_da_daily['prec_orig']['day'])
-nlat = len(dict_da_daily['prec_orig']['lat'])
-nlon = len(dict_da_daily['prec_orig']['lon'])
-
 # Load in domain file
 ds_domain = xr.open_dataset(os.path.join(cfg['CONTROL']['root_dir'],
                                          cfg['DOMAIN']['domain_file']))
-mask = ds_domain['mask'].values
-mask_reshape = mask.reshape(nlat*nlon)
+da_mask = ds_domain['mask']
 
-dict_array_active = {}
-# Loop over each variable
-for var, da in dict_da_daily.items():
-    # Convert to np.array and reshape to [nday, ncell]
-    array_all_cells = da.values.reshape(ndays, nlat*nlon)
-    # Only keep active grid cells to the final dimension [nday, npixel_active]
-    array_active = array_all_cells[:, mask_reshape>0]
-    # Transpose the dimensio nto [npixel_active, nday]
-    array_active = np.transpose(array_active)
-    # Put in final dictionary
-    dict_array_active[var] = array_active
+# Convert data to dimension [npixel_active, nday]
+dict_array_active = da_3D_to_2D_for_SMART(dict_da_daily, da_mask, time_varname='day')
 
 
 # ============================================================ #

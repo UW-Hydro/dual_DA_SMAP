@@ -1919,3 +1919,182 @@ def load_nc_and_concat_var_years(basepath, start_year, end_year, dict_vars):
 
     return dict_da
 
+
+def da_3D_to_2D_for_SMART(dict_da_3D, da_mask, time_varname='time'):
+    ''' Convert data arrays with dimension [time, lat, lon] to [npixel_active, time]
+    
+    Parameters
+    ----------
+    dict_da_3D: <dict>
+        A dict of xr.DataArray's with [time, lat, lon] dimension
+        Keys: variable name
+        Elements: xr.DataArray
+    da_mask: <xr.DataArray>
+        Domain mask (>0 for active grid cells)
+    time_varname: <str>
+        Varname for time in all da's in dict_da_3D
+    
+    Return
+    ----------
+    dict_array_active: <dict>
+        Keys: variable name (same as in input)
+        Elements: np.array with dimension [npixel_active, time]
+    
+    '''
+    
+    # Extract ntime, nlat and nlon
+    da_example = dict_da_3D[list(dict_da_3D.keys())[0]]
+    ntime = len(da_example[time_varname])
+    nlat = len(da_example['lat'])
+    nlon = len(da_example['lon'])
+    
+    # Reshape domain mask
+    mask = da_mask.values
+    mask_reshape = mask.reshape(nlat*nlon)
+    
+    # Convert all da's in dict_da_3D to [npixel_active, nday]
+    dict_array_active = {}
+    # Loop over each da
+    for var, da in dict_da_3D.items():
+        # Convert to np.array and reshape to [ntime, ncell]
+        array_all_cells = da.values.reshape(ntime, nlat*nlon)
+        # Only keep active grid cells to the final dimension [ntime, npixel_active]
+        array_active = array_all_cells[:, mask_reshape>0]
+        # Transpose dimension to [npixel_active, nday]
+        array_active = np.transpose(array_active)
+        # Put in final dictionary
+        dict_array_active[var] = array_active
+    
+    return dict_array_active
+
+
+def da_2D_to_3D_from_SMART(dict_array_2D, da_mask, out_time_varname, out_time_coord):
+    ''' Convert data arrays with dimension [time, npixel_active] to [time, lat, lon]
+
+    Parameters
+    ----------
+    dict_array_2D: <dict>
+        Keys: variable name
+        Elements: np.array with dimension [time, npixel_active]
+    da_mask: <xr.DataArray>
+        Domain mask (>0 for active grid cells)
+    out_time_varname: <str>
+        Varname for time in output xr.DataArray's
+    out_time_coord: <list or other types usable for xr coords>
+        Time coordinates in output xr.DataArray's
+
+    Return
+    ----------
+    dict_da_3D: <dict>
+        Keys: variable name (same as in input)
+        Elements: xr.DataArray with dimension [time, lat, lon]
+
+    '''
+
+    # Extract ndays, nlat and nlon (as well as lat and lon)
+    ntime = len(out_time_coord)
+    lat = da_mask['lat']
+    lon = da_mask['lon']
+    nlat = len(lat)
+    nlon = len(lon)    
+
+    # Reshape domain mask and identify indices of active pixels
+    mask = da_mask.values
+    mask_reshape = mask.reshape(nlat*nlon)
+    ind_active = np.where(mask_reshape>0)[0]
+    
+    # Convert all arrays in dict_da_2D to [time, lat, lon]
+    dict_da_3D = {}
+    # Loop over each da
+    for var, array in dict_array_2D.items():
+        # Fill in inactive cells (to dimension [time, ncells])
+        array_allcells_reshape = np.empty([ntime, nlat*nlon])
+        array_allcells_reshape[:] = np.nan
+        array_allcells_reshape[:, ind_active] = array
+        # Convert to dimension [time, lat, lon]
+        array_3D = array_allcells_reshape.reshape([ntime, nlat, nlon])
+        # Put in xr.DataArray
+        da = xr.DataArray(array_3D, coords=[out_time_coord, lat, lon],
+                          dims=[out_time_varname, 'lat', 'lon'])
+        # Put in final dictionary
+        dict_da_3D[var] = da
+
+    return dict_da_3D
+
+
+def correct_prec_from_SMART(da_prec_orig, window_size, da_prec_corr_window,
+                            start_date):
+    ''' Correct (i.e., rescale) original precipitation data based on outputs from
+        SMART (which is corrected prec sum in longer time windows).
+            - The first window is not corrected (orig. prec used)
+            - The last incomplete window, if exists, is not corrected (orig. prec used)
+        
+    Parameters
+    ----------
+    da_prec_orig: <xr.DataArray>
+        Original prec data to be corrected. Original timestep, typically daily or
+        sub-daily.
+        Dims: [time, lat, lon]
+    window_size: <int>
+        Size of each window [unit: day]
+    da_prec_corr_window: <xr.DataArray>
+        Corrected prec sum in each window
+        Dims: [window (index starting from 0), lat, lon]
+        NOTE: this is the output from SMART:
+                - the first window data is junk (always zeros)
+                - Only include complete windows
+    start_date: <dt.datetime or pd.datetime>
+        Starting date (midnight) of the starting time of all the time series
+        
+    Returns
+    ----------
+    da_prec_corrected: <xr.DataArray>
+        Corrected prec data to be corrected. Original timestep, consistent with that
+        of input da_prec_orig
+        Dims: [time, lat, lon]
+    '''
+    
+    # Identify the number of complete windows
+    nwindow = len(da_prec_corr_window['window'])
+    
+    # Sum original prec in each window (the last window may be incomplete)
+    da_prec_orig_window = da_prec_orig.resample(
+                            dim='time',
+                            freq='{}D'.format(window_size),
+                            how='sum')
+    da_prec_orig_window = da_prec_orig_window.rename({'time': 'window'})
+    
+    # Loop over each window and rescale original prec (skip first window)
+    da_prec_corrected = da_prec_orig.copy()
+    for i in range(1, nwindow):
+        # --- Select out this window period from original prec data --- #
+        window_start_date = start_date + pd.DateOffset(days=i*window_size)
+        window_end_date = start_date + pd.DateOffset(days=(i+1)*window_size-0.0001)
+        da_prec_orig_this_window = da_prec_orig.sel(
+                time=slice(window_start_date, window_end_date))
+        # --- Rescale --- #
+        # (1) Calculate rescaling factors for this window;
+        prec_corr = da_prec_corr_window[i, :, :].values  # dim: [lat, lon]
+        prec_sum_orig = da_prec_orig_window[i, :, :].values  # dim: [lat, lon]
+        # Note: If prec_sum_orig is 0 for a grid cell, scale_factors will be np.inf for
+        # that grid cell
+        scale_factors = prec_corr / prec_sum_orig  
+        # (2) Rescale for the orig. prec data (at orig. sub-daily or daily timestep)
+        # for this window (here array broadcast is used)
+        prec_corr_this_window = da_prec_orig_this_window.values * scale_factors
+        # (3) For grid cells where scale_factors == np.inf (which indicates orig. prec are all
+        # zero for this window and this cell), fill in with constant corrected prec from
+        # SMART
+        # Index of zero-orig-prec grid cells
+        ind_inf_scale = np.where(np.isinf(scale_factors))
+        # Constant corrected prec to fill in (divided to each orig. timestep)
+        const_prec = prec_corr / len(da_prec_orig_this_window['time'])
+        # Fill in those zero-orig-prec grid cells
+        const_prec_inf_scale = const_prec[ind_inf_scale[0], ind_inf_scale[1]]
+        prec_corr_this_window[:, ind_inf_scale[0], ind_inf_scale[1]] = const_prec_inf_scale
+        # --- Put in the final da --- #
+        da_prec_corrected.sel(time=slice(window_start_date, window_end_date))[:] = \
+                prec_corr_this_window
+    
+    return da_prec_corrected
+
