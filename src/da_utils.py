@@ -297,7 +297,7 @@ class Forcings(object):
         Parameters
         ----------
         varname: <str>
-            Precipitation variable name in the 
+            Precipitation variable name in the forcing ds
         std: <float>
             Standard deviation of the multiplier (which is log-normal distributed);
             Note: here sigma is the real standard deviation of the multiplier, not
@@ -318,6 +318,28 @@ class Forcings(object):
         ds_perturbed[varname][:] *= noise
         
         return ds_perturbed
+
+        
+    def replace_prec(self, varname, da_prec):
+        ''' Replace prec in the forcing by specified prec data
+        
+        Parameters
+        ----------
+        varname: <str>
+            Precipitation variable name in the current forcing ds
+        da_prec: <xr.DataArray>
+            A DataArray of prec to be filled in.
+            Must have the same dimensions as the forcing object itselt
+
+        Returns
+        ----------
+        self.ds: <xr.Dataset>
+            A dataset of forcings, with specified prec
+        '''
+
+        self.ds[varname][:] = da_prec.values
+
+        return self.ds
 
 
 class VarToPerturb(object):
@@ -1737,9 +1759,11 @@ def calculate_ensemble_mean_states(list_state_nc, out_state_nc):
     return out_state_nc
 
 
-def run_vic_assigned_states(start_time, end_time, vic_exe, init_state_nc, dict_assigned_state_nc,
-                            global_template, vic_forcing_basepath, vic_model_steps_per_day,
-                            output_global_root_dir, output_state_root_dir, output_vic_history_root_dir,
+def run_vic_assigned_states(start_time, end_time, vic_exe, init_state_nc,
+                            dict_assigned_state_nc, global_template,
+                            vic_forcing_basepath, vic_model_steps_per_day,
+                            output_global_root_dir, output_state_root_dir,
+                            output_vic_history_root_dir,
                             output_vic_log_root_dir):
     ''' Run VIC with assigned initial states and other assigned state files during the simulation time
     

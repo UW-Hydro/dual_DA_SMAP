@@ -40,7 +40,7 @@ np.random.seed(cfg['CONTROL']['seed'])
 # Prepare output directories
 # ============================================================ #
 dirs = setup_output_dirs(os.path.join(cfg['CONTROL']['root_dir'],
-                                      cfg['OUTPUT']['output_basdir']),
+                                      cfg['OUTPUT']['output_EnKF_basedir']),
                          mkdirs=['global', 'history', 'states', 'forcings',
                                  'logs', 'plots'])
 
