@@ -17,6 +17,9 @@ import os
 import xarray as xr
 from scipy.io import loadmat
 import matplotlib.pyplot as plt
+from bokeh.plotting import figure, output_file, save
+from bokeh.io import reset_output
+import bokeh
 
 from tonic.io import read_configobj
 
@@ -135,20 +138,24 @@ for lt in lat:
         if da_mask.loc[lt, lg] <= 0 or np.isnan(da_mask.loc[lt, lg]) == True:
             continue
 
+        # --- Regular figure --- #
         # Create figure
         fig = plt.figure(figsize=(12, 6))
         # plot truth
-        da_prec_true.loc[:, lt, lg].to_series().plot(
+        ts_prec_truth = da_prec_true.loc[:, lt, lg].to_series()
+        ts_prec_truth.plot(
                 color='k', style='-',
-                label='Truth (VIC by perturbed forcings and states)',
+                label='Truth (orig. prec plus perturbation)',
                 legend=True)
         # Plot corrected prec
-        da_prec_corrected.loc[:, lt, lg].to_series().plot(
+        ts_prec_corrected = da_prec_corrected.loc[:, lt, lg].to_series()
+        ts_prec_corrected.plot(
                 color='b', style='-',
                 label='Corrected prec (via SMART)',
                 legend=True)
         # Plot orig. prec
-        da_prec_orig.loc[:, lt, lg].to_series().plot(
+        ts_prec_orig = da_prec_orig.loc[:, lt, lg].to_series()
+        ts_prec_orig.plot(
                 color='r', style='--',
                 label='Orig. prec (before correction)',
                 legend=True)
@@ -159,4 +166,27 @@ for lt in lat:
         fig.savefig(os.path.join(outdir_plots,
                                  'check_plot.{}_{}.png'.format(lt, lg)),
                     format='png')
+
+        # --- Interactive figure --- #
+        # Create figure
+        output_file(os.path.join(outdir_plots, 'check_plot.{}_{}.html'.format(lt, lg)))
+
+        p = figure(title='Precipitation, {}, {}'.format(lt, lg),
+                   x_axis_label="Time", y_axis_label="Precipitation (mm/step)",
+                   x_axis_type='datetime', width=1000, height=500)
+        # plot truth
+        ts = ts_prec_truth
+        p.line(ts.index, ts.values, color="black", line_dash="solid",
+               legend="Truth (orig. prec plus perturbation)", line_width=2)
+        # plot corrected prec
+        ts = ts_prec_corrected
+        p.line(ts.index, ts.values, color="blue", line_dash="solid",
+               legend="Corrected prec (via SMART)", line_width=2)
+        # plot orig. prec
+        ts = ts_prec_orig
+        p.line(ts.index, ts.values, color="red", line_dash="dashed",
+               legend="Orig. prec (before correction)", line_width=2)
+        # Save
+        save(p)
+
 
