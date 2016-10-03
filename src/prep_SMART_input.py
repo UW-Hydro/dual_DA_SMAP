@@ -105,7 +105,7 @@ for var, da in dict_da.items():
     if var == 'prec_orig' or var == 'prec_for_tuning_lambda' or\
     var == 'prec_true':
         # Sum daily preciptation
-        da_daily = da.groupby('time.day').sum(dim='time')
+        da_daily = da.groupby('time.date').sum(dim='time')
         # Put into dict
         dict_da_daily[var] = da_daily
 
@@ -115,7 +115,7 @@ for var in ['sm_ascend', 'sm_descend']:
     if var in dict_da.keys():
         # Average to daily soil moisture
         da = dict_da[var]
-        da_daily = da.groupby('time.day').mean(dim='time')
+        da_daily = da.groupby('time.date').mean(dim='time')
         # Put into dict
         dict_da_daily[var] = da_daily
     
@@ -138,7 +138,9 @@ ds_domain = xr.open_dataset(os.path.join(cfg['CONTROL']['root_dir'],
 da_mask = ds_domain['mask']
 
 # Convert data to dimension [npixel_active, nday]
-dict_array_active = da_3D_to_2D_for_SMART(dict_da_daily, da_mask, time_varname='day')
+dict_array_active = da_3D_to_2D_for_SMART(dict_da_daily,
+                                          da_mask,
+                                          time_varname='date')
 
 
 # ============================================================ #
