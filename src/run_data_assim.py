@@ -187,7 +187,7 @@ dict_ens_list_history_files = EnKF_VIC(
          output_vic_log_root_dir=dirs['logs'],
          dict_varnames=dict_varnames, prec_std=cfg['FORCINGS']['prec_std'],
          state_perturb_sigma_percent=cfg['EnKF']['state_perturb_sigma_percent'],
-         nproc=sys.argv[2])
+         nproc=int(sys.argv[2]))
 
 # --- Concatenate all history files for each ensemble --- #
 out_hist_concat_dir = setup_output_dirs(dirs['history'],
