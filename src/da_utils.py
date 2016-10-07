@@ -885,7 +885,7 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
     '''
     
     # --- Set up multiprocessing --- #
-    pool = mp.Pool(processes=20)
+    pool = mp.Pool(processes=nproc)
     
     # --- Loop over each ensemble member --- #
     for i in range(N):
