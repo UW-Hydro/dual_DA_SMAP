@@ -375,7 +375,7 @@ def main(cfg_file, nproc=1):
                     f.write('units: W m-2\n')
                     f.write('standard_name: incoming_shortwave_radiation\n')
                     f.write('description: incoming shortwave radiation\n')
-                elif var == 'LONGAVE':
+                elif var == 'LONGWAVE':
                     f.write('\n[LONGWAVE]\n')
                     f.write('column: {}\n'.format(i))
                     f.write('units: W m-2\n')

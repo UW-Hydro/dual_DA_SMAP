@@ -424,7 +424,7 @@ with open(cfg_file, 'w') as f:
             f.write('units: W m-2\n')
             f.write('standard_name: incoming_shortwave_radiation\n')
             f.write('description: incoming shortwave radiation\n')
-        elif var == 'LONGAVE':
+        elif var == 'LONGWAVE':
             f.write('\n[LONGWAVE]\n')
             f.write('column: {}\n'.format(i))
             f.write('units: W m-2\n')
