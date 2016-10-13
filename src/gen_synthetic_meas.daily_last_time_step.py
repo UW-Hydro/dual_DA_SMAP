@@ -21,9 +21,10 @@ from da_utils import (Forcings, setup_output_dirs, propagate,
                       calculate_max_soil_moist_domain, VarToPerturb)
 
 # =========================================================== #
-# Load config file
+# Load command line arguments
 # =========================================================== #
 cfg = read_configobj(sys.argv[1])
+mpi_proc = int(sys.argv[2])
 
 # =========================================================== #
 # Set random generation seed
@@ -139,7 +140,9 @@ propagate(start_time=start_time, end_time=meas_times[0],
           out_global_basepath=os.path.join(truth_subdirs['global'], 'global'),
           out_log_dir=log_dir,
           forcing_basepath=os.path.join(truth_subdirs['forcings'],
-                                        'forc_perturbed.'))
+                                        'forc_perturbed.'),
+          mpi_proc=mpi_proc,
+          mpi_exe=cfg['VIC']['mpi_exe'])
 # Concat output history file to the list to be concatenated
 list_history_paths.append(os.path.join(truth_subdirs['history'],
                                        'history.{}-{:05d}.nc'.format(
@@ -199,7 +202,9 @@ for t in range(len(meas_times)):
               out_global_basepath=os.path.join(truth_subdirs['global'], 'global'),
               out_log_dir=log_dir,
               forcing_basepath=os.path.join(truth_subdirs['forcings'],
-                                            'forc_perturbed.'))
+                                            'forc_perturbed.'),
+              mpi_proc=mpi_proc,
+              mpi_exe=cfg['VIC']['mpi_exe'])
     # Concat output history file to the list to be concatenated
     list_history_paths.append(os.path.join(truth_subdirs['history'],
                                            'history.{}-{:05d}.nc'.format(

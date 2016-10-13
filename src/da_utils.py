@@ -406,7 +406,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
              vic_model_steps_per_day, output_vic_global_root_dir,
              output_vic_state_root_dir, output_vic_history_root_dir,
              output_vic_forcing_root_dir, output_vic_log_root_dir,
-             dict_varnames, prec_std, state_perturb_sigma_percent, nproc):
+             dict_varnames, prec_std, state_perturb_sigma_percent, nproc=1,
+             mpi_proc=None, mpi_exe='mpiexec'):
     ''' This function runs ensemble kalman filter (EnKF) on VIC (image driver)
 
     Parameters
@@ -459,6 +460,10 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
         = 5% of max soil moisture will be added as perturbation)
     nproc: <int>
         Number of processors to use
+    mpi_proc: <int or None>
+        Number of processors to use for VIC MPI run. None for not using MPI
+    mpi_exe: <str>
+        Path for MPI exe
 
     Returns
     ----------
@@ -568,7 +573,9 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
                        out_global_dir=out_global_dir,
                        out_log_dir=out_log_dir,
                        forcing_perturbed_dir=output_vic_forcing_root_dir,
-                       nproc=nproc)
+                       nproc=nproc,
+                       mpi_proc=mpi_proc,
+                       mpi_exe=mpi_exe)
     # Put output history file paths into dictionary
     for i in range(N):
         dict_ens_list_history_files['ens{}'.format(i+1)].append(os.path.join(
@@ -663,7 +670,9 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
                        out_global_dir=out_global_dir,
                        out_log_dir=out_log_dir,
                        forcing_perturbed_dir=output_vic_forcing_root_dir,  # perturbed forcing
-                       nproc=nproc)
+                       nproc=nproc,
+                       mpi_proc=mpi_proc,
+                       mpi_exe=mpi_exe)
 
         # Put output history file paths into dictionary
         for i in range(N):
@@ -814,32 +823,44 @@ def check_returncode(returncode, expected=0):
                                  'expected ({1})'.format(returncode, expected))
 
 
-def run_vic_for_multiprocess(vic_exe, global_file, log_dir):
+def run_vic_for_multiprocess(vic_exe, global_file, log_dir,
+                             mpi_proc=None, mpi_exe=None):
     '''This function is a simple wrapper for calling "run" method under
         VIC class in multiprocessing
 
     Parameters
     ----------
-    vic_exe: <class VIC>
+    vic_exe: <str>
         A VIC class object
     global_file: <str>
         VIC global file path
     log_dir: <str>
         VIC run output log directory
+    mpi_proc: <int or None>
+        Number of processors to use for VIC MPI run. None for not using MPI
+    mpi_exe: <str>
+        Path for MPI exe. Only used if mpi_proc is not None
 
     Require
     ----------
     check_returncode
     '''
 
-    returncode = vic_exe.run(global_file, logdir=log_dir)
-    check_returncode(returncode, expected=0)
+    if mpi_proc == None:
+        returncode = vic_exe.run(global_file, logdir=log_dir,
+                                 **{'mpi_proc': mpi_proc})
+        check_returncode(returncode, expected=0)
+    else:
+        returncode = vic_exe.run(global_file, logdir=log_dir,
+                                 **{'mpi_proc': mpi_proc, 'mpi_exe': mpi_exe})
+        check_returncode(returncode, expected=0)
 
 
 def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_file,
                        vic_model_steps_per_day, init_state_dir, out_state_dir,
                        out_history_dir, out_global_dir, out_log_dir,
-                       forcing_perturbed_dir, nproc):
+                       forcing_perturbed_dir, nproc=1, mpi_proc=None,
+                       mpi_exe='mpiexec'):
     ''' This function propagates (via VIC) an ensemble of states to a certain time point.
     
     Parameters
@@ -875,7 +896,13 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
         Perturbed forcing directory. File names are: "forc.ens<i>.<YYYY>.nc",
         where <i> is 1, 2, ..., N, and <YYYY> is forcing year
     nproc: <int>
-        Number of processors to use
+        Number of processors to use for parallel ensemble
+        Default: 1
+    mpi_proc: <int or None>
+        Number of processors to use for VIC MPI run. None for not using MPI
+        Default: None
+    mpi_exe: <str>
+        Path for MPI exe. Only used if mpi_proc is not None
         
     Require
     ----------
@@ -883,39 +910,67 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
     multiprocessing
     generate_VIC_global_file
     '''
-    
-    # --- Set up multiprocessing --- #
-    pool = mp.Pool(processes=nproc)
-    
-    # --- Loop over each ensemble member --- #
-    for i in range(N):
-        # Generate VIC global param file
-        replace = OrderedDict([('FORCING1', os.path.join(forcing_perturbed_dir,
-                                                         'forc.ens{}.'.format(i+1))),
-                               ('OUTFILE', 'history.ens{}'.format(i+1))])
-        global_file = generate_VIC_global_file(
-                            global_template_path=vic_global_template_file,
-                            model_steps_per_day=vic_model_steps_per_day,
-                            start_time=start_time,
-                            end_time=end_time,
-                            init_state="INIT_STATE {}".format(
-                                            os.path.join(init_state_dir,
-                                                         'state.ens{}.nc'.format(i+1))),
-                            vic_state_basepath=os.path.join(out_state_dir,
-                                                            'state.ens{}'.format(i+1)),
-                            vic_history_file_dir=out_history_dir,
-                            replace=replace,
-                            output_global_basepath=os.path.join(
-                                        out_global_dir,
-                                        'global.ens{}'.format(i+1)))
-        # Run VIC
-        pool.apply_async(run_vic_for_multiprocess, (vic_exe, global_file, out_log_dir,))
-        #returncode = vic_exe.run(global_file, logdir=out_log_dir)
-        #check_returncode(returncode, expected=0)
-    
-    # --- Finish multiprocessing --- #
-    pool.close()
-    pool.join()
+
+    # --- If nproc == 1, do a regular ensemble loop --- #
+    if nproc == 1:
+        for i in range(N):
+            # Generate VIC global param file
+            replace = OrderedDict([('FORCING1', os.path.join(
+                                        forcing_perturbed_dir,
+                                        'forc.ens{}.'.format(i+1))),
+                                   ('OUTFILE', 'history.ens{}'.format(i+1))])
+            global_file = generate_VIC_global_file(
+                                global_template_path=vic_global_template_file,
+                                model_steps_per_day=vic_model_steps_per_day,
+                                start_time=start_time,
+                                end_time=end_time,
+                                init_state="INIT_STATE {}".format(
+                                        os.path.join(
+                                            init_state_dir,
+                                            'state.ens{}.nc'.format(i+1))),
+                                vic_state_basepath=os.path.join(
+                                            out_state_dir,
+                                            'state.ens{}'.format(i+1)),
+                                vic_history_file_dir=out_history_dir,
+                                replace=replace,
+                                output_global_basepath=os.path.join(
+                                            out_global_dir,
+                                            'global.ens{}'.format(i+1)))
+            # Run VIC
+            run_vic_for_multiprocess(vic_exe, global_file, out_log_dir,
+                                     mpi_proc, mpi_exe)
+    # --- If nproc > 1, use multiprocessing --- #
+    elif nproc > 1:
+        # --- Set up multiprocessing --- #
+        pool = mp.Pool(processes=nproc)
+        # --- Loop over each ensemble member --- #
+        for i in range(N):
+            # Generate VIC global param file
+            replace = OrderedDict([('FORCING1', os.path.join(forcing_perturbed_dir,
+                                                             'forc.ens{}.'.format(i+1))),
+                                   ('OUTFILE', 'history.ens{}'.format(i+1))])
+            global_file = generate_VIC_global_file(
+                                global_template_path=vic_global_template_file,
+                                model_steps_per_day=vic_model_steps_per_day,
+                                start_time=start_time,
+                                end_time=end_time,
+                                init_state="INIT_STATE {}".format(
+                                                os.path.join(init_state_dir,
+                                                             'state.ens{}.nc'.format(i+1))),
+                                vic_state_basepath=os.path.join(out_state_dir,
+                                                                'state.ens{}'.format(i+1)),
+                                vic_history_file_dir=out_history_dir,
+                                replace=replace,
+                                output_global_basepath=os.path.join(
+                                            out_global_dir,
+                                            'global.ens{}'.format(i+1)))
+            # Run VIC
+            pool.apply_async(run_vic_for_multiprocess,
+                             (vic_exe, global_file, out_log_dir, mpi_proc, mpi_exe))
+        
+        # --- Finish multiprocessing --- #
+        pool.close()
+        pool.join()
 
 
 def determine_tile_frac(global_path):
@@ -1467,7 +1522,7 @@ def propagate(start_time, end_time, vic_exe, vic_global_template_file,
                        vic_model_steps_per_day, init_state_nc, out_state_basepath,
                        out_history_dir, out_history_fileprefix,
                        out_global_basepath, out_log_dir,
-                       forcing_basepath):
+                       forcing_basepath, mpi_proc=None, mpi_exe='mpiexec'):
     ''' This function propagates (via VIC) from an initial state (or no initial state)
         to a certain time point.
 
@@ -1497,6 +1552,12 @@ def propagate(start_time, end_time, vic_exe, vic_global_template_file,
         Directory for output log files
     forcing_basepath: <str>
         Forcing basepath. <YYYY.nc> will be appended
+    mpi_proc: <int or None>
+        Number of processors to use for VIC MPI run. None for not using MPI
+        Default: None
+    mpi_exe: <str>
+        Path for MPI exe. Only used if mpi_proc is not None
+
 
     Require
     ----------
@@ -1521,7 +1582,8 @@ def propagate(start_time, end_time, vic_exe, vic_global_template_file,
                         output_global_basepath=out_global_basepath)
     
     # Run VIC
-    returncode = vic_exe.run(global_file, logdir=out_log_dir)
+    returncode = vic_exe.run(global_file, logdir=out_log_dir,
+                             **{'mpi_proc': mpi_proc, 'mpi_exe': mpi_exe})
     check_returncode(returncode, expected=0)
 
 
