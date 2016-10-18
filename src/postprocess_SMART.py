@@ -25,7 +25,7 @@ from tonic.io import read_configobj
 
 from da_utils import (load_nc_and_concat_var_years, setup_output_dirs,
                       da_2D_to_3D_from_SMART, da_3D_to_2D_for_SMART,
-                      correct_prec_from_SMART)
+                      correct_prec_from_SMART, rmse)
 
 
 # ============================================================ #
@@ -138,26 +138,37 @@ for lt in lat:
         if da_mask.loc[lt, lg] <= 0 or np.isnan(da_mask.loc[lt, lg]) == True:
             continue
 
+        # --- Extract time series, aggregate to daily and calculate statistics --- #
+        ts_prec_truth = da_prec_true.loc[:, lt, lg].to_series()
+        ts_prec_truth_daily = ts_prec_truth.resample('D').mean()
+        ts_prec_corrected = da_prec_corrected.loc[:, lt, lg].to_series()
+        ts_prec_corrected_daily = ts_prec_corrected.resample('D').mean()
+        ts_prec_orig = da_prec_orig.loc[:, lt, lg].to_series()
+        ts_prec_orig_daily = ts_prec_orig.resample('D').mean()
+        # Calculate rmse
+        df_daily = pd.concat([ts_prec_truth_daily, ts_prec_corrected_daily, ts_prec_orig_daily],
+                             axis=1,
+                             keys=['truth', 'corrected', 'orig'])
+        rmse_orig = rmse(df_daily, 'truth', 'orig')
+        rmse_corrected = rmse(df_daily, 'truth', 'corrected')
+
         # --- Regular figure --- #
         # Create figure
         fig = plt.figure(figsize=(12, 6))
         # plot truth
-        ts_prec_truth = da_prec_true.loc[:, lt, lg].to_series()
-        ts_prec_truth.plot(
+        ts_prec_truth_daily.plot(
                 color='k', style='-',
-                label='Truth (orig. prec plus perturbation)',
+                label='Truth (orig. prec plus perturbation), daily',
                 legend=True)
         # Plot corrected prec
-        ts_prec_corrected = da_prec_corrected.loc[:, lt, lg].to_series()
-        ts_prec_corrected.plot(
+        ts_prec_corrected_daily.plot(
                 color='b', style='-',
-                label='Corrected prec (via SMART)',
+                label='Corrected prec (via SMART), daily\nRMSE = {:.2f}'.format(rmse_corrected),
                 legend=True)
         # Plot orig. prec
-        ts_prec_orig = da_prec_orig.loc[:, lt, lg].to_series()
-        ts_prec_orig.plot(
+        ts_prec_orig_daily.plot(
                 color='r', style='--',
-                label='Orig. prec (before correction)',
+                label='Orig. prec (before correction), daily\nRMSE = {:.2f}'.format(rmse_orig),
                 legend=True)
         plt.xlabel('Time')
         plt.ylabel('Precipitation (mm/step)')
@@ -176,16 +187,24 @@ for lt in lat:
                    x_axis_type='datetime', width=1000, height=500)
         # plot truth
         ts = ts_prec_truth
+        p.line(ts.index, ts.values, color="black", line_dash="solid", alpha=0.3,
+               legend="Truth (orig. prec plus perturbation), hourly", line_width=2)
+        # plot truth, daily
+        ts = ts_prec_truth.resample('D').mean()
         p.line(ts.index, ts.values, color="black", line_dash="solid",
-               legend="Truth (orig. prec plus perturbation)", line_width=2)
-        # plot corrected prec
-        ts = ts_prec_corrected
+               legend="Truth (orig. prec plus perturbation), daily", line_width=2)
+        # plot corrected prec, daily
+        ts = ts_prec_corrected.resample('D').mean()
         p.line(ts.index, ts.values, color="blue", line_dash="solid",
-               legend="Corrected prec (via SMART)", line_width=2)
-        # plot orig. prec
-        ts = ts_prec_orig
+               legend="Corrected prec (via SMART), daily\n"
+                      "RMSE = {:.2f}".format(rmse_corrected),
+               line_width=2)
+        # plot orig. prec, daily
+        ts = ts_prec_orig.resample('D').mean()
         p.line(ts.index, ts.values, color="red", line_dash="dashed",
-               legend="Orig. prec (before correction)", line_width=2)
+               legend="Orig. prec (before correction), daily\n"
+                      "RMSE = {:.2f}".format(rmse_orig),
+               line_width=2)
         # Save
         save(p)
 
