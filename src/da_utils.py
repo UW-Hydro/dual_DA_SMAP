@@ -10,7 +10,6 @@ import multiprocessing as mp
 
 from tonic.models.vic.vic import VIC, default_vic_valgrind_error_code
 
-
 class VICReturnCodeError(Exception):
     pass
 
@@ -2164,15 +2163,17 @@ def correct_prec_from_SMART(da_prec_orig, window_size, da_prec_corr_window,
         prec_sum_orig = da_prec_orig_window[i, :, :].values  # dim: [lat, lon]
         # Note: If prec_sum_orig is 0 for a grid cell, scale_factors will be np.inf for
         # that grid cell
-        scale_factors = prec_corr / prec_sum_orig  
+        scale_factors = prec_corr / prec_sum_orig
         # (2) Rescale for the orig. prec data (at orig. sub-daily or daily timestep)
         # for this window (here array broadcast is used)
         prec_corr_this_window = da_prec_orig_this_window.values * scale_factors
-        # (3) For grid cells where scale_factors == np.inf (which indicates orig. prec are all
-        # zero for this window and this cell), fill in with constant corrected prec from
-        # SMART
+        # (3) For grid cells where scale_factors == np.inf or scale == np.nan
+        # (which indicates orig. prec are all zero for this window and this
+        # cell; np.inf indicates non-zero numerator while np.nan indicates
+        # zero numerator; np.nan at inactive grid cells as well), fill in with
+        # constant corrected prec from SMART
         # Index of zero-orig-prec grid cells
-        ind_inf_scale = np.where(np.isinf(scale_factors))
+        ind_inf_scale = np.where(np.isinf(scale_factors) + np.isnan(scale_factors))
         # Constant corrected prec to fill in (divided to each orig. timestep)
         const_prec = prec_corr / len(da_prec_orig_this_window['time'])
         # Fill in those zero-orig-prec grid cells
