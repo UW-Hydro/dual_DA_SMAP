@@ -169,19 +169,17 @@ class States(object):
         return ds
     
     
-    def perturb_soil_moisture_Gaussian(self, global_path, sigma_percent):
-        ''' Perturb each soil moisture state by sigma_percent %, uncorrelated
-            Gaussian noise.
+    def perturb_soil_moisture_Gaussian(self, da_scale):
+        ''' Perturb soil moisture states by adding Gaussian white noise. Each
+            grid cell and soil layer can have different noise magnitude, but
+            all veg and snow tiles within a certain layer and grid cell have
+            the same noise magnitude.
         
         Parameters
         ----------
-        global_path: <str>
-            VIC global parameter file path; can be a template file (here it is only used to
-            extract soil parameter file info)
-        sigma_percent: <float>
-            Percentage of the maximum state value to perturb; sigma_percent will be used
-            as the standard deviation of the Gaussian noise added (e.g., sigma_percent = 5
-            for 5% of maximum soil moisture perturbation)
+        da_scale: <xr.DataArray>
+            Standard deviation of Gaussian noise to add
+            Dimension: [nlayer, lat, lon]
         
         Returns
         ----------
@@ -192,46 +190,35 @@ class States(object):
         Require
         ----------
         numpy
-        find_global_param_value
+        calculate_sm_noise_to_add_magnitude
         '''
         
-        # Load soil parameter file (as defined in global file)
-        with open(global_path, 'r') as global_file:
-            global_param = global_file.read()
-        soil_nc = find_global_param_value(global_param, 'PARAMETERS')
-        ds_soil = xr.open_dataset(soil_nc, decode_cf=False)
-        ds_soil.load()
-        ds_soil.close()
-        
-        # Calculate maximum soil moisture for each layer
-        # Dimension: [nlayer, lat, lon]
-        da_depth = ds_soil['depth']  # [m]
-        da_bulk_density = ds_soil['bulk_density']  # [kg/m3]
-        da_soil_density = ds_soil['soil_density']  # [kg/m3]
-        da_porosity = 1 - da_bulk_density / da_soil_density
-        da_max_moist = da_depth * da_porosity * 1000  # [mm]
-
-        # Perturb for each layer and each grid cell
+        # Extract coords
         veg_class = self.ds['veg_class']
         snow_band = self.ds['snow_band']
         lat = self.ds['lat']
         lon = self.ds['lon']
         nlayer = self.ds['nlayer']
-        
+
+        # Determine size for the map() function
         ds = self.ds.copy()
-        for lt in lat:
-            for lg in lon:
-                for l in nlayer:
-                    max_moist = da_max_moist.loc[l, lt, lg].values
-                    if np.isnan(max_moist) == True or max_moist <= 0:  # if inactive cell
-                        continue
-                    noise = np.random.normal(
-                                    loc=0,
-                                    scale=da_max_moist.loc[l, lt, lg].values *\
-                                          sigma_percent / 100.0,
-                                    size=(len(veg_class), len(snow_band)))
-                    ds['STATE_SOIL_MOISTURE'].loc[:, :, l, lt, lg] += noise
-        
+        nloop = len(nlayer)*len(lat)*len(lon)
+        size = np.empty([nloop, 2], dtype=int)
+        size[:, 0] = len(veg_class)
+        size[:, 1] = len(snow_band)
+
+        # Calculate noise
+        noise = np.array(list((map(np.random.normal,
+                                   np.zeros(nloop),
+                                   da_scale.values.reshape([nloop]),
+                                   size))))  # dim: [nloop, veg, snow]
+        noise = np.rollaxis(noise, 0, 3).reshape(
+                    [len(veg_class), len(snow_band), len(nlayer), len(lat),
+                     len(lon)])
+
+        # Add noise to the original soil moisture states
+        ds['STATE_SOIL_MOISTURE'][:] += noise
+
         # Reset negative perturbed soil moistures to zero
         sm_new = ds['STATE_SOIL_MOISTURE'].values
         sm_new[sm_new<0] = 0
@@ -256,6 +243,53 @@ class States(object):
             (measurement for each grid cell )
         '''
         pass
+
+
+def calculate_sm_noise_to_add_magnitude(global_path, sigma_percent):
+    ''' Calculates the standard deviation of Gaussian noise to add for each
+        layer and grid cell.
+
+        Parameters
+        ----------
+        global_path: <str>
+            VIC global parameter file path; can be a template file (here it is only used to
+            extract soil parameter file info)
+        sigma_percent: <float>
+            Percentage of the maximum state value to perturb; sigma_percent will be used
+            as the standard deviation of the Gaussian noise added (e.g., sigma_percent = 5
+            for 5% of maximum soil moisture perturbation)
+
+        Returns
+        ----------
+        da_scale: <xr.DataArray>
+            Standard deviation of noise to add
+            Dimension: [nlayer, lat, lon]
+    '''
+
+    # Load soil parameter file (as defined in global file)
+    with open(global_path, 'r') as global_file:
+        global_param = global_file.read()
+    soil_nc = find_global_param_value(global_param, 'PARAMETERS')
+    ds_soil = xr.open_dataset(soil_nc, decode_cf=False)
+    ds_soil.load()
+    ds_soil.close()
+
+    # Calculate maximum soil moisture for each layer
+    # Dimension: [nlayer, lat, lon]
+    da_depth = ds_soil['depth']  # [m]
+    da_bulk_density = ds_soil['bulk_density']  # [kg/m3]
+    da_soil_density = ds_soil['soil_density']  # [kg/m3]
+    da_porosity = 1 - da_bulk_density / da_soil_density
+    da_max_moist = da_depth * da_porosity * 1000  # [mm]
+
+    # Calculate standard devation of noise to add
+    da_scale = da_max_moist * sigma_percent / 100.0
+
+    # Mask out inactive cells
+    mask = ds_soil['mask']
+    da_scale[:] = da_scale.values[:, mask==1] = np.nan
+
+    return da_scale
 
 
 class Forcings(object):
@@ -1610,13 +1644,18 @@ def perturb_soil_moisture_states(states_to_perturb_nc, global_path,
     class States
     '''
     
-    # Load in original state file
+    # --- Load in original state file --- #
     class_states = States(xr.open_dataset(states_to_perturb_nc))
 
+    # --- Perturb --- #
+    # Calculate perturbation magnitude
+    da_scale = calculate_sm_noise_to_add_magnitude(global_path,
+                                                   sigma_percent)
     # Perturb
     ds_perturbed = class_states.perturb_soil_moisture_Gaussian(
-                                        global_path, sigma_percent)
-    # Save perturbed state file
+                            da_scale)
+
+    # --- Save perturbed state file --- #
     ds_perturbed.to_netcdf(out_states_nc,
                            format='NETCDF4_CLASSIC')
 
