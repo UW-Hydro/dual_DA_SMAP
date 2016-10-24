@@ -212,8 +212,11 @@ for t in range(len(meas_times)):
                                                 current_time.hour*3600+current_time.second)))
 
 # (3) Concatenate all history files
+print('Concatenating all history files...')
 ds_concat = concat_vic_history_files(list_history_paths)
+
 # Save to history output directory
+print('Saving history file to netCDF...')
 first_time = pd.to_datetime(ds_concat['time'][0].values)
 last_time = pd.to_datetime(ds_concat['time'][-1].values)
 hist_concat_nc = os.path.join(truth_subdirs['history'],
@@ -228,6 +231,9 @@ ds_concat.to_netcdf(hist_concat_nc)
 # Simulate synthetic measurement - Extract top-layer soil
 # moisture from "truth" at the end of each day, and add noise
 # =========================================================== #
+
+print('Simulating synthetic measurements...')
+
 # --- Load history file --- #
 ds_hist = xr.open_dataset(hist_concat_nc)
 

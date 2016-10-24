@@ -1672,17 +1672,19 @@ def concat_vic_history_files(list_history_nc):
     # --- Open all history files --- #
     list_ds = []
     for file in list_history_nc:
+        print("\tOpening file {}".format(file))
         list_ds.append(xr.open_dataset(file))
-    
+
     # --- Loop over each history file and concatenate --- #
     list_ds_to_concat = []  # list of ds to concat, with no overlapping periods
     for i in range(len(list_ds[:-1])):
+        print("\tChecking history file {}".format(i))
         # Determine and truncate data, if needed
         times_current = pd.to_datetime(list_ds[i]['time'].values)  # times of current ds
         times_next = pd.to_datetime(list_ds[i+1]['time'].values)  # times of next ds
         if times_current[-1] >= times_next[0]:  # if overlap, truncate the current ds
             # Minus 2 seconds to avoid resolution issue
-            trunc_time_point = times_nest[0] - pd.DateOffset(seconds=2) 
+            trunc_time_point = times_next[0] - pd.DateOffset(seconds=2) 
             ds = list_ds[i].sel(time=slice(None, '{}T{:02d}:{:02d}:{:02d}'.format(
                                                 trunc_time_point.strftime('%Y-%m-%d'),
                                                 trunc_time_point.hour,
@@ -1695,8 +1697,10 @@ def concat_vic_history_files(list_history_nc):
         
     # Concat the last period fully to the list
     list_ds_to_concat.append(list_ds[-1])
-    
+   
     # Concat all ds's
+    print('\tConcatenating...')
+    
     ds_concat = xr.concat(list_ds_to_concat, dim='time')
     
     return ds_concat
