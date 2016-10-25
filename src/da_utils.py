@@ -286,8 +286,10 @@ def calculate_sm_noise_to_add_magnitude(global_path, sigma_percent):
     da_scale = da_max_moist * sigma_percent / 100.0
 
     # Mask out inactive cells
-    mask = ds_soil['mask']
-    da_scale[:] = da_scale.values[:, mask==1] = np.nan
+    mask = ds_soil['mask'].values
+    scale = da_scale.values
+    scale[:, mask==1] = np.nan
+    da_scale[:] = scale
 
     return da_scale
 
