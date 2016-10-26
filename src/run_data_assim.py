@@ -41,7 +41,7 @@ np.random.seed(cfg['CONTROL']['seed'])
 # ============================================================ #
 dirs = setup_output_dirs(os.path.join(cfg['CONTROL']['root_dir'],
                                       cfg['OUTPUT']['output_EnKF_basedir']),
-                         mkdirs=['global', 'history', 'states', 'forcings',
+                         mkdirs=['global', 'history', 'states',
                                  'logs', 'plots'])
 
 
@@ -101,8 +101,8 @@ vic_run_end_time = pd.to_datetime(cfg['EnKF']['end_time'])
 print('Running open-loop: ', vic_run_start_time, 'to', vic_run_end_time,
        '...')
 
-# --- Run VIC (unperturbed forcings and states) --- #
-# Identify initial state time (must be one time step before start_time)
+# --- Run VIC (orig. forcings and states) --- #
+# Identify initial state time
 init_state_time = vic_run_start_time
 # Prepare log sub-directory
 out_log_dir = setup_output_dirs(dirs['logs'], mkdirs=['openloop'])['openloop']
@@ -177,13 +177,12 @@ dict_ens_list_history_files = EnKF_VIC(
          vic_exe=vic_exe,
          vic_global_template=os.path.join(cfg['CONTROL']['root_dir'],
                                           cfg['VIC']['vic_global_template']),
-         vic_forcing_orig_basepath=os.path.join(cfg['CONTROL']['root_dir'],
-                                          cfg['FORCINGS']['orig_forcing_nc_basepath']),
+         ens_forcing_basepath=os.path.join(cfg['CONTROL']['root_dir'],
+                                           cfg['FORCINGS']['ens_forcing_basepath']),
          vic_model_steps_per_day=cfg['VIC']['model_steps_per_day'],
          output_vic_global_root_dir=dirs['global'],
          output_vic_state_root_dir=dirs['states'],
          output_vic_history_root_dir=dirs['history'],
-         output_vic_forcing_root_dir=dirs['forcings'],
          output_vic_log_root_dir=dirs['logs'],
          dict_varnames=dict_varnames, prec_std=cfg['FORCINGS']['prec_std'],
          state_perturb_sigma_percent=cfg['EnKF']['state_perturb_sigma_percent'],
