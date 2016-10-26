@@ -437,10 +437,10 @@ class VarToPerturb(object):
 
 def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
              da_meas_time_var, vic_exe, vic_global_template,
-             vic_forcing_orig_basepath,
+             ens_forcing_basepath,
              vic_model_steps_per_day, output_vic_global_root_dir,
              output_vic_state_root_dir, output_vic_history_root_dir,
-             output_vic_forcing_root_dir, output_vic_log_root_dir,
+             output_vic_log_root_dir,
              dict_varnames, prec_std, state_perturb_sigma_percent, nproc=1,
              mpi_proc=None, mpi_exe='mpiexec'):
     ''' This function runs ensemble kalman filter (EnKF) on VIC (image driver)
@@ -470,8 +470,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
         VIC run class
     vic_global_template: <str>
         VIC global file template
-    vic_forcing_orig_basepath: <str>
-        VIC original unperturbed forcing netCDF file basepath ('YYYY.nc' will be appended)
+    ens_forcing_basepath: <str>
+        Ensemble forcing netCDF files basepath ('ens{}.YYYY.nc' will be appended)
     vic_model_steps_per_day: <int>
         VIC model steps per day
     output_vic_global_root_dir: <str>
@@ -480,8 +480,6 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
         Directory for VIC output state files
     output_vic_result_root_dir: <str>
         Directory for VIC output result files
-    output_vic_forcing_root_dir: <str>
-        Directory for VIC perturbed forcing files
     output_vic_log_root_dir: <str>
         Directory for VIC output log files
     dict_varnames: <dict>
@@ -527,19 +525,6 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
     pass
     # Check whether the time range of da_meas is within run period
     pass
-    
-    # --- Prepare perturbed forcing data for each ensemble member --- #
-    print('\tPreparing perturbed forcings...')
-    start_year = start_time.year
-    end_year = end_time.year
-    for year in range(start_year, end_year+1): 
-        class_forcings_orig = Forcings(xr.open_dataset(
-                                    '{}{}.nc'.format(vic_forcing_orig_basepath,
-                                                     year)))
-        perturb_forcings_ensemble(N, orig_forcing=class_forcings_orig,
-                                  year=year, dict_varnames=dict_varnames,
-                                  prec_std=prec_std,
-                                  out_forcing_dir=output_vic_forcing_root_dir)
     
     # --- Step 1. Initialize ---#
     init_state_time = start_time
@@ -607,7 +592,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
                        out_history_dir=out_history_dir,
                        out_global_dir=out_global_dir,
                        out_log_dir=out_log_dir,
-                       forcing_perturbed_dir=output_vic_forcing_root_dir,
+                       ens_forcing_basepath=ens_forcing_basepath,
                        nproc=nproc,
                        mpi_proc=mpi_proc,
                        mpi_exe=mpi_exe)
@@ -704,7 +689,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
                        out_history_dir=out_history_dir,
                        out_global_dir=out_global_dir,
                        out_log_dir=out_log_dir,
-                       forcing_perturbed_dir=output_vic_forcing_root_dir,  # perturbed forcing
+                       ens_forcing_basepath=ens_forcing_basepath,
                        nproc=nproc,
                        mpi_proc=mpi_proc,
                        mpi_exe=mpi_exe)
@@ -894,7 +879,7 @@ def run_vic_for_multiprocess(vic_exe, global_file, log_dir,
 def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_file,
                        vic_model_steps_per_day, init_state_dir, out_state_dir,
                        out_history_dir, out_global_dir, out_log_dir,
-                       forcing_perturbed_dir, nproc=1, mpi_proc=None,
+                       ens_forcing_basepath, nproc=1, mpi_proc=None,
                        mpi_exe='mpiexec'):
     ''' This function propagates (via VIC) an ensemble of states to a certain time point.
     
@@ -927,8 +912,8 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
     out_log_dir: <str>
         Directory of output log files for each ensemble member
         Log file names will be "global.ens<i>.xxx", where <i> is 1, 2, ..., N
-    forcing_perturbed_dir: <str>
-        Perturbed forcing directory. File names are: "forc.ens<i>.<YYYY>.nc",
+    ens_forcing_basepath: <str>
+        Ensemble forcing basepath. "ens<i>.<YYYY>.nc" will be appended,
         where <i> is 1, 2, ..., N, and <YYYY> is forcing year
     nproc: <int>
         Number of processors to use for parallel ensemble
@@ -950,9 +935,8 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
     if nproc == 1:
         for i in range(N):
             # Generate VIC global param file
-            replace = OrderedDict([('FORCING1', os.path.join(
-                                        forcing_perturbed_dir,
-                                        'forc.ens{}.'.format(i+1))),
+            replace = OrderedDict([('FORCING1', '{}ens{}.{}.nc'.format(
+                                        ens_forcing_basepath, i+1)),
                                    ('OUTFILE', 'history.ens{}'.format(i+1))])
             global_file = generate_VIC_global_file(
                                 global_template_path=vic_global_template_file,
@@ -981,8 +965,8 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
         # --- Loop over each ensemble member --- #
         for i in range(N):
             # Generate VIC global param file
-            replace = OrderedDict([('FORCING1', os.path.join(forcing_perturbed_dir,
-                                                             'forc.ens{}.'.format(i+1))),
+            replace = OrderedDict([('FORCING1', '{}ens{}.{}.nc'.format(
+                                        ens_forcing_basepath, i+1)),
                                    ('OUTFILE', 'history.ens{}'.format(i+1))])
             global_file = generate_VIC_global_file(
                                 global_template_path=vic_global_template_file,
