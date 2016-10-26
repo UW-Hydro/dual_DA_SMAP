@@ -933,7 +933,7 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
     if nproc == 1:
         for i in range(N):
             # Generate VIC global param file
-            replace = OrderedDict([('FORCING1', '{}ens{}.{}.nc'.format(
+            replace = OrderedDict([('FORCING1', '{}ens{}.'.format(
                                         ens_forcing_basepath, i+1)),
                                    ('OUTFILE', 'history.ens{}'.format(i+1))])
             global_file = generate_VIC_global_file(
@@ -963,8 +963,8 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
         # --- Loop over each ensemble member --- #
         for i in range(N):
             # Generate VIC global param file
-            replace = OrderedDict([('FORCING1', '{}ens{}.{}.nc'.format(
-                                        ens_forcing_basepath, i+1)),
+            replace = OrderedDict([('FORCING1', '{}ens{}.'.format(
+                                            ens_forcing_basepath, i+1)),
                                    ('OUTFILE', 'history.ens{}'.format(i+1))])
             global_file = generate_VIC_global_file(
                                 global_template_path=vic_global_template_file,
