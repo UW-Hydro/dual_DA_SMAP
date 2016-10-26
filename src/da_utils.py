@@ -441,7 +441,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
              vic_model_steps_per_day, output_vic_global_root_dir,
              output_vic_state_root_dir, output_vic_history_root_dir,
              output_vic_log_root_dir,
-             dict_varnames, prec_std, state_perturb_sigma_percent, nproc=1,
+             dict_varnames, state_perturb_sigma_percent, nproc=1,
              mpi_proc=None, mpi_exe='mpiexec'):
     ''' This function runs ensemble kalman filter (EnKF) on VIC (image driver)
 
@@ -485,8 +485,6 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
     dict_varnames: <dict>
         A dictionary of forcing names in nc file;
         e.g., {'PREC': 'prcp'; 'AIR_TEMP': 'tas'}
-    prec_std: <float>
-        Standard deviation of the precipitation perturbing multiplier
     state_perturb_sigma_percent: <float>
         Percentage of max value of each state to perturb (e.g., if
         state_perturb_sigma_percent = 5, then Gaussian noise with standard deviation

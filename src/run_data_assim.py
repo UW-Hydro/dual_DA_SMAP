@@ -184,7 +184,7 @@ dict_ens_list_history_files = EnKF_VIC(
          output_vic_state_root_dir=dirs['states'],
          output_vic_history_root_dir=dirs['history'],
          output_vic_log_root_dir=dirs['logs'],
-         dict_varnames=dict_varnames, prec_std=cfg['FORCINGS']['prec_std'],
+         dict_varnames=dict_varnames,
          state_perturb_sigma_percent=cfg['EnKF']['state_perturb_sigma_percent'],
          nproc=int(sys.argv[2]))
 
