@@ -2,19 +2,19 @@
 # Random generation seed
 seed = 456
 # Root directory (all the paths specified would be under this root dir)
-root_dir = /raid2/ymao/data_assim/
+root_dir = /civil/hydro/ymao/data_assim/
 
 [VIC]
 # VIC image driver executable file
 exe = VIC/vic/drivers/image/vic_image.exe
 # MPI exe (this is absolute path!!!)
-mpi_exe = /opt/openmpi/bin/mpiexec
+mpi_exe = mpiexec.hydra
 # VIC global template file
 vic_global_template = control/vic/global.ArkRed.test.template.txt
 # Model step per day. This is VIC model running timestep
 model_steps_per_day = 8
 # Original forcing netCDF file basepath ('YYYY.nc' will be appended)
-orig_forcing_nc_basepath = forcing/vic/Newman/ArkRed/ens_1/force.
+orig_forcing_nc_basepath = forcing/vic/Newman/ArkRed/ens_100/force.
 # Forcing variable names:
 PREC = PREC
 
@@ -30,7 +30,7 @@ state_perturb_sigma_percent = 5
 [TIME_INDEX]
 # Simulation start and end time (YYYY-MM-DD-HH-SS)
 start_time = 1980-01-01-00-00
-end_time = 1982-12-31-23-00
+end_time = 1980-12-31-23-00
 # Last time step hour of a day (timestep-beginning, e.g., 23 for hourly VIC output)
 # This should correspond to VIC output timestep set in the VIC global template file
 last_hour = 21

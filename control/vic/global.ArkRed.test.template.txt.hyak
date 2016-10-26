@@ -28,7 +28,7 @@ AERO_RESIST_CANSNOW AR_406
 #######################################################################
 # DOMAIN INFO
 #######################################################################
-DOMAIN  /raid2/ymao/data_assim/param/vic/ArkRed/ArkRed.domain.nc
+DOMAIN  /civil/hydro/ymao/data_assim/param/vic/ArkRed/ArkRed.domain.nc
 DOMAIN_TYPE    LAT     lat
 DOMAIN_TYPE    LON     lon
 DOMAIN_TYPE    MASK    mask
@@ -52,7 +52,7 @@ STATE_FORMAT           NETCDF4_CLASSIC  # State file format, valid options: NETC
 # Forcing Files and Parameters
 # netcdf forcing files will be of the form: <FORCING1>YYYY.nc
 #######################################################################
-FORCING1	  /raid2/ymao/data_assim/forcing/vic/Newman/ArkRed/ens_1/force.
+FORCING1	  /civil/hydro/ymao/data_assim/forcing/vic/Newman/ArkRed/ens_1/force.
 FORCE_TYPE    AIR_TEMP 	   AIR_TEMP    # Average air temperature, C
 FORCE_TYPE    PREC 	       PREC   # Total precipitation (rain and snow), mm
 FORCE_TYPE    PRESSURE 	   PRESSURE   # Atmospheric pressure, kPa
@@ -65,7 +65,7 @@ WIND_H        10.0                # height of wind speed measurement
 #######################################################################
 # Land Surface Files and Parameters
 #######################################################################
-PARAMETERS      /raid2/ymao/data_assim/param/vic/ArkRed/Maurer/ArkRed.param.nc
+PARAMETERS      /civil/hydro/ymao/data_assim/param/vic/ArkRed/Maurer/ArkRed.param.nc
 NODES           3  # number of soil thermal nodes
 SNOW_BAND	    False
 
