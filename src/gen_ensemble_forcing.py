@@ -44,8 +44,8 @@ end_time = pd.to_datetime(cfg['ENSEMBLE']['end_time'])
 orig_forcing_basedir = os.path.join(
                             cfg['CONTROL']['root_dir'],
                             cfg['FORCING']['orig_forcing_nc_basepath'])
-output_dir = os.path.join(cfg['CONTROL']['root_dir'],
-                          cfg['OUTPUT']['output_dir'])
+output_basedir = os.path.join(cfg['CONTROL']['root_dir'],
+                              cfg['OUTPUT']['output_basedir'])
 N = cfg['ENSEMBLE']['N']
 
 # --- Process forcing names in the input forcing netCDF file --- #
@@ -64,6 +64,6 @@ for year in range(start_year, end_year+1):
     perturb_forcings_ensemble(N, orig_forcing=class_forcings_orig,
                               year=year, dict_varnames=dict_varnames,
                               prec_std=cfg['FORCING']['prec_std'],
-                              out_forcing_dir=output_dir)
+                              out_forcing_basedir=output_basedir)
 
 
