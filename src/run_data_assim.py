@@ -29,6 +29,11 @@ from da_utils import (EnKF_VIC, setup_output_dirs, generate_VIC_global_file,
 # Read config file
 cfg = read_configobj(sys.argv[1])
 
+# Number of processors for parallelizing ensemble runs
+nproc = int(sys.argv[2])
+
+# Number of processors for each VIC run
+mpi_proc = int(sys.argv[3])
 
 # ============================================================ #
 # Set random generation seed
@@ -46,9 +51,10 @@ dirs = setup_output_dirs(os.path.join(cfg['CONTROL']['root_dir'],
 
 
 # ============================================================ #
-# Prepare VIC exe
+# Prepare VIC exe and MPI exe
 # ============================================================ #
 vic_exe = VIC(os.path.join(cfg['CONTROL']['root_dir'], cfg['VIC']['vic_exe']))
+mpi_exe = cfg['VIC']['mpi_exe']
 
 
 # ============================================================ #
@@ -87,7 +93,8 @@ log_dir = setup_output_dirs(dirs['logs'],
                             mkdirs=['spinup'])['spinup']
 
 # --- Run VIC --- #
-returncode = vic_exe.run(global_file, logdir=log_dir)
+returncode = vic_exe.run(global_file, logdir=log_dir,
+                         **{'mpi_proc': mpi_proc, 'mpi_exe': mpi_exe})
 check_returncode(returncode, expected=0)
 
 
@@ -124,7 +131,9 @@ propagate(start_time=vic_run_start_time, end_time=vic_run_end_time,
            out_log_dir=out_log_dir,
            forcing_basepath=os.path.join(
                                     cfg['CONTROL']['root_dir'],
-                                    cfg['FORCINGS']['orig_forcing_nc_basepath']))
+                                    cfg['FORCINGS']['orig_forcing_nc_basepath']),
+           mpi_proc=mpi_proc,
+           mpi_exe=mpi_exe)
 hist_openloop_nc = os.path.join(
                         dirs['history'],
                         'history.openloop.{}-{:05d}.nc'.format(
@@ -187,7 +196,7 @@ dict_ens_list_history_files = EnKF_VIC(
          output_vic_log_root_dir=dirs['logs'],
          dict_varnames=dict_varnames,
          state_perturb_sigma_percent=cfg['EnKF']['state_perturb_sigma_percent'],
-         nproc=int(sys.argv[2]))
+         nproc=nproc)
 
 # --- Concatenate all history files for each ensemble --- #
 out_hist_concat_dir = setup_output_dirs(dirs['history'],
