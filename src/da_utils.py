@@ -10,6 +10,7 @@ import multiprocessing as mp
 
 from tonic.models.vic.vic import VIC, default_vic_valgrind_error_code
 
+
 class VICReturnCodeError(Exception):
     pass
 
@@ -1539,17 +1540,12 @@ def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir, global_path,
     '''
     
     for i in range(N):
-        # Load in original state file
-        class_states = States(xr.open_dataset(
-                                os.path.join(states_to_perturb_dir,
-                                             'state.ens{}.nc'.format(i+1))))
-        # Perturb
-        ds_perturbed = class_states.perturb_soil_moisture_Gaussian(
-                                global_path, sigma_percent)
-        # Save perturbed state file
-        ds_perturbed.to_netcdf(os.path.join(out_states_dir,
-                                            'state.ens{}.nc'.format(i+1)),
-                               format='NETCDF4_CLASSIC')
+        states_to_perturb_nc = os.path.join(states_to_perturb_dir,
+                                            'state.ens{}.nc'.format(i+1))
+        out_states_nc = os.path.join(out_states_dir,
+                                     'state.ens{}.nc'.format(i+1))
+        perturb_soil_moisture_states(states_to_perturb_nc, global_path,
+                                 sigma_percent, out_states_nc)
 
 
 def propagate(start_time, end_time, vic_exe, vic_global_template_file,
