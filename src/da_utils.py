@@ -175,6 +175,7 @@ class States(object):
             grid cell and soil layer can have different noise magnitude, but
             all veg and snow tiles within a certain layer and grid cell have
             the same noise magnitude.
+            NOTE: this method does not change self
         
         Parameters
         ----------
@@ -228,22 +229,61 @@ class States(object):
         return ds
         
     
-    def update_soil_moisture(self, da_K, da_y, da_y_est, R):
+    def update_soil_moisture_states(self, da_K, da_y_meas, da_y_est, R):
         ''' This function updates soil moisture states for the whole field
+            NOTE: this method does not change self
         
         Parameters
         ----------
         da_K: <xr.DataArray>
-            Gain K for the whole field;
-            Dimension: [veg_class, snow_band, lat, lon, n, m], 
-            where [n, m] is the Kalman gain K;
-            This is output from function calculate_gain_K_whole_field
-        da_y: <xr.DataArray>
-            Measurement at this time point for the whole field;
-            Dimension: [lat, lon]
-            (measurement for each grid cell )
+            Gain K for the whole field
+            Dimension: [lat, lon, n, m], where [n, m] is the Kalman gain K
+        da_y_meas: <xr.DataArray> [lat, lon, m]
+            Measurements at current time
+        da_y_est: <xr.DataArray>
+            Estimated measurement from before-updated states (y = Hx);
+            Dimension: [lat, lon, m]
+        R: <float> (for m = 1)
+            Measurement error covariance matrix (measurement error ~ N(0, R))
+
+        Return
+        ----------
+        da_x_updated: <xr.DataArray>
+            Updated soil moisture states
+            Dimension: [lat, lon, n]
         '''
-        pass
+
+        # --- Extract dimensions --- #
+        m = len(da_y_est['m'])
+        n = len(self.da_EnKF['n'])
+        lat_coord = self.da_EnKF['lat']
+        lon_coord = self.da_EnKF['lon']
+
+        # --- Initiate updated DataArray for states --- #
+        da_x_updated = self.da_EnKF.copy()  # [lat, lon, n]
+
+        # --- Update states --- #
+        # Determine the total number of loops
+        nloop = len(lat_coord) * len(lon_coord)
+        # Generate random measurement perturbation
+        v = np.random.multivariate_normal(
+                np.zeros(m), R,size=nloop).reshape([nloop, m, 1])  # [nloop, m, 1]
+        # Convert xr.DataArray's to np.array's and straighten lat and lon into nloop
+        K = da_K.values.reshape([nloop, n, m])  # [nloop, n, m]
+        y_meas = da_y_meas.values.reshape([nloop, m, 1])  # [nloop, m, 1]
+        y_est = da_y_est.values.\
+                    reshape([nloop, m, 1])  # [nloop, m, 1]
+        # Calculate delta = K * (y_meas + v - y_est)
+        delta = np.array(list(map(
+                    lambda j: np.dot(K[j, :, :],
+                                     y_meas[j, :, :] + v[j, :, :] - y_est[j, :, :]),
+                    range(nloop))))  # [nloop, n, 1]
+        # Reshape delta
+        delta = delta.reshape([len(lat_coord), len(lon_coord), n])  # [lat, lon, n]
+        # Update states - add delta to orig. states
+        da_x_updated[:] += delta
+
+        return(da_x_updated)
 
 
 def calculate_sm_noise_to_add_magnitude(global_path, sigma_percent):
@@ -639,7 +679,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
         out_updated_state_dir = setup_output_dirs(output_vic_state_root_dir,
                                                   mkdirs=[updated_states_dir_name])[updated_states_dir_name]
         # Update states and save to nc files
-        da_x_updated = update_states_ensemble(da_x, da_y_est, da_K,
+        da_x_updated = update_states_ensemble(da_y_est, da_K,
                                               da_meas.loc[time, :, :, :], R,
                                               state_dir_before_update=state_dir_before_update,
                                               current_time=current_time,
@@ -1389,15 +1429,12 @@ def calculate_gain_K_whole_field(da_x, da_y_est, R):
     return da_K
 
 
-def update_states_ensemble(da_x, da_y_est, da_K, da_meas, R, state_dir_before_update, current_time,
+def update_states_ensemble(da_y_est, da_K, da_meas, R, state_dir_before_update, current_time,
                             out_vic_state_dir):
     ''' Update the EnKF states for the whole field for each ensemble member.
     
     Parameters
     ----------
-    da_x: <xr.DataArray>
-        Soil moisture states of all ensemble members, before update;
-        Dimension: [lat, lon, n, N]
     da_y_est: <xr.DataArray>
         Estimated measurement from pre-updated states of all ensemble members (y = Hx);
         Dimension: [lat, lon, m, N]
@@ -1429,37 +1466,12 @@ def update_states_ensemble(da_x, da_y_est, da_K, da_meas, R, state_dir_before_up
     ----------
     numpy
     '''
-    
-    # Extract dimensions
-    N = len(da_x['N'])  # number of ensemble members
-    m = len(da_y_est['m'])
-    n = len(da_x['n'])
-    lat_coord = da_x['lat']
-    lon_coord = da_x['lon']
-    
-    # Initiate updated DataArray for states
-    da_x_updated = da_x.copy()
-    
-    # Loop over each ensemble member and each grid cell
+
+    # Extract N
+    N = len(da_y_est['N'])
+
+    # Loop over each ensemble member
     for i in range(N):
-        for lat in lat_coord:
-            for lon in lon_coord:
-                # --- Calculate delta = K * (y_meas + v - y_est) for all grid cells --- #
-                # Generate random measurement perturbation
-                v = np.random.multivariate_normal(np.zeros(m), R).reshape((m, 1))  # [m*1]
-                # Extract other data for this grid cell
-                K = da_K.loc[lat, lon, :, :].values  # [n*m]
-                y_meas = da_meas.loc[lat, lon, :].values.reshape((m, 1))  # [m*1]
-                y_est = da_y_est.loc[lat, lon, :, i].values.reshape((m, 1))  # [m*1]
-                delta = np.dot(K, y_meas + v - y_est)  # [n*1]
-                # --- Update states --- #
-                da_x_updated.loc[lat, lon, :, i] += delta.reshape((n))
-                # --- Set negative to zero --- #
-                tmp = da_x_updated.loc[lat, lon, :, i].values
-                tmp[tmp<0] = 0
-                da_x_updated.loc[lat, lon, :, i] = tmp
-                
-        # --- Save updated states to nc files for each ensemble member --- #
         # Load VIC states before update for this ensemble member          
         ds = xr.open_dataset(os.path.join(state_dir_before_update,
                                           'state.ens{}.{}_{:05d}.nc'.format(
@@ -1468,7 +1480,12 @@ def update_states_ensemble(da_x, da_y_est, da_K, da_meas, R, state_dir_before_up
                                                     current_time.hour*3600+current_time.second)))
         # Convert EnKF states back to VIC states
         class_states = States(ds)
-        ds_updated = class_states.convert_new_EnKFstates_sm_to_VICstates(da_x_updated.loc[:, :, :, i])
+        # Update states
+        da_x_updated = class_states.update_soil_moisture_states(
+                                        da_K, da_meas,
+                                        da_y_est.loc[:, :, :, i], R)  # [lat, lon, n]
+        # Convert updated states to VIC states format
+        ds_updated = class_states.convert_new_EnKFstates_sm_to_VICstates(da_x_updated)
         # Save VIC states to netCDF file
         ds_updated.to_netcdf(os.path.join(out_vic_state_dir,
                                           'state.ens{}.nc'.format(i+1)),
