@@ -1360,6 +1360,7 @@ def calculate_gain_K_whole_field(da_x, da_y_est, R):
     lat_coord = da_x['lat']
     lon_coord = da_x['lon']
     n_coord = da_x['n']
+    N_coord = da_x['N']
     m_coord = da_y_est['m']
     
     # --- Initialize da_K --- #
@@ -1370,13 +1371,20 @@ def calculate_gain_K_whole_field(da_x, da_y_est, R):
                         dims=['lat', 'lon', 'n', 'm'])
     
     # --- Calculate gain K for the whole field --- #
-    for lat in lat_coord:
-        for lon in lon_coord:
-            # Calculate gain K
-            K = calculate_gain_K(da_x.loc[lat, lon, :, :],
-                                 da_y_est.loc[lat, lon, :, :], R)
-            # Fill K in da_K
-            da_K.loc[lat, lon, :, :] = K
+    # Determine the total number of loops
+    nloop = len(lat_coord) * len(lon_coord)
+    # Convert da_x and da_y_est to np.array and straighten lat and lon into nloop
+    x = da_x.values.reshape([nloop, len(n_coord), len(N_coord)])  # [nloop, n, N]
+    y_est = da_y_est.values.reshape([nloop, len(m_coord), len(N_coord)])  # [nloop, m, N]
+    # Calculate gain K for the whole field
+    K = np.array(list(map(
+                lambda i: calculate_gain_K(x[i, :, :], y_est[i, :, :], R),
+                range(nloop))))  # [nloop, n, m]
+    # Reshape K
+    K = K.reshape([len(lat_coord), len(lon_coord), len(n_coord),
+                   len(m_coord)])  # [lat, lon, n, m]
+    # Put in da_K
+    da_K[:] = K
 
     return da_K
 
