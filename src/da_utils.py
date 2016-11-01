@@ -1169,17 +1169,17 @@ def get_soil_moisture_and_estimated_meas_all_ensemble(N, state_dir, state_time,
     return da_x, da_y_est
 
 
-def calculate_y_est(da_x_cell, da_tile_frac_cell):
+def calculate_y_est(x_cell, tile_frac_cell):
     ''' Caclulate estimated measurement y_est = Hx for one grid cell; here y_est is
         calculated as tile-average top-layer soil moisture over the whole grid cell.
     
     Parameters
     ----------
-    da_x_cell: <xr.DataArray>
-        An DataArray of VIC soil moisture states for a grid cell
+    x_cell: <np.array>
+        An array of VIC soil moisture states for a grid cell
         Dimension: [veg_class, snow_band, nlayer]
-    da_tile_frac_cell: <xr.DataArray>
-        An DataArray of veg/band tile fraction for a grid cell
+    tile_frac_cell: <np.array>
+        An array of veg/band tile fraction for a grid cell
         Dimension: [veg_class, snow_band]
     
     Returns
@@ -1193,7 +1193,7 @@ def calculate_y_est(da_x_cell, da_tile_frac_cell):
     '''
     
     # Calculate y_est
-    y_est = np.nansum(da_x_cell[:, :, 0].values * da_tile_frac_cell.values)
+    y_est = np.nansum(x_cell[:, :, 0] * tile_frac_cell)
     
     return y_est
 
@@ -1223,19 +1223,34 @@ def calculate_y_est_whole_field(da_x, da_tile_frac):
     numpy
     '''
     
-    # Extract lat and lon coords
+    # --- Extract coords --- #
     lat = da_x['lat']
     lon = da_x['lon']
+    veg_class = da_x['veg_class']
+    snow_band = da_x['snow_band']
+    nlayer = da_x['nlayer']
     
-    # Initiate da_y_est
+    # --- Initiate da_y_est --- #
     data = np.empty([len(lat), len(lon), 1])
     da_y_est = xr.DataArray(data, coords=[lat, lon, [0]], dims=['lat', 'lon', 'm'])
     
-    # Loop over each grid cell and calculate y_est, and fill in da_y_est
-    for lt in lat:
-        for lg in lon:
-            da_y_est.loc[lt, lg, 0] = calculate_y_est(da_x.loc[:, :, :, lt, lg],
-                                                      da_tile_frac.loc[:, :, lt, lg])
+    # --- Calculate y_est for all grid cells --- #
+    # Determine the total number of loops
+    nloop = len(lat) * len(lon)
+    # Convert da_x and da_tile_frac to np.array and straighten lat and lon into nloop
+    x = da_x.values.reshape([len(veg_class), len(snow_band),
+                            len(nlayer), nloop])  # [nveg, nsnow, nlayer, nloop]
+    tile_frac = da_tile_frac.values.reshape([len(veg_class), len(snow_band),
+                                             nloop])  # [nveg, nsnow, nloop]
+    # Calculate y_est for all grid cells
+    y_est = np.array(list(map(
+                lambda i: calculate_y_est(x[:, :, :, i],
+                                          tile_frac[:, :, i]),
+                range(nloop)))).reshape([nloop, 1])  # [nloop, m=1]
+    # Reshape y_est
+    y_est = y_est.reshape([len(lat), len(lon), 1])  # [lat, lon, m=1]
+    # Put in da_y_est
+    da_y_est[:] = y_est
     
     return da_y_est
 
