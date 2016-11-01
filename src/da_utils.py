@@ -203,7 +203,7 @@ class States(object):
 
         # Determine size for the map() function
         ds = self.ds.copy()
-        nloop = len(nlayer)*len(lat)*len(lon)
+        nloop = len(nlayer) * len(lat) * len(lon)
         size = np.empty([nloop, 2], dtype=int)
         size[:, 0] = len(veg_class)
         size[:, 1] = len(snow_band)
@@ -1024,18 +1024,18 @@ def determine_tile_frac(global_path):
     xarray
     '''
     
-    # Load global parameter file
+    # --- Load global parameter file --- #
     with open(global_path, 'r') as global_file:
             global_param = global_file.read()
             
-    # Extract Cv from vegparam file (as defined in the global file)
+    # --- Extract Cv from vegparam file (as defined in the global file) --- #
     param_nc = find_global_param_value(global_param, 'PARAMETERS')   
     ds_param = xr.open_dataset(param_nc, decode_cf=False)
     da_Cv = ds_param['Cv']  # dim: [veg_class, lat, lon]
     lat = da_Cv['lat']
     lon = da_Cv['lon']
     
-    # Extract snowband info from the global and param files
+    # --- Extract snowband info from the global and param files --- #
     SNOW_BAND = find_global_param_value(global_param, 'SNOW_BAND')
     if SNOW_BAND.upper() == 'TRUE':
         n_snowband = len(ds_param['snow_band'])
@@ -1049,7 +1049,7 @@ def determine_tile_frac(global_path):
     else:  # if more than one snowband
         da_AreaFract = ds_param['AreaFract']
 
-    # Initialize the final DataArray
+    # --- Initialize the final DataArray --- #
     veg_class = da_Cv['veg_class']
     snow_band = da_AreaFract['snow_band']
     data = np.empty([len(veg_class), len(snow_band), len(lat), len(lon)])
@@ -1057,12 +1057,27 @@ def determine_tile_frac(global_path):
     da_tile_frac = xr.DataArray(data, coords=[veg_class, snow_band, lat, lon],
                                 dims=['veg_class', 'snow_band', 'lat', 'lon'])
     
-    # Calculate fraction of each veg/snowband tile for each grid cell, and fill in
-    # da_file_frac
-    for lt in lat:
-        for lg in lon:
-            da_tile_frac.loc[:, :, lt, lg] =\
-                    da_Cv.loc[:, lt, lg] * da_AreaFract.loc[:, lt, lg]
+    # --- Calculate fraction of each veg/snowband tile for each grid cell,
+    # and fill in da_file_frac --- #
+    # Determine the total number of loops
+    nloop = len(lat) * len(lon)
+    # Convert Cv and AreaFract to np.array and straighten lat and lon into nloop
+    Cv = da_Cv.values.reshape([len(veg_class), nloop])  # [nveg, nloop]
+    AreaFract = da_AreaFract.values.reshape([len(snow_band), nloop])  # [nsnow, nloop]
+
+    # Multiply Cv and AreaFract for each tile and grid cell
+    tile_frac = np.array(list(map(
+                    lambda i: np.dot(
+                        Cv[:, i].reshape([len(veg_class), 1]),
+                        AreaFract[:, i].reshape([1, len(snow_band)])),
+                    range(nloop))))  # [nloop, nveg, nsnow]
+
+    # Reshape tile_frac
+    tile_frac = np.rollaxis(tile_frac, 0, 3)  # [nveg, nsow, nloop]
+    tile_frac = tile_frac.reshape([len(veg_class), len(snow_band), len(lat), len(lon)])
+
+    # Put in da_tile_frac
+    da_tile_frac[:] = tile_frac
     
     return da_tile_frac
 
@@ -1347,7 +1362,7 @@ def calculate_gain_K_whole_field(da_x, da_y_est, R):
                                  da_y_est.loc[lat, lon, :, :], R)
             # Fill K in da_K
             da_K.loc[lat, lon, :, :] = K
-    
+
     return da_K
 
 
