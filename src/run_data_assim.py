@@ -22,6 +22,7 @@ from da_utils import (EnKF_VIC, setup_output_dirs, generate_VIC_global_file,
                       check_returncode, propagate, calculate_ensemble_mean_states,
                       run_vic_assigned_states, concat_vic_history_files)
 
+import timeit
 
 # ============================================================ #
 # Process command line arguments
@@ -93,9 +94,12 @@ log_dir = setup_output_dirs(dirs['logs'],
                             mkdirs=['spinup'])['spinup']
 
 # --- Run VIC --- #
+time1 = timeit.default_timer()
 returncode = vic_exe.run(global_file, logdir=log_dir,
                          **{'mpi_proc': mpi_proc, 'mpi_exe': mpi_exe})
 check_returncode(returncode, expected=0)
+time2 = timeit.default_timer()
+print('\tTime for spinning up: {} sec'.format(time2-time1))
 
 
 # ============================================================ #
@@ -113,6 +117,7 @@ print('Running open-loop: ', vic_run_start_time, 'to', vic_run_end_time,
 init_state_time = vic_run_start_time
 # Prepare log sub-directory
 out_log_dir = setup_output_dirs(dirs['logs'], mkdirs=['openloop'])['openloop']
+time1 = timeit.default_timer()
 propagate(start_time=vic_run_start_time, end_time=vic_run_end_time,
           vic_exe=vic_exe,
           vic_global_template_file=os.path.join(
@@ -134,6 +139,8 @@ propagate(start_time=vic_run_start_time, end_time=vic_run_end_time,
                                     cfg['FORCINGS']['orig_forcing_nc_basepath']),
            mpi_proc=mpi_proc,
            mpi_exe=mpi_exe)
+time2 = timeit.default_timer()
+print('\tTime for open-loop: {} sec'.format(time2-time1))
 hist_openloop_nc = os.path.join(
                         dirs['history'],
                         'history.openloop.{}-{:05d}.nc'.format(
