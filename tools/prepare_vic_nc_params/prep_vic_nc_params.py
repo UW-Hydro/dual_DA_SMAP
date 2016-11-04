@@ -13,6 +13,7 @@ import getpass
 from datetime import datetime
 import numpy as np
 import subprocess
+import sys
 
 from tonic.io import read_config, read_configobj
 import tonic.models.vic.grid_params as gp
@@ -25,7 +26,8 @@ now = datetime.now()
 # ============================================================== #
 # Load in config file
 # ============================================================== #
-cfg = read_configobj('/raid2/ymao/data_assim/tools/prepare_vic_nc_params/cfg/prep_vic_nc_params.Maurer.ArkRed.cfg')
+cfg = read_configobj(sys.argv[1])
+
 
 # ============================================================== #
 # Convert VIC parameter files to netCDF - same domain as ascii param files
