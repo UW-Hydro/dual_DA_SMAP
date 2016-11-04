@@ -17,6 +17,7 @@ from tonic.models.vic.vic import VIC
 from tonic.io import read_configobj
 
 from da_utils import (Forcings, setup_output_dirs, propagate,
+                      calculate_sm_noise_to_add_magnitude,
                       perturb_soil_moisture_states, concat_vic_history_files,
                       calculate_max_soil_moist_domain, VarToPerturb)
 
@@ -150,6 +151,14 @@ list_history_paths.append(os.path.join(truth_subdirs['history'],
                                             start_time.hour*3600+start_time.second)))
 
 # (2) Loop over until each measurement point and run VIC
+# --- Calculate state perturbation magnitude --- #
+da_scale = calculate_sm_noise_to_add_magnitude(
+                vic_history_path=os.path.join(
+                        cfg['CONTROL']['root_dir'],
+                        cfg['FORCINGS_STATES_PERTURB']['vic_history_path']),
+                sigma_percent=cfg['FORCINGS_STATES_PERTURB']['state_perturb_sigma_percent'])
+
+# --- Run VIC --- #
 for t in range(len(meas_times)):
     # --- Determine last, current and next time point (all these are time
     # points at the beginning of a time step)--- #
@@ -179,8 +188,7 @@ for t in range(len(meas_times)):
                                     state_time.hour*3600+state_time.second))
     perturb_soil_moisture_states(
             states_to_perturb_nc=orig_state_nc,
-            global_path=global_template,
-            sigma_percent=cfg['FORCINGS_STATES_PERTURB']['state_perturb_sigma_percent'],
+            da_scale,
             out_states_nc=perturbed_state_nc)
 
     # --- Propagate to the next time point --- #
