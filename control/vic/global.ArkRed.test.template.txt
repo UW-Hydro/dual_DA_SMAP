@@ -68,7 +68,6 @@ PARAMETERS      /raid2/ymao/data_assim/param/vic/ArkRed/Naoki/ArkRed.param.nc
 BASEFLOW        NIJSSEN2001 # ARNO or NIJSSEN2001
 NODES           3  # number of soil thermal nodes
 SNOW_BAND	    False
-COMPUTE_TREELINE  10  # TRUE: you must specify the default understory veg type, eg 10
 
 #######################################################################
 # Output Files and Parameters

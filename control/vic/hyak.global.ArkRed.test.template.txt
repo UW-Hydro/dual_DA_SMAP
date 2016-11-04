@@ -23,7 +23,6 @@ FULL_ENERGY FALSE	# calculate full energy balance
 FROZEN_SOIL	FALSE	# calculate frozen soils
 
 #######################################################################
-AERO_RESIST_CANSNOW AR_406
 
 #######################################################################
 # DOMAIN INFO
@@ -65,7 +64,8 @@ WIND_H        10.0                # height of wind speed measurement
 #######################################################################
 # Land Surface Files and Parameters
 #######################################################################
-PARAMETERS      /civil/hydro/ymao/data_assim/param/vic/ArkRed/Maurer/ArkRed.param.nc
+PARAMETERS      /civil/hydro/ymao/data_assim/param/vic/ArkRed/Naoki/ArkRed.param.nc
+BASEFLOW        NIJSSEN2001 # ARNO or NIJSSEN2001
 NODES           3  # number of soil thermal nodes
 SNOW_BAND	    False
 
@@ -76,18 +76,18 @@ RESULT_DIR  $result_dir
 OUTFILE     fluxes
 AGGFREQ     NHOURS 3
 
-OUTVAR      OUT_PREC
+#OUTVAR      OUT_PREC
 OUTVAR      OUT_RAINF
 OUTVAR      OUT_SNOWF
-OUTVAR      OUT_AIR_TEMP
-OUTVAR      OUT_SWDOWN
-OUTVAR      OUT_LWDOWN
-OUTVAR      OUT_PRESSURE
-OUTVAR      OUT_WIND
+#OUTVAR      OUT_AIR_TEMP
+#OUTVAR      OUT_SWDOWN
+#OUTVAR      OUT_LWDOWN
+#OUTVAR      OUT_PRESSURE
+#OUTVAR      OUT_WIND
 OUTVAR      OUT_DENSITY
 OUTVAR      OUT_REL_HUMID
 OUTVAR      OUT_QAIR
-OUTVAR      OUT_VP
+#OUTVAR      OUT_VP
 OUTVAR      OUT_VPD
 OUTVAR      OUT_RUNOFF
 OUTVAR      OUT_BASEFLOW
