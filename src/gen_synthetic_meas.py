@@ -188,7 +188,7 @@ for t in range(len(meas_times)):
                                     state_time.hour*3600+state_time.second))
     perturb_soil_moisture_states(
             states_to_perturb_nc=orig_state_nc,
-            da_scale,
+            da_scale=da_scale,
             out_states_nc=perturbed_state_nc)
 
     # --- Propagate to the next time point --- #
