@@ -1894,7 +1894,7 @@ def run_vic_assigned_states(start_time, end_time, vic_exe, init_state_nc,
                             vic_forcing_basepath, vic_model_steps_per_day,
                             output_global_root_dir, output_state_root_dir,
                             output_vic_history_root_dir,
-                            output_vic_log_root_dir):
+                            output_vic_log_root_dir, mpi_proc=None, mpi_exe=None):
     ''' Run VIC with assigned initial states and other assigned state files during the simulation time
     
     Parameters
@@ -1925,6 +1925,10 @@ def run_vic_assigned_states(start_time, end_time, vic_exe, init_state_nc,
         Directory for VIC output history files
     output_vic_log_root_dir: <str>
         Directory for VIC output log files
+    mpi_proc: <int or None>
+        Number of processors to use for VIC MPI run. None for not using MPI
+    mpi_exe: <str>
+        Path for MPI exe
     
     Returns
     ----------
@@ -1955,7 +1959,9 @@ def run_vic_assigned_states(start_time, end_time, vic_exe, init_state_nc,
               out_history_fileprefix='history',
               out_global_basepath=os.path.join(output_global_root_dir, 'global'),
               out_log_dir=output_vic_log_root_dir,
-              forcing_basepath=vic_forcing_basepath)
+              forcing_basepath=vic_forcing_basepath,
+              mpi_proc=mpi_proc,
+              mpi_exe=mpi_exe)
     list_history_files.append(os.path.join(
                     output_vic_history_root_dir,
                     'history.{}-{:05d}.nc'.format(
@@ -1989,7 +1995,9 @@ def run_vic_assigned_states(start_time, end_time, vic_exe, init_state_nc,
                   out_history_fileprefix='history',
                   out_global_basepath=os.path.join(output_global_root_dir, 'global'),
                   out_log_dir=output_vic_log_root_dir,
-                  forcing_basepath=vic_forcing_basepath)
+                  forcing_basepath=vic_forcing_basepath,
+                  mpi_proc=mpi_proc,
+                  mpi_exe=mpi_exe)
         list_history_files.append(os.path.join(
                     output_vic_history_root_dir,
                     'history.{}-{:05d}.nc'.format(

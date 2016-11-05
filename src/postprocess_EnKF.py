@@ -1,4 +1,13 @@
 
+''' This script post processes EnKF updated soil moisture states and SMART
+    corrected rainfall. Specifically:
+        1) Take average of all ensemble updated states
+        2) Insert the updated states, and use corrected rainfall forcing to run VIC
+
+    Usage:
+        $ python postprocess_EnKF.py <config_file> <mpi_proc>
+'''
+
 from collections import OrderedDict
 import numpy as np
 import pandas as pd
@@ -20,6 +29,8 @@ from da_utils import (setup_output_dirs, run_vic_assigned_states,
 # Read config file
 cfg = read_configobj(sys.argv[1])
 
+# Read number of processors for VIC MPI runs
+mpi_proc = int(sys.argv[2])
 
 # ============================================================ #
 # Prepare VIC exe
@@ -153,7 +164,9 @@ list_history_files = run_vic_assigned_states(
                         output_global_root_dir=dirs['global'],
                         output_state_root_dir=dirs['states'],
                         output_vic_history_root_dir=dirs['history'],
-                        output_vic_log_root_dir=dirs['logs'])
+                        output_vic_log_root_dir=dirs['logs'],
+                        mpi_proc=mpi_proc,
+                        mpi_exe=cfg['VIC']['mpi_exe'])
 
 # Concatenate all history files
 ds_concat = concat_vic_history_files(list_history_files)
