@@ -84,6 +84,7 @@ for j=1:numpixels %space loop
     rain_true = prec_true(j, :); % Used as benchmark
     sma_observed = sm_ascend(j, :); % Soil Moisture - Ascending
     smd_observed = sm_descend(j, :); % Soil Moisture - Descending
+    sm_quality = sm_error(j, :);  % Soil moisture standard error
     
     % Change nan missing data to negative values
     % This is not ideal...should really change code to use nan for missing data
