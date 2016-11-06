@@ -283,6 +283,11 @@ class States(object):
         # Update states - add delta to orig. states
         da_x_updated[:] += delta
 
+        # --- Reset negative updated soil moistures to zero --- #
+        x_new = da_x_updated[:].values
+        x_new[x_new<0] = 0
+        da_x_updated[:] = x_new
+
         return(da_x_updated)
 
 
