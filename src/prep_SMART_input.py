@@ -142,6 +142,15 @@ dict_array_active = da_3D_to_2D_for_SMART(dict_da_daily,
                                           da_mask,
                                           time_varname='date')
 
+# ============================================================ #
+# Make soil moisture uncertainty data
+# ============================================================ #
+# Copy the data for shape
+sm_error = dict_array_active['sm_ascend']
+# Fill in constant value
+sm_error[:, :] = cfg['SM']['sm_error']
+# Put in final dictionary
+dict_array_active['sm_error'] = sm_error
 
 # ============================================================ #
 # Save datasets to .mat file
@@ -194,6 +203,7 @@ with open(os.path.join(out_dir, 'run_matlab.sh'), 'w') as f:
     f.write('    location_flag {} \\\n'.format(cfg['SMART_RUN']['location_flag']))
     f.write('    window_size {} \\\n'.format(cfg['SMART_RUN']['window_size']))
     f.write('    API_mean {} \\\n'.format(cfg['SMART_RUN']['API_mean']))
+    f.write('    bb {} \\\n'.format(cfg['SMART_RUN']['bb']))
     f.write('    API_range {} \n'.format(cfg['SMART_RUN']['API_range']))
 
 
