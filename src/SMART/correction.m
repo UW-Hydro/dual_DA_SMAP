@@ -18,8 +18,8 @@ sum_rain_sp_pr = sum_rain_sp(sum_rain_indep >= 0);
 sum_rain_sp_subset = sum_rain_sp_pr(increment_sum_hold_pr > -500);
 
 % --- find optimized lambda --- %
-if (lambda_flag ~=2); optimized_fraction = fminbnd(@(x) fraction_tune(x,sum_rain_indep_subset,sum_rain_sp_subset,increment_sum_hold_subset),0.00,2.00); end;
-if (lambda_flag == 2); optimized_fraction = 0.60; end;
+if (lambda_flag == 999); optimized_fraction = fminbnd(@(x) fraction_tune(x,sum_rain_indep_subset,sum_rain_sp_subset,increment_sum_hold_subset),0.01,2.00,optimset('Display','off')); end;
+if (lambda_flag ~= 999); optimized_fraction = lambda_flag; end;
 
 % Calculate corrected rainfall
 increment_sum(increment_sum < -500) = 0;
