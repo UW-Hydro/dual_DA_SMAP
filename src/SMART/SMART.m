@@ -1,5 +1,5 @@
 
-function [output_stat1, output_stat2] = SMART(varargin)
+function SMART(varargin)
 
 %% Process input arguments
 p = inputParser;
