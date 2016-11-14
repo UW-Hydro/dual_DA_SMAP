@@ -146,7 +146,7 @@ dict_array_active = da_3D_to_2D_for_SMART(dict_da_daily,
 # Make soil moisture uncertainty data
 # ============================================================ #
 # Copy the data for shape
-sm_error = dict_array_active['sm_ascend']
+sm_error = dict_array_active['sm_ascend'].copy()
 # Fill in constant value
 sm_error[:, :] = cfg['SM']['sm_error']
 # Put in final dictionary
