@@ -132,6 +132,7 @@ da_prec_true = load_nc_and_concat_var_years(
                     dict_vars={'prec_true': cfg['PREC']['prec_true_varname']})\
                ['prec_true']
 
+count = 0
 for lt in lat:
     for lg in lon:
         # if inactive cell, skip
@@ -207,5 +208,11 @@ for lt in lat:
                line_width=2)
         # Save
         save(p)
+
+        count += 1
+        if count > 21:
+            break
+    if count > 21:
+        break
 
 
