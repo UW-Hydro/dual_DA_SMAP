@@ -16,6 +16,8 @@ import pandas as pd
 import os
 import xarray as xr
 from scipy.io import loadmat
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from bokeh.plotting import figure, output_file, save
 from bokeh.io import reset_output

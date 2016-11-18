@@ -120,6 +120,7 @@ for i in range(cfg['EnKF']['N']):
     ens_name = 'ens{}'.format(i+1)
     dict_ens_da_sm1[ens_name] = dict_ens_ds[ens_name]['OUT_SOIL_MOIST'].sel(nlayer=0)
 # Plot
+count = 0
 for lt in lat:
     for lg in lon:
         if np.isnan(da_sm1_openloop.loc[da_sm1_openloop['time'][0],
@@ -245,10 +246,17 @@ for lt in lat:
         # Save
         save(p)
 
+        count += 1
+        if count > 21:
+            break
+    if count > 21:
+        break
+
 
 # ------------------------------------------------------------ #
 # Plot innovation (meas - y_est_before_update)
 # ------------------------------------------------------------ #
+count = 0
 for lt in lat:
     for lg in lon:
         if np.isnan(da_sm1_openloop.loc[da_sm1_openloop['time'][0],
@@ -317,6 +325,12 @@ for lt in lat:
                line_width=2)
         save(p)
 
+        count += 1
+        if count > 21:
+            break
+    if count > 21:
+        break
+
 
 # ------------------------------------------------------------ #
 # Plot results - second-layer soil moisture time series
@@ -330,6 +344,7 @@ for i in range(cfg['EnKF']['N']):
     ens_name = 'ens{}'.format(i+1)
     dict_ens_da_sm2[ens_name] = dict_ens_ds[ens_name]['OUT_SOIL_MOIST'].sel(nlayer=1)
 # Plot
+count = 0
 for lt in lat:
     for lg in lon:
         if np.isnan(da_sm2_openloop.loc[da_sm2_openloop['time'][0],
@@ -408,6 +423,12 @@ for lt in lat:
         # Save
         save(p)
         
+        count += 1
+        if count > 21:
+            break
+    if count > 21:
+        break
+
  
 # ------------------------------------------------------------ #
 # Plot results - third-layer soil moisture time series
@@ -421,6 +442,7 @@ for i in range(cfg['EnKF']['N']):
     ens_name = 'ens{}'.format(i+1)
     dict_ens_da_sm3[ens_name] = dict_ens_ds[ens_name]['OUT_SOIL_MOIST'].sel(nlayer=2)
 # Plot
+count = 0
 for lt in lat:
     for lg in lon:
         if np.isnan(da_sm3_openloop.loc[da_sm3_openloop['time'][0],
@@ -498,6 +520,12 @@ for lt in lat:
                legend="Open-loop, RMSE={:.2f}".format(rmse_openloop), line_width=2)
         # Save
         save(p)
+
+        count += 1
+        if count > 21:
+            break
+    if count > 21:
+        break
         
 
 # ------------------------------------------------------------ #
@@ -512,6 +540,7 @@ for i in range(cfg['EnKF']['N']):
     ens_name = 'ens{}'.format(i+1)
     dict_ens_da_swe[ens_name] = dict_ens_ds[ens_name]['OUT_SWE']
 # Plot
+count = 0
 for lt in lat:
     for lg in lon:
         if np.isnan(da_swe_openloop.loc[da_swe_openloop['time'][0],
@@ -590,6 +619,12 @@ for lt in lat:
         # Save
         save(p)
 
+        count += 1
+        if count > 21:
+            break
+    if count > 21:
+        break
+        
 
 # ------------------------------------------------------------ #
 # Plot results - surface runoff time series
@@ -603,6 +638,7 @@ for i in range(cfg['EnKF']['N']):
     ens_name = 'ens{}'.format(i+1)
     dict_ens_da_runoff[ens_name] = dict_ens_ds[ens_name]['OUT_RUNOFF']
 # Plot
+count = 0
 for lt in lat:
     for lg in lon:
         if np.isnan(da_runoff_openloop.loc[da_runoff_openloop['time'][0],
@@ -681,6 +717,12 @@ for lt in lat:
         # Save
         save(p) 
 
+        count += 1
+        if count > 21:
+            break
+    if count > 21:
+        break
+        
 
 # ------------------------------------------------------------ #
 # Plot results - baseflow time series
@@ -694,6 +736,7 @@ for i in range(cfg['EnKF']['N']):
     ens_name = 'ens{}'.format(i+1)
     dict_ens_da_baseflow[ens_name] = dict_ens_ds[ens_name]['OUT_BASEFLOW']
 # Plot
+count = 0
 for lt in lat:
     for lg in lon:
         if np.isnan(da_baseflow_openloop.loc[da_baseflow_openloop['time'][0],
@@ -772,6 +815,12 @@ for lt in lat:
         # Save
         save(p)
 
+        count += 1
+        if count > 21:
+            break
+    if count > 21:
+        break
+        
 
 # ------------------------------------------------------------ #
 # Plot results - precipitation time series
@@ -786,6 +835,7 @@ for i in range(cfg['EnKF']['N']):
     ens_name = 'ens{}'.format(i+1)
     dict_ens_da_prec[ens_name] = dict_ens_ds[ens_name]['OUT_PREC']
 # Plot
+count = 0
 for lt in lat:
     for lg in lon:
         if np.isnan(da_prec_openloop.loc[da_prec_openloop['time'][0],
@@ -864,3 +914,9 @@ for lt in lat:
         # Save
         save(p)
 
+        count += 1
+        if count > 21:
+            break
+    if count > 21:
+        break
+        
