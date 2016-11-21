@@ -137,13 +137,13 @@ for lt in lat:
         ts_openloop = da_sm1_openloop.loc[:, lt, lg].to_series()
         # Calculate meas vs. truth
         df_truth_meas = pd.concat([ts_truth, ts_meas], axis=1, keys=['truth', 'meas']).dropna()
-        rmse_meas = rmse(df_truth_meas, var_true='truth', var_est='meas')
+        rmse_meas = rmse(df_truth_meas['truth'].values, df_truth_meas['meas'])
         # Calculate EnKF_mean vs. truth
         df_truth_EnKF = pd.concat([ts_truth, ts_EnKF_mean], axis=1, keys=['truth', 'EnKF_mean']).dropna()
-        rmse_EnKF_mean = rmse(df_truth_EnKF, var_true='truth', var_est='EnKF_mean')
+        rmse_EnKF_mean = rmse(df_truth_EnKF['truth'], df_truth_EnKF['EnKF_mean'])
         # Calculate open-loop vs. truth
         df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
-        rmse_openloop = rmse(df_truth_openloop, var_true='truth', var_est='openloop')
+        rmse_openloop = rmse(df_truth_openloop['truth'], df_truth_openloop['openloop'])
 
         # ----- Regular plots ----- #
         # Create figure
@@ -358,10 +358,10 @@ for lt in lat:
         ts_openloop = da_sm2_openloop.loc[:, lt, lg].to_series()
         # Calculate EnKF_mean vs. truth
         df_truth_EnKF = pd.concat([ts_truth, ts_EnKF_mean], axis=1, keys=['truth', 'EnKF_mean']).dropna()
-        rmse_EnKF_mean = rmse(df_truth_EnKF, var_true='truth', var_est='EnKF_mean')
+        rmse_EnKF_mean = rmse(df_truth_EnKF['truth'], df_truth_EnKF['EnKF_mean'])
         # Calculate open-loop vs. truth
         df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
-        rmse_openloop = rmse(df_truth_openloop, var_true='truth', var_est='openloop')
+        rmse_openloop = rmse(df_truth_openloop['truth'], df_truth_openloop['openloop'])
         
         # ----- Regular plots ----- #
         # Create figure
@@ -456,10 +456,10 @@ for lt in lat:
         ts_openloop = da_sm3_openloop.loc[:, lt, lg].to_series()
         # Calculate EnKF_mean vs. truth
         df_truth_EnKF = pd.concat([ts_truth, ts_EnKF_mean], axis=1, keys=['truth', 'EnKF_mean']).dropna()
-        rmse_EnKF_mean = rmse(df_truth_EnKF, var_true='truth', var_est='EnKF_mean')
+        rmse_EnKF_mean = rmse(df_truth_EnKF['truth'], df_truth_EnKF['EnKF_mean'])
         # Calculate open-loop vs. truth
         df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
-        rmse_openloop = rmse(df_truth_openloop, var_true='truth', var_est='openloop')
+        rmse_openloop = rmse(df_truth_openloop['truth'], df_truth_openloop['openloop'])
         
         # ----- Regular plots ----- #
         # Create figure
@@ -554,10 +554,10 @@ for lt in lat:
         ts_openloop = da_swe_openloop.loc[:, lt, lg].to_series()
         # Calculate EnKF_mean vs. truth
         df_truth_EnKF = pd.concat([ts_truth, ts_EnKF_mean], axis=1, keys=['truth', 'EnKF_mean']).dropna()
-        rmse_EnKF_mean = rmse(df_truth_EnKF, var_true='truth', var_est='EnKF_mean')
+        rmse_EnKF_mean = rmse(df_truth_EnKF['truth'], df_truth_EnKF['EnKF_mean'])
         # Calculate open-loop vs. truth
         df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
-        rmse_openloop = rmse(df_truth_openloop, var_true='truth', var_est='openloop')
+        rmse_openloop = rmse(df_truth_openloop['truth'], df_truth_openloop['openloop'])
         
         # ----- Regular plots ----- #
         # Create figure
@@ -652,10 +652,10 @@ for lt in lat:
         ts_openloop = da_runoff_openloop.loc[:, lt, lg].to_series()
         # Calculate EnKF_mean vs. truth
         df_truth_EnKF = pd.concat([ts_truth, ts_EnKF_mean], axis=1, keys=['truth', 'EnKF_mean']).dropna()
-        rmse_EnKF_mean = rmse(df_truth_EnKF, var_true='truth', var_est='EnKF_mean')
+        rmse_EnKF_mean = rmse(df_truth_EnKF['truth'], df_truth_EnKF['EnKF_mean'])
         # Calculate open-loop vs. truth
         df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
-        rmse_openloop = rmse(df_truth_openloop, var_true='truth', var_est='openloop')
+        rmse_openloop = rmse(df_truth_openloop['truth'], df_truth_openloop['openloop'])
         
         # ----- Regular plots ----- #
         # Create figure
@@ -750,10 +750,10 @@ for lt in lat:
         ts_openloop = da_baseflow_openloop.loc[:, lt, lg].to_series()
         # Calculate EnKF_mean vs. truth
         df_truth_EnKF = pd.concat([ts_truth, ts_EnKF_mean], axis=1, keys=['truth', 'EnKF_mean']).dropna()
-        rmse_EnKF_mean = rmse(df_truth_EnKF, var_true='truth', var_est='EnKF_mean')
+        rmse_EnKF_mean = rmse(df_truth_EnKF['truth'], df_truth_EnKF['EnKF_mean'])
         # Calculate open-loop vs. truth
         df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
-        rmse_openloop = rmse(df_truth_openloop, var_true='truth', var_est='openloop')
+        rmse_openloop = rmse(df_truth_openloop['truth'], df_truth_openloop['openloop'])
         
         # ----- Regular plots ----- #
         # Create figure
@@ -849,10 +849,10 @@ for lt in lat:
         ts_openloop = da_prec_openloop.loc[:, lt, lg].to_series()
         # Calculate EnKF_mean vs. truth
         df_truth_EnKF = pd.concat([ts_truth, ts_EnKF_mean], axis=1, keys=['truth', 'EnKF_mean']).dropna()
-        rmse_EnKF_mean = rmse(df_truth_EnKF, var_true='truth', var_est='EnKF_mean')
+        rmse_EnKF_mean = rmse(df_truth_EnKF['truth'], df_truth_EnKF['EnKF_mean'])
         # Calculate open-loop vs. truth
         df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
-        rmse_openloop = rmse(df_truth_openloop, var_true='truth', var_est='openloop')
+        rmse_openloop = rmse(df_truth_openloop['truth'], df_truth_openloop['openloop'])
 
         # ----- Regular plots ----- #
         # Create figure
