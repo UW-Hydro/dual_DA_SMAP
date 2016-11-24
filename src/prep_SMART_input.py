@@ -185,9 +185,7 @@ with open(os.path.join(out_dir, 'run_matlab.sh'), 'w') as f:
     f.write('    input_dataset {} \\\n'.format(
                         os.path.join(out_dir,
                         'SMART_input.mat')))
-    f.write('    output_dataset {} \\\n'.format(
-                        os.path.join(smart_run_outdir,
-                        'SMART_output.mat')))
+    f.write('    output_dir {} \\\n'.format(smart_run_outdir))
     f.write('    start_date {} \\\n'.format(cfg['SMART_RUN']['start_date']))
     f.write('    end_date {} \\\n'.format(cfg['SMART_RUN']['end_date']))
     f.write('    filter_flag {} \\\n'.format(cfg['SMART_RUN']['filter_flag']))

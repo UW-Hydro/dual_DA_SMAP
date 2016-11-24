@@ -6,7 +6,7 @@ p = inputParser;
 % 'addParamValue' in old releases; 'addParameter' in new releases
 % WARNING...some of these choice are not fully implemented
 p.addParamValue('input_dataset', []);  % the input .mat file path; containing: 3 prec datasets; 2 soil moisture datasets; lidx; dnum
-p.addParamValue('output_dataset', []);  % output .mat file path; containing corrected rainfall data
+p.addParamValue('output_dir', []);  % output directory; corrected rainfall data, innovation and lambda parameter will be written to this directory
 p.addParamValue('start_date', []);  % start date of simulation and data
 p.addParamValue('end_date', []);  % end date of simulation and data
 p.addParamValue('filter_flag', []);  % filter_flag 1)KF, 2)EnKF, 3)DI, 4)PART, 5)KF with RTS gap-filling, 6) EnKF with EnKS gap-filling, 7) PART - DIRECT RAINFALL
@@ -27,7 +27,7 @@ p.addParamValue('API_range', []); % only used if API is varying seasonally
 p.parse(varargin{:});
 % Assign input arguments to variables
 input_dataset = p.Results.input_dataset;
-output_dataset = p.Results.output_dataset;
+output_dir = p.Results.output_dir;
 start_date = p.Results.start_date;
 end_date = p.Results.end_date;
 filter_flag = str2num(p.Results.filter_flag);
@@ -61,6 +61,10 @@ ist = numel(dnum);  % number of days Yixin
 % Extract number of pixels
 size_data = size(prec_orig);
 numpixels = size_data(1);
+
+% Initialize some matrices
+innovation(1:ist, 1:numpixels) = 0;
+lambda(1:numpixels) = 0;
 
 for j=1:numpixels %space loop
     
@@ -131,7 +135,7 @@ for j=1:numpixels %space loop
         end
         
         % Calculate Increments
-        [increment_sum,increment_sum_hold,sum_rain,sum_rain_sp,sum_rain_sp_hold,sum_rain_sp2,increment_ens] = ...
+        [increment_sum,increment_sum_hold,sum_rain,sum_rain_sp,sum_rain_sp_hold,sum_rain_sp2,increment_ens, innovation(:, j)] = ...
             analysis(window_size,ist,filter_flag,transform_flag,API_model_flag,NUMEN,Q_fixed,P_inflation,...
             logn_var,bb,rain_observed,rain_observed_hold,rain_indep,rain_true,sm_observed,...
             ta_observed,ta_observed_climatology,PET_observed,PET_observed_climatology,EVI_observed,...
@@ -139,11 +143,13 @@ for j=1:numpixels %space loop
         
         % Correct Rainfall..Yixin, this sub-routine will have to be changed to accomodate ensemble
         [sum_rain_corrected,optimized_fraction] = ...
-            correction(increment_sum,increment_sum_hold,sum_rain_sp,sum_rain_sp2,lambda_flag);
+            correction(increment_sum,increment_sum_hold,sum_rain_sp,sum_rain_sp2,lambda_flag);       lambda(j) = optimized_fraction;
         
         RAIN_SMART_SMOS(:,j) = sum_rain_corrected(:);
 %     end
 end
 
-save(output_dataset, 'RAIN_SMART_SMOS');  % [ntime, npixel]
+save([output_dir '/SMART_corrected_rainfall.mat'], 'RAIN_SMART_SMOS');  % [ntime, npixel]
+save([output_dir '/innovation.mat'], 'innovation');  % [ntime, npixel]
+save([output_dir '/lambda.mat'], 'lambda');  % [npixel]
 
