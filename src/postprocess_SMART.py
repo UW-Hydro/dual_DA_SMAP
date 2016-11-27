@@ -64,7 +64,7 @@ da_prec_orig = load_nc_and_concat_var_years(
 run_SMART_outfile = os.path.join(cfg['CONTROL']['root_dir'],
                                  cfg['OUTPUT']['output_basedir'],
                                  'run_SMART',
-                                 'SMART_output.mat')
+                                 'SMART_corrected_rainfall.mat')
 run_SMART_prec_corr = loadmat(run_SMART_outfile)['RAIN_SMART_SMOS']  # [nwindow, npixel]
 
 # Load in domain file
@@ -152,8 +152,8 @@ for lt in lat:
         df_daily = pd.concat([ts_prec_truth_daily, ts_prec_corrected_daily, ts_prec_orig_daily],
                              axis=1,
                              keys=['truth', 'corrected', 'orig'])
-        rmse_orig = rmse(df_daily, 'truth', 'orig')
-        rmse_corrected = rmse(df_daily, 'truth', 'corrected')
+        rmse_orig = rmse(df_daily['truth'], df_daily['orig'])
+        rmse_corrected = rmse(df_daily['truth'], df_daily['corrected'])
 
         # --- Regular figure --- #
         # Create figure
