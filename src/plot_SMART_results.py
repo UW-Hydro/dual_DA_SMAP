@@ -202,7 +202,7 @@ fig = plt.figure(figsize=(14, 7))
 cs = da_rmse_corr.plot(add_colorbar=False, cmap='viridis', vmin=0, vmax=2)
 cbar = plt.colorbar(cs, extend='max').set_label('Prec. (mm)', fontsize=20)
 plt.title('Prec., RMSE of SMART corrected (wrt. truth) '
-          'avg. value: {:.2f}'.format(float(da_rmse_orig.mean().values)), fontsize=20)
+          'avg. value: {:.2f}'.format(float(da_rmse_corr.mean().values)), fontsize=20)
 fig.savefig(os.path.join(output_subdir_maps, 'rmse_prec_corr.png'), format='png')
 
 # Plot map - RMSE diff (corr - orig)
