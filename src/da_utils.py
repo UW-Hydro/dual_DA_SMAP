@@ -359,7 +359,7 @@ class Forcings(object):
         self.ds['time'] = pd.to_datetime(self.ds['time'].values)
         
     
-    def perturb_prec_lognormal(self, varname, std=1):
+    def perturb_prec_lognormal(self, varname, std=1, phi=0):
         ''' Perturb precipitation forcing data
         
         Parameters
@@ -371,15 +371,33 @@ class Forcings(object):
             Note: here sigma is the real standard deviation of the multiplier, not
             the standard deviation of the underlying normal distribution! (and the
             real mean of the multiplier is 1)
+        phi: <float>
+            Parameter in AR(1) process. Default: 0 (no autocorrelation).
         '''
         
-        # Calculate mu and sigma for the lognormal distribution
+        # --- Calculate mu and sigma for the lognormal distribution --- #
+        # (here mu and sigma are mean and std of the underlying normal dist.)
         mu = -0.5 * np.log(std+1)
         sigma = np.sqrt(np.log(std+1))
-        
-        # Generate random noise for the whole field
-        noise = np.random.lognormal(mu, sigma,
-                                    size=(self.time_len, self.lat_len, self.lon_len))
+
+        # Calculate std of white noise and generate random white noise
+        scale = sigma * np.sqrt(1 - phi * phi)
+        white_noise = np.random.normal(
+                            loc=0, scale=scale,
+                            size=(self.time_len, self.lat_len, self.lon_len))
+
+        # --- AR(1) process --- #
+        # Initialize
+        ar1 = np.empty([self.time_len, self.lat_len, self.lon_len])
+        # Generate data for the first time point (need to double check how to do this!!!!!)
+        ar1[0, :, :] = white_noise[0, :, :]
+        # Loop over each time point
+        for t in range(1, self.time_len):
+            ar1[t, :, :] = mu + phi * (ar1[t-1, :, :] - mu) +\
+                              white_noise[t, :, :]
+
+        # --- Calculate final noise by taking exp --- #
+        noise = np.exp(ar1)
         
         # Add noise to soil moisture field
         ds_perturbed = self.ds.copy()

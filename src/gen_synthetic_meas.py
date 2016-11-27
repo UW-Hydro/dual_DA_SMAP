@@ -95,7 +95,8 @@ for year in range(start_year, end_year+1):
     # Perturb precipitaiton
     ds_true = class_forcings_orig.perturb_prec_lognormal(
                                 varname=dict_varnames['PREC'],
-                                std=cfg['FORCINGS_STATES_PERTURB']['prec_std'])
+                                std=cfg['FORCINGS_STATES_PERTURB']['prec_std'],
+                                phi=cfg['FORCINGS_STATES_PERTURB']['phi'])
     # Save to nc file
     ds_true.to_netcdf(os.path.join(truth_subdirs['forcings'],
                                    'forc_perturbed.{}.nc'.format(year)),
@@ -107,7 +108,8 @@ for year in range(start_year, end_year+1):
     # Perturbe precipitation
     ds_perturbed = class_forcings_true.perturb_prec_lognormal(
                                 varname=dict_varnames['PREC'],
-                                std=cfg['FORCINGS_STATES_PERTURB']['prec_std'])
+                                std=cfg['FORCINGS_STATES_PERTURB']['prec_std'],
+                                phi=cfg['FORCINGS_STATES_PERTURB']['phi'])
     da_prec_perturbed = ds_perturbed[dict_varnames['PREC']]
     # Save to nc file
     ds_simulated = xr.Dataset({'simulated_indep_prec_meas': da_prec_perturbed})
@@ -115,6 +117,8 @@ for year in range(start_year, end_year+1):
                                 meas_subdirs['indep_prec_meas'],
                                 'indep_prec.{}.nc'.format(year)),
                            format='NETCDF4_CLASSIC')
+
+exit()
 
 # --- Run VIC with perturbed forcings and soil moisture states --- #
 # Initialize a list of file paths to be concatenated
