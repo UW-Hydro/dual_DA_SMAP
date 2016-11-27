@@ -118,8 +118,6 @@ for year in range(start_year, end_year+1):
                                 'indep_prec.{}.nc'.format(year)),
                            format='NETCDF4_CLASSIC')
 
-exit()
-
 # --- Run VIC with perturbed forcings and soil moisture states --- #
 # Initialize a list of file paths to be concatenated
 list_history_paths = []
