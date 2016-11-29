@@ -7,6 +7,7 @@ from collections import OrderedDict
 import xarray as xr
 import datetime as dt
 import multiprocessing as mp
+import shutil
 
 from tonic.models.vic.vic import VIC, default_vic_valgrind_error_code
 
@@ -683,6 +684,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P0, R, da_meas,
                     da_scale=da_scale,
                     out_states_dir=pert_state_dir,
                     state_time=current_time)
+        # Delete propogated states
+        shutil.rmtree(state_dir_after_prop)
         
         # (2) Calculate gain K
         da_x, da_y_est = get_soil_moisture_and_estimated_meas_all_ensemble(
@@ -703,6 +706,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P0, R, da_meas,
                                               da_meas.loc[time, :, :, :], R,
                                               state_dir_before_update=pert_state_dir,
                                               out_vic_state_dir=out_updated_state_dir)
+        # Delete perturbed states
+        shutil.rmtree(pert_state_dir)
         
         # (3) Propagate each ensemble member to the next measurement time point
         # If current_time > next_time, do not propagate (we already reach the end of the simulation)
@@ -1978,6 +1983,12 @@ def run_vic_assigned_states(start_time, end_time, vic_exe, init_state_nc,
                     'history.{}-{:05d}.nc'.format(
                             run_start_time.strftime('%Y-%m-%d'),
                             run_start_time.hour*3600+run_start_time.second)))
+    # Clean up output state file
+    state_time = run_end_time + pd.DateOffset(hours=24/vic_model_steps_per_day)
+    os.remove(os.path.join(output_state_root_dir,
+                           'state.tmp.{}_{:05d}.nc'.format(
+                                state_time.strftime('%Y%m%d'),
+                                state_time.hour*3600+state_time.second)))
     
     # --- Run VIC from each assigned state time to the next (or to end_time) --- #
     for t, time in enumerate(dict_assigned_state_nc.keys()):
@@ -2014,6 +2025,12 @@ def run_vic_assigned_states(start_time, end_time, vic_exe, init_state_nc,
                     'history.{}-{:05d}.nc'.format(
                             current_time.strftime('%Y-%m-%d'),
                             current_time.hour*3600+current_time.second)))
+        # Clean up output state file
+        state_time = next_time + pd.DateOffset(hours=24/vic_model_steps_per_day)
+        os.remove(os.path.join(output_state_root_dir,
+                           'state.tmp.{}_{:05d}.nc'.format(
+                                state_time.strftime('%Y%m%d'),
+                                state_time.hour*3600+state_time.second)))
     
     return list_history_files
 

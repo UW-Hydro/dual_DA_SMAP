@@ -22,7 +22,6 @@ from da_utils import (setup_output_dirs, run_vic_assigned_states,
                       calculate_ensemble_mean_states,
                       Forcings)
 
-
 # ============================================================ #
 # Process command line arguments
 # ============================================================ #
@@ -146,7 +145,6 @@ for year in range(start_year, end_year+1):
                         'forc.post_prec.{}.nc'.format(year)),
                      format='NETCDF4_CLASSIC')
 
-
 # Run VIC with assinged states
 start_time = pd.to_datetime(cfg['EnKF']['start_time'])
 end_time = pd.to_datetime(cfg['EnKF']['end_time'])
@@ -178,4 +176,9 @@ hist_ens_mean_post = os.path.join(
                                 end_time.strftime('%Y%m%d'),
                                 end_time.hour*3600+end_time.second))
 ds_concat.to_netcdf(hist_ens_mean_post, format='NETCDF4_CLASSIC')
+
+# Clean up individual histroy files
+for f in list_history_files:
+    os.remove(f)
+
 

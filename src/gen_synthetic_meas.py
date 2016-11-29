@@ -238,6 +238,11 @@ hist_concat_nc = os.path.join(truth_subdirs['history'],
                                         last_time.hour*3600+last_time.second))
 ds_concat.to_netcdf(hist_concat_nc)
 
+# (4) Clean up individual history files
+for f in list_history_paths:
+    os.remove(f)
+
+
 # =========================================================== #
 # Simulate synthetic measurement - Extract top-layer soil
 # moisture from "truth" at the end of each day, and add noise
