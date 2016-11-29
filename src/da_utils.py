@@ -486,7 +486,7 @@ class VarToPerturb(object):
         return da_perturbed
 
 
-def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
+def EnKF_VIC(N, start_time, end_time, init_state_nc, P0, R, da_meas,
              da_meas_time_var, vic_exe, vic_global_template,
              ens_forcing_basedir, ens_forcing_prefix,
              vic_model_steps_per_day, output_vic_global_root_dir,
@@ -504,9 +504,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
         Start time of EnKF run
     end_time: <pandas.tslib.Timestamp>
         End time of EnKF run
-    init_state_basepath: <str>
-        Initial state directory and file name prefix (excluding '.YYMMDD_SSSSS.nc');
-        Initial state time must be one time step before start_time
+    init_state_nc: <str>
+        Initial state netCDF file
     P0: <float>
         Initial state error matrix
     R: <np.array>  [m*m]
@@ -581,10 +580,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
     init_state_time = start_time
     print('\tGenerating ensemble initial states at ', init_state_time)
     # Load initial state file
-    ds_states = xr.open_dataset('{}.{}_{:05d}.nc'.format(
-                                        init_state_basepath,
-                                        init_state_time.strftime('%Y%m%d'),
-                                        init_state_time.hour*3600+init_state_time.second))
+    ds_states = xr.open_dataset(init_state_nc)
     class_states = States(ds_states)
     
     # Determine the number of EnKF states, n
@@ -604,7 +600,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_basepath, P0, R, da_meas,
         ds.to_netcdf(os.path.join(init_state_dir,
                                   'state.ens{}.nc'.format(i+1)),
                      format='NETCDF4_CLASSIC')
-    
+
     # --- Step 2. Propagate (run VIC) until the first measurement time point ---#    
     # Initialize dictionary of history file paths for each ensemble member
     dict_ens_list_history_files = {}

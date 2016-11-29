@@ -23,7 +23,6 @@ from da_utils import (EnKF_VIC, setup_output_dirs, generate_VIC_global_file,
                       run_vic_assigned_states, concat_vic_history_files,
                       calculate_sm_noise_to_add_magnitude)
 
-import timeit
 
 # ============================================================ #
 # Process command line arguments
@@ -58,95 +57,6 @@ dirs = setup_output_dirs(os.path.join(cfg['CONTROL']['root_dir'],
 vic_exe = VIC(os.path.join(cfg['CONTROL']['root_dir'], cfg['VIC']['vic_exe']))
 mpi_exe = cfg['VIC']['mpi_exe']
 
-
-# ============================================================ #
-# VIC model spinup
-# VIC will be run for a spinup period to get x0
-# ============================================================ #
-# --- Determine VIC spinup run period --- #
-vic_run_start_time = pd.to_datetime(cfg['VIC']['spinup_start_time'])
-vic_run_end_time = pd.to_datetime(cfg['EnKF']['start_time']) -\
-                   pd.DateOffset(hours=24/cfg['VIC']['model_steps_per_day'])
-
-print('Running spinup time: ', vic_run_start_time, 'to', vic_run_end_time,
-       '...')
-
-# --- Generate VIC global param file (no initial state) --- #
-# Specify forcing file and output history file name
-replace = OrderedDict([('FORCING1', os.path.join(
-                                        cfg['CONTROL']['root_dir'],
-                                        cfg['FORCINGS']['orig_forcing_nc_basepath'])),
-                       ('OUTFILE', 'history.spinup')])
-global_file = generate_VIC_global_file(
-                        global_template_path=os.path.join(cfg['CONTROL']['root_dir'],
-                                                          cfg['VIC']['vic_global_template']),
-                        model_steps_per_day=cfg['VIC']['model_steps_per_day'],
-                        start_time=vic_run_start_time,
-                        end_time=vic_run_end_time,
-                        init_state="# INIT_STATE",
-                        vic_state_basepath=os.path.join(dirs['states'], 'state.spinup'),
-                        vic_history_file_dir=dirs['history'],
-                        replace=replace,
-                        output_global_basepath=os.path.join(dirs['global'],
-                                                            'global.spinup'))
-
-# --- Prepare log directory --- #
-log_dir = setup_output_dirs(dirs['logs'],
-                            mkdirs=['spinup'])['spinup']
-
-# --- Run VIC --- #
-time1 = timeit.default_timer()
-returncode = vic_exe.run(global_file, logdir=log_dir,
-                         **{'mpi_proc': mpi_proc, 'mpi_exe': mpi_exe})
-check_returncode(returncode, expected=0)
-time2 = timeit.default_timer()
-print('\tTime for spinning up: {} sec'.format(time2-time1))
-
-
-# ============================================================ #
-# Open-loop run
-# ============================================================ #
-# --- Determine open-loop run period --- #
-vic_run_start_time = pd.to_datetime(cfg['EnKF']['start_time'])
-vic_run_end_time = pd.to_datetime(cfg['EnKF']['end_time'])
-
-print('Running open-loop: ', vic_run_start_time, 'to', vic_run_end_time,
-       '...')
-
-# --- Run VIC (orig. forcings and states) --- #
-# Identify initial state time
-init_state_time = vic_run_start_time
-# Prepare log sub-directory
-out_log_dir = setup_output_dirs(dirs['logs'], mkdirs=['openloop'])['openloop']
-time1 = timeit.default_timer()
-propagate(start_time=vic_run_start_time, end_time=vic_run_end_time,
-          vic_exe=vic_exe,
-          vic_global_template_file=os.path.join(
-                                    cfg['CONTROL']['root_dir'],
-                                    cfg['VIC']['vic_global_template']),
-           vic_model_steps_per_day=cfg['VIC']['model_steps_per_day'],
-           init_state_nc=os.path.join(
-                                dirs['states'],
-                                'state.spinup.{}_{:05d}.nc'.format(
-                                        init_state_time.strftime('%Y%m%d'),
-                                        init_state_time.hour*3600+init_state_time.second)),
-           out_state_basepath=os.path.join(dirs['states'], 'state.openloop'),
-           out_history_dir=dirs['history'],
-           out_history_fileprefix='history.openloop',
-           out_global_basepath=os.path.join(dirs['global'], 'global.openloop'),
-           out_log_dir=out_log_dir,
-           forcing_basepath=os.path.join(
-                                    cfg['CONTROL']['root_dir'],
-                                    cfg['FORCINGS']['orig_forcing_nc_basepath']),
-           mpi_proc=mpi_proc,
-           mpi_exe=mpi_exe)
-time2 = timeit.default_timer()
-print('\tTime for open-loop: {} sec'.format(time2-time1))
-hist_openloop_nc = os.path.join(
-                        dirs['history'],
-                        'history.openloop.{}-{:05d}.nc'.format(
-                                vic_run_start_time.strftime('%Y-%m-%d'),
-                                vic_run_start_time.hour*3600+vic_run_start_time.second))
 
 # ============================================================ #
 # Prepare and run EnKF
@@ -193,7 +103,8 @@ dict_ens_list_history_files = EnKF_VIC(
          N=cfg['EnKF']['N'],
          start_time=start_time,
          end_time=end_time,
-         init_state_basepath=os.path.join(dirs['states'], 'state.spinup'),
+         init_state_nc=os.path.join(cfg['CONTROL']['root_dir'],
+                                    cfg['EnKF']['vic_initial_state']),
          P0=cfg['EnKF']['P0'],
          R=R,
          da_meas=da_meas,

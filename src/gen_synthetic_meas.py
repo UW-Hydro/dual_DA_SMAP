@@ -122,7 +122,7 @@ for year in range(start_year, end_year+1):
 # Initialize a list of file paths to be concatenated
 list_history_paths = []
 
-# (1) Run VIC until the first measurement time point (no initial state)
+# (1) Run VIC until the first measurement time point (with initial state)
 prop_period_stamp = '{}-{}'.format(start_time.strftime('%Y%m%d_%H%S'),
                                    meas_times[0].strftime('%Y%m%d_%H%S'))
 print('\tRun VIC until the first measurement time {}...'.format(prop_period_stamp))
@@ -135,7 +135,8 @@ log_dir = setup_output_dirs(
 propagate(start_time=start_time, end_time=meas_times[0],
           vic_exe=vic_exe, vic_global_template_file=global_template,
           vic_model_steps_per_day=cfg['VIC']['model_steps_per_day'],
-          init_state_nc=None,
+          init_state_nc=os.path.join(cfg['CONTROL']['root_dir'],
+                                     cfg['VIC']['vic_initial_state']),
           out_state_basepath=os.path.join(truth_subdirs['states'],
                                           'propagated.state'),
           out_history_dir=truth_subdirs['history'],
