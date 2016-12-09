@@ -1,0 +1,100 @@
+#######################################################################
+# VIC Model Parameters for Stehekin Basin Sample Image Driver Setup
+#######################################################################
+
+#######################################################################
+# Simulation Parameters
+#######################################################################
+MODEL_STEPS_PER_DAY   8  # number of model time steps in 24 hour period
+SNOW_STEPS_PER_DAY	  8  # number of snow model time steps in 24 hour period
+RUNOFF_STEPS_PER_DAY  8  # number of runoff time steps in 24 hour period
+
+STARTYEAR	1949	# year model simulation starts
+STARTMONTH	1	# month model simulation starts
+STARTDAY	1 	# day model simulation starts
+STARTSEC	0 	# second model simulation starts
+ENDYEAR     1979
+ENDMONTH	12
+ENDDAY		31
+
+CALENDAR    PROLEPTIC_GREGORIAN
+
+FULL_ENERGY FALSE	# calculate full energy balance
+FROZEN_SOIL	FALSE	# calculate frozen soils
+
+#######################################################################
+
+#######################################################################
+# DOMAIN INFO
+#######################################################################
+DOMAIN  /civil/hydro/ymao/data_assim/param/vic/ArkRed/ArkRed.domain.nc
+DOMAIN_TYPE    LAT     lat
+DOMAIN_TYPE    LON     lon
+DOMAIN_TYPE    MASK    mask
+DOMAIN_TYPE    AREA    area
+DOMAIN_TYPE    FRAC    frac
+DOMAIN_TYPE    YDIM    lat
+DOMAIN_TYPE    XDIM    lon
+
+######################################################################
+## State Files and Parameters
+########################################################################
+$init_state
+STATENAME /civil/hydro/ymao/data_assim/output/vic/ArkRed/spinup.1949_1979.Maurer/states/state  # Output state file path/prefix. The time (STATEYEAR,STATEMONTH,STATEDAY,STATESEC) will be appended to the prefix automatically in the format yyyymmdd.
+STATEYEAR   1980    # year to save model state
+STATEMONTH  1  # month to save model state
+STATEDAY    1  # day to save model state
+STATESEC    0  # second to save model state
+STATE_FORMAT           NETCDF4_CLASSIC  # State file format, valid options: NETCDF3_CLASSIC, NETCDF3_64BIT_OFFSET, NETCDF4_CLASSIC, NETCDF4
+
+#######################################################################
+# Forcing Files and Parameters
+# netcdf forcing files will be of the form: <FORCING1>YYYY.nc
+#######################################################################
+FORCING1	  /civil/hydro/ymao/data_assim/forcing/vic/Maurer/ArkRed/force.
+FORCE_TYPE    AIR_TEMP 	   AIR_TEMP    # Average air temperature, C
+FORCE_TYPE    PREC 	       PREC   # Total precipitation (rain and snow), mm
+FORCE_TYPE    PRESSURE 	   PRESSURE   # Atmospheric pressure, kPa
+FORCE_TYPE    SWDOWN       SHORTWAVE  # Incoming shortwave, W/m2
+FORCE_TYPE    LWDOWN 	   LONGWAVE  # Incoming longwave radiation, W/m2
+FORCE_TYPE    VP           VP   # Vapor pressure, kPa
+FORCE_TYPE    WIND         WIND   # Wind speed, m/s
+WIND_H        10.0                # height of wind speed measurement
+
+#######################################################################
+# Land Surface Files and Parameters
+#######################################################################
+PARAMETERS      /civil/hydro/ymao/data_assim/param/vic/ArkRed/Naoki/ArkRed.param.nc
+BASEFLOW        NIJSSEN2001 # ARNO or NIJSSEN2001
+NODES           3  # number of soil thermal nodes
+SNOW_BAND	    False
+
+#######################################################################
+# Output Files and Parameters
+#######################################################################
+RESULT_DIR  /civil/hydro/ymao/data_assim/output/vic/ArkRed/spinup.1949_1979.Maurer/history/
+LOG_DIR		/civil/hydro/ymao/data_assim/output/vic/ArkRed/spinup.1949_1979.Maurer/logs/
+OUTFILE     fluxes
+AGGFREQ     NMONTHS 1
+HISTFREQ    NYEARS 1
+
+OUTVAR      OUT_PREC
+OUTVAR      OUT_RAINF
+OUTVAR      OUT_SNOWF
+OUTVAR      OUT_AIR_TEMP
+OUTVAR      OUT_SWDOWN
+OUTVAR      OUT_LWDOWN
+OUTVAR      OUT_PRESSURE
+OUTVAR      OUT_WIND
+OUTVAR      OUT_DENSITY
+OUTVAR      OUT_REL_HUMID
+OUTVAR      OUT_QAIR
+OUTVAR      OUT_VP
+OUTVAR      OUT_VPD
+OUTVAR      OUT_RUNOFF
+OUTVAR      OUT_BASEFLOW
+OUTVAR      OUT_EVAP
+OUTVAR      OUT_SWE
+OUTVAR      OUT_SOIL_MOIST
+OUTVAR      OUT_ALBEDO
+OUTVAR      OUT_SOIL_TEMP
