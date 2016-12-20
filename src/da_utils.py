@@ -302,11 +302,12 @@ def calculate_sm_noise_to_add_magnitude(vic_history_path, sigma_percent):
         VIC history output file path, typically of openloop run. The range
         of soil moisture for each layer and each grid cell will be used
         to determine soil parameter perturbation level
-    sigma_percent: <float>
-        Percentage of the soil moisture range value to perturb.
-        sigma_percent will be used as the standard deviation of the
-        Gaussian noise added (e.g., sigma_percent = 5 for 5% of soil 
-        moisture range for perturbation)
+    sigma_percent: <list>
+        List of percentage of the soil moisture range value to perturb.
+        Each value of sigma_percent will be used as the standard deviation of
+        the Gaussian noise added (e.g., sigma_percent = 5 for 5% of soil 
+        moisture range for perturbation).
+        Each value in the list is for one soil layer (from up to bottom)
 
     Returns
     ----------
@@ -318,12 +319,17 @@ def calculate_sm_noise_to_add_magnitude(vic_history_path, sigma_percent):
     # Load VIC history file and extract soil moisture var
     ds_hist = xr.open_dataset(vic_history_path)
     da_sm = ds_hist['OUT_SOIL_MOIST']
+    nlayer = da_sm['nlayer'].values  # coordinate of soil layers
 
     # Calculate range of soil moisture
     da_range = da_sm.max(dim='time') - da_sm.min(dim='time')
 
     # Calculate standard devation of noise to add
-    da_scale = da_range * sigma_percent / 100.0
+    da_scale = da_range.copy()
+    da_scale[:] = np.nan  # [nlayer, lat, lon]
+    for i, layer in enumerate(nlayer):
+        da_scale.loc[layer, :, :] = da_range.loc[layer, :, :].values\
+                                    * sigma_percent[i] / 100.0
 
     return da_scale
 
