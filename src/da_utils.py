@@ -52,7 +52,7 @@ class States(object):
         da_sm_states: <xr.DataArray>
             A re-shaped soil moisture DataArray;
             Dimension: [lat, lon, n],
-                where len(n) = len(veg_class) * len(snow_band) * len(nlayer)
+                where len(n) = len(nlayer) * len(veg_class) * len(snow_band)
         '''
              
         # Extract coordinates
@@ -71,8 +71,9 @@ class States(object):
                                dims=['lat', 'lon', 'n'])
         
         # Extract soil moisture states and convert dimension
-        EnKF_states = self.ds['STATE_SOIL_MOISTURE'].values.reshape(
-                                                [n, len(lat), len(lon)])
+        EnKF_states = np.rollaxis(self.ds['STATE_SOIL_MOISTURE'].values,
+                                  2, 0)  # [nlayer, veg_class, snow_band, lat, lon]
+        EnKF_states = EnKF_states.reshape([n, len(lat), len(lon)])
         
         # roll the 'n' dimension to after lat and lon, and fill in da
         EnKF_states = np.rollaxis(EnKF_states, 0, 3) 
@@ -112,8 +113,9 @@ class States(object):
         ds = self.ds.copy()
         
         # Convert da_EnKF dimension
-        EnKF_states_reshape = da_EnKF.values.reshape(len(lat), len(lon), len(veg_class),
-                                                 len(snow_band), len(nlayer))
+        EnKF_states_reshape = da_EnKF.values.reshape(len(lat), len(lon), len(nlayer),
+                                                     len(veg_class), len(snow_band))
+        EnKF_states_reshape = np.rollaxis(EnKF_states_reshape, 2, 5)  # roll nlayer to the last
         EnKF_states_reshape = np.rollaxis(EnKF_states_reshape, 0, 5)  # put lat and lon to the last
         EnKF_states_reshape = np.rollaxis(EnKF_states_reshape, 0, 5)
         
