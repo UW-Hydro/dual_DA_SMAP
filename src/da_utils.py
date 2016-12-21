@@ -542,13 +542,13 @@ class VarToPerturb(object):
         return da_perturbed
 
 
-def EnKF_VIC(N, start_time, end_time, init_state_nc, P0, R, da_meas,
+def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, R, da_meas,
              da_meas_time_var, vic_exe, vic_global_template,
              ens_forcing_basedir, ens_forcing_prefix,
              vic_model_steps_per_day, output_vic_global_root_dir,
              output_vic_state_root_dir, output_vic_history_root_dir,
              output_vic_log_root_dir,
-             dict_varnames, da_scale, nproc=1,
+             dict_varnames, nproc=1,
              mpi_proc=None, mpi_exe='mpiexec'):
     ''' This function runs ensemble kalman filter (EnKF) on VIC (image driver)
 
@@ -562,8 +562,9 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P0, R, da_meas,
         End time of EnKF run
     init_state_nc: <str>
         Initial state netCDF file
-    P0: <float>
-        Initial state error matrix
+    P_whole_field: <np.array>
+        Covariance matrix for sm state perturbation for the whole field
+        Dimension: [lat, lon, n, n], where n = nlayer * nveg * nsnow
     R: <np.array>  [m*m]
         Measurement error covariance matrix
     da_meas: <xr.DataArray> [time, lat, lon]
@@ -594,9 +595,6 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P0, R, da_meas,
     dict_varnames: <dict>
         A dictionary of forcing names in nc file;
         e.g., {'PREC': 'prcp'; 'AIR_TEMP': 'tas'}
-    da_scale: <xr.DataArray>
-        Standard deviation of noise to add
-        Dimension: [nlayer, lat, lon]
     nproc: <int>
         Number of processors to use
     mpi_proc: <int or None>
@@ -625,7 +623,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P0, R, da_meas,
     # Determine fraction of each veg/snowband tile in each grid cell
     da_tile_frac = determine_tile_frac(vic_global_template)
     
-    # Check whether the dimension of P0 is consistent with number of soil moisture states
+    # Check whether the dimension of P_whole_field is consistent with number of soil moisture states
     pass
     # Check whether the run period is consistent with VIC setup
     pass
@@ -648,11 +646,10 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P0, R, da_meas,
     init_state_dir = setup_output_dirs(
                             output_vic_state_root_dir,
                             mkdirs=[init_state_dir_name])[init_state_dir_name]
-    # For each ensemble member, add Gaussian noise to sm states with covariance P0,
+    # For each ensemble member, add Gaussian noise to sm states with covariance P,
     # and save each ensemble member states
-    P0_diag = np.identity(n) * P0  # Set up P0 matrix
     for i in range(N):
-        ds = class_states.add_gaussian_white_noise_states(P0_diag)
+        ds = class_states.perturb_soil_moisture_Gaussian(P_whole_field)
         ds.to_netcdf(os.path.join(init_state_dir,
                                   'state.ens{}.nc'.format(i+1)),
                      format='NETCDF4_CLASSIC')
@@ -736,7 +733,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P0, R, da_meas,
         perturb_soil_moisture_states_ensemble(
                     N,
                     states_to_perturb_dir=state_dir_after_prop,
-                    da_scale=da_scale,
+                    P_whole_field=P_whole_field,
                     out_states_dir=pert_state_dir,
                     state_time=current_time)
         # Delete propogated states
@@ -1617,7 +1614,8 @@ def replace_global_values(gp, replace):
     return gpl
 
 
-def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir, da_scale,
+def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir,
+                                          P_whole_field,
                                           out_states_dir, state_time):
     ''' Perturb all soil_moisture states for each ensemble member
     
@@ -1628,9 +1626,9 @@ def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir, da_scale,
     states_to_perturb_dir: <str>
         Directory for VIC state files to perturb.
         File names: state.ens<i>.nc, where <i> is ensemble index 1, ..., N
-    da_scale: <xr.DataArray>
-        Standard deviation of noise to add
-        Dimension: [nlayer, lat, lon]
+    P_whole_field: <np.array>
+        Covariance matrix for sm state perturbation for the whole field
+        Dimension: [lat, lon, n, n], where n = nlayer * nveg * nsnow
     out_states_dir: <str>
         Directory for output perturbed VIC state files;
         File names: state.ens<i>.nc, where <i> is ensemble index 1, ..., N
@@ -1651,7 +1649,7 @@ def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir, da_scale,
                         state_time.hour*3600+state_time.second))
         out_states_nc = os.path.join(out_states_dir,
                                      'state.ens{}.nc'.format(i+1))
-        perturb_soil_moisture_states(states_to_perturb_nc, da_scale,
+        perturb_soil_moisture_states(states_to_perturb_nc, P_whole_field,
                                      out_states_nc)
 
 

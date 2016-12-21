@@ -21,7 +21,8 @@ from tonic.io import read_config, read_configobj
 from da_utils import (EnKF_VIC, setup_output_dirs, generate_VIC_global_file,
                       check_returncode, propagate, calculate_ensemble_mean_states,
                       run_vic_assigned_states, concat_vic_history_files,
-                      calculate_sm_noise_to_add_magnitude)
+                      calculate_sm_noise_to_add_magnitude,
+                      calculate_sm_noise_to_add_covariance_matrix_whole_field)
 
 
 # ============================================================ #
@@ -87,12 +88,23 @@ dict_varnames['PREC'] = cfg['FORCINGS']['PREC']
 # --- Prepare measurement error covariance matrix R [m*m] --- #
 R = np.array([[cfg['EnKF']['R']]])
 
-# --- Calculate state perturbation magnitude --- #
+# --- Calculate state perturbation covariance matrix --- #
+# Calculate perturvation magnitude [nlayer, lat, lon]
 da_scale = calculate_sm_noise_to_add_magnitude(
                 vic_history_path=os.path.join(
                         cfg['CONTROL']['root_dir'],
                         cfg['EnKF']['vic_history_path']),
                 sigma_percent=cfg['EnKF']['state_perturb_sigma_percent'])
+# Extract veg_class and snow_band information from a state file
+init_state_nc = os.path.join(cfg['CONTROL']['root_dir'],
+                             cfg['EnKF']['vic_initial_state'])
+ds_state = xr.open_dataset(init_state_nc)
+nveg = len(ds_state['veg_class'])
+nsnow= len(ds_state['snow_band'])
+# Calculate covariance matrix
+P_whole_field = calculate_sm_noise_to_add_covariance_matrix_whole_field(
+                    da_scale, nveg, nsnow,
+                    cfg['EnKF']['state_perturb_corrcoef'])
 
 # --- Run EnKF --- #
 start_time = pd.to_datetime(cfg['EnKF']['start_time'])
@@ -105,7 +117,7 @@ dict_ens_list_history_files = EnKF_VIC(
          end_time=end_time,
          init_state_nc=os.path.join(cfg['CONTROL']['root_dir'],
                                     cfg['EnKF']['vic_initial_state']),
-         P0=cfg['EnKF']['P0'],
+         P_whole_field=P_whole_field,
          R=R,
          da_meas=da_meas,
          da_meas_time_var='time',
@@ -121,7 +133,6 @@ dict_ens_list_history_files = EnKF_VIC(
          output_vic_history_root_dir=dirs['history'],
          output_vic_log_root_dir=dirs['logs'],
          dict_varnames=dict_varnames,
-         da_scale=da_scale,
          nproc=nproc)
 
 # --- Concatenate all history files for each ensemble and clean up --- #
