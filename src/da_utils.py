@@ -370,6 +370,7 @@ def calculate_sm_noise_to_add_covariance_matrix_whole_field(da_scale, nveg, nsno
     # Convert da_scale to np.array and straighten lat and lon into nloop
     scale = da_scale.values.reshape([len(nlayer), nloop])  # [nlayer, nloop]
     scale = np.transpose(scale)  # [nloop, nlayer]
+    scale[np.isnan(scale)] = 0  # set inactive cell to zero
     
     # Calculate covariance matrix P
     P_whole_field = np.array(list(map(calculate_sm_noise_to_add_covariance_matrix,
