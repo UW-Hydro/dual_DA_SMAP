@@ -19,7 +19,8 @@ from tonic.io import read_configobj
 from da_utils import (Forcings, setup_output_dirs, propagate,
                       calculate_sm_noise_to_add_magnitude,
                       perturb_soil_moisture_states, concat_vic_history_files,
-                      calculate_max_soil_moist_domain, VarToPerturb)
+                      calculate_max_soil_moist_domain, VarToPerturb,
+                      calculate_sm_noise_to_add_covariance_matrix_whole_field)
 
 # =========================================================== #
 # Load command line arguments
@@ -154,12 +155,26 @@ list_history_paths.append(os.path.join(truth_subdirs['history'],
                                             start_time.hour*3600+start_time.second)))
 
 # (2) Loop over until each measurement point and run VIC
-# --- Calculate state perturbation magnitude --- #
+# --- Calculate state perturbation covariance matrix --- #
+# Calculate perturvation magnitude [nlayer, lat, lon]
 da_scale = calculate_sm_noise_to_add_magnitude(
                 vic_history_path=os.path.join(
                         cfg['CONTROL']['root_dir'],
                         cfg['FORCINGS_STATES_PERTURB']['vic_history_path']),
                 sigma_percent=cfg['FORCINGS_STATES_PERTURB']['state_perturb_sigma_percent'])
+# Extract veg_class and snow_band information from a state file
+state_time = meas_times[0] + pd.DateOffset(days=1/cfg['VIC']['model_steps_per_day'])
+state_filename = os.path.join(truth_subdirs['states'],
+                              'propagated.state.{}_{:05d}.nc'.format(
+                                    state_time.strftime('%Y%m%d'),
+                                    state_time.hour*3600+state_time.second))
+ds_state = xr.open_dataset(state_filename)
+nveg = len(ds_state['veg_class'])
+nsnow= len(ds_state['snow_band'])
+# Calculate covariance matrix
+P_whole_field = calculate_sm_noise_to_add_covariance_matrix_whole_field(
+                    da_scale, nveg, nsnow,
+                    cfg['FORCINGS_STATES_PERTURB']['state_perturb_corrcoef'])
 
 # --- Run VIC --- #
 for t in range(len(meas_times)):
@@ -191,7 +206,7 @@ for t in range(len(meas_times)):
                                     state_time.hour*3600+state_time.second))
     perturb_soil_moisture_states(
             states_to_perturb_nc=orig_state_nc,
-            da_scale=da_scale,
+            P_whole_field=P_whole_field,
             out_states_nc=perturbed_state_nc)
 
     # --- Propagate to the next time point --- #
@@ -270,7 +285,7 @@ da_sm1_true = ds_hist_meas_times['OUT_SOIL_MOIST'].sel(nlayer=0)
 
 # --- Add noise --- #
 # Generate the standard deviation of noise to be added for each grid cell
-da_sigma = da_sm1_true[0, :, :].copy()
+da_sigma = da_sm1_true[0, :, :].copy(deep=True)
 da_sigma[:] = cfg['SYNTHETIC_MEAS']['sigma']
 # Add noise
 VarToPerturb_sm1 = VarToPerturb(da_sm1_true) # create class

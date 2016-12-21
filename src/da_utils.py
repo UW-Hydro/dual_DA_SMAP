@@ -110,7 +110,7 @@ class States(object):
         lon = self.ds['lon']
         
         # Initialize a new ds for new VIC states
-        ds = self.ds.copy()
+        ds = self.ds.copy(deep=True)
         
         # Convert da_EnKF dimension
         EnKF_states_reshape = da_EnKF.values.reshape(len(lat), len(lon), len(nlayer),
@@ -124,113 +124,69 @@ class States(object):
         
         return ds
         
-    
-    def add_gaussian_white_noise_states(self, P):
-        ''' Add a constant Gaussian noise (constant covariance matrix of all states n
-            over all grid cells) for the whole field.
+
+    def perturb_soil_moisture_Gaussian(self, P_whole_field):
+        ''' Perturb soil moisture states by adding Gaussian noise.
+            Each grid cell and soil layer can have different noise magnitude (specified
+            by the diagonal of covariance matrix P), but all veg and snow tiles within
+            a certain layer and grid cell have the same noise magnitude; within each grid
+            cell, noise added to different layers and tiles can be correlated (specified by
+            non-diagonal values of covariance matrix P).
             NOTE: this method does not change self
 
         Parameters
         ----------
-        P: <float>
-            Covariance matrix of the Gaussian noise to be added
-            
-        Returns
-        ----------
-        ds: <xr.dataset>
-            A dataset of VIC states, with soil moisture states = da_EnKF, and all the other
-            state variables = those in self.ds
-        '''
+        P_whole_field: <np.array>
+            Covariance matrix for sm state perturbation for the whole field
+            Dimension: [lat, lon, n, n], where n = nlayer * nveg * nsnow
 
-        # Extract the number of EnKF states
-        n = len(self.da_EnKF['n'])
-        
-        # Check if P is in shape [n*n]
-        pass
-        
-        # Generate random noise for the whole field
-        noise = np.random.multivariate_normal(
-                        np.zeros(n), P,
-                        size=len(self.ds['lat'])*\
-                             len(self.ds['lon']))
-        noise_reshape = noise.reshape([n,
-                                       len(self.ds['lat']),
-                                       len(self.ds['lon'])])
-        noise_reshape = np.rollaxis(noise_reshape, 0, 3)  # roll the 'n' dimension to the last
-        
-        # Add noise to soil moisture field
-        da_perturbed = self.da_EnKF.copy()
-        da_perturbed[:] += noise_reshape
-
-        # Reset negative perturbed soil moistures to zero
-        sm_new = da_perturbed.values
-        sm_new[sm_new<0] = 0
-        da_perturbed[:] = sm_new
-        
-        # Put the perturbed soil moisture states to back to VIC states ds
-        ds = self.convert_new_EnKFstates_sm_to_VICstates(da_perturbed)
-
-        return ds
-    
-    
-    def perturb_soil_moisture_Gaussian(self, da_scale):
-        ''' Perturb soil moisture states by adding Gaussian white noise. Each
-            grid cell and soil layer can have different noise magnitude, but
-            all veg and snow tiles within a certain layer and grid cell have
-            the same noise magnitude.
-            NOTE: this method does not change self
-        
-        Parameters
-        ----------
-        da_scale: <xr.DataArray>
-            Standard deviation of Gaussian noise to add
-            Dimension: [nlayer, lat, lon]
-        
         Returns
         ----------
         ds: <xr.dataset>
             A dataset of VIC states, with soil moisture states perturbed, and all the other
             state variables = those in self.ds
-        
-        Require
-        ----------
-        numpy
-        calculate_sm_noise_to_add_magnitude
         '''
-        
-        # Extract coords
-        veg_class = self.ds['veg_class']
-        snow_band = self.ds['snow_band']
+
+        # Extract the number of EnKF states
+        n = len(self.da_EnKF['n'])
+
+        # Check if P_whole_field is in shape [lat, lno, n, n]
+        pass
+
+        # Extract coordinates
         lat = self.ds['lat']
         lon = self.ds['lon']
+        veg_class = self.ds['veg_class']
+        snow_band = self.ds['snow_band']
         nlayer = self.ds['nlayer']
+        
+        # Determine total number of loops
+        nloop = len(lat) * len(lon)
+        n = len(nlayer) * len(veg_class) * len(snow_band)
+        
+        # Convert straighten lat and lon into nloop for P
+        P = P_whole_field.reshape([nloop, n, n])  # [nloop, n, n]
+    
+        # Generate random noise for the whole field
+        noise = np.array(list(map(np.random.multivariate_normal,
+                                  np.zeros([nloop, n]),
+                                  P)))  # [nloop, n]
+        noise = noise.reshape([len(lat), len(lon), n])  # [lat, lon, n]
 
-        # Determine size for the map() function
-        ds = self.ds.copy()
-        nloop = len(nlayer) * len(lat) * len(lon)
-        size = np.empty([nloop, 2], dtype=int)
-        size[:, 0] = len(veg_class)
-        size[:, 1] = len(snow_band)
-
-        # Calculate noise
-        noise = np.array(list((map(np.random.normal,
-                                   np.zeros(nloop),
-                                   da_scale.values.reshape([nloop]),
-                                   size))))  # dim: [nloop, veg, snow]
-        noise = np.rollaxis(noise, 0, 3).reshape(
-                    [len(veg_class), len(snow_band), len(nlayer), len(lat),
-                     len(lon)])
-
-        # Add noise to the original soil moisture states
-        ds['STATE_SOIL_MOISTURE'][:] += noise
+        # Add noise to soil moisture field
+        da_perturbed = self.da_EnKF.copy(deep=True)
+        da_perturbed[:] += noise
 
         # Reset negative perturbed soil moistures to zero
-        sm_new = ds['STATE_SOIL_MOISTURE'].values
+        sm_new = da_perturbed.values
         sm_new[sm_new<0] = 0
-        ds['STATE_SOIL_MOISTURE'][:] = sm_new
+        da_perturbed[:] = sm_new
 
-        return ds
+        # Put the perturbed soil moisture states back to VIC states ds
+        ds = self.convert_new_EnKFstates_sm_to_VICstates(da_perturbed)
         
+        return ds
+
     
     def update_soil_moisture_states(self, da_K, da_y_meas, da_y_est, R):
         ''' This function updates soil moisture states for the whole field
@@ -263,7 +219,7 @@ class States(object):
         lon_coord = self.da_EnKF['lon']
 
         # --- Initiate updated DataArray for states --- #
-        da_x_updated = self.da_EnKF.copy()  # [lat, lon, n]
+        da_x_updated = self.da_EnKF.copy(deep=True)  # [lat, lon, n]
 
         # --- Update states --- #
         # Determine the total number of loops
@@ -327,13 +283,103 @@ def calculate_sm_noise_to_add_magnitude(vic_history_path, sigma_percent):
     da_range = da_sm.max(dim='time') - da_sm.min(dim='time')
 
     # Calculate standard devation of noise to add
-    da_scale = da_range.copy()
+    da_scale = da_range.copy(deep=True)
     da_scale[:] = np.nan  # [nlayer, lat, lon]
     for i, layer in enumerate(nlayer):
         da_scale.loc[layer, :, :] = da_range.loc[layer, :, :].values\
                                     * sigma_percent[i] / 100.0
 
     return da_scale
+
+
+def calculate_sm_noise_to_add_covariance_matrix(layer_scale, nveg, nsnow, corrcoef):
+    ''' Calculates covariance matrix for sm state perturbation for one grid cell.
+
+    Parameters
+    ----------
+    layer_scale: <np.array>
+        An array of standard deviation of noise to add for each layer
+        Dimension: [nlayer]
+    nveg: <int>
+        Number of veg classes
+    nsnow: <int>
+        Number of snow bands
+    corrcoef: <float>
+        Correlation coefficient across different tiles and soil layers
+
+    Returns
+    ----------
+    P: <np.array>
+        Covariance matrix for sm state perturbation
+        Dimension: [n, n], where n = nlayer * nveg * nsnow
+    '''
+
+    nlayer = len(layer_scale)
+    n = nlayer * nveg * nsnow
+
+    # Initialize P as an correlation coefficient matrix
+    P = np.identity(n)
+    P[P==0] = corrcoef
+
+    # Calculate multiplier for each location in the matrix
+    # (corresponding to flattened sm states in the order of [nlayer, veg, snow])
+    scales = np.repeat(layer_scale, nveg*nsnow).reshape([n, 1])  # [n, 1]
+    mult = np.dot(scales, np.transpose(scales))  # [n, n]
+
+    # Calculate covariance matrix
+    P = P * mult
+
+    return P
+
+
+def calculate_sm_noise_to_add_covariance_matrix_whole_field(da_scale, nveg, nsnow, corrcoef):
+    ''' Calculates covariance matrix for sm state perturbation for one grid cell.
+
+    Parameters
+    ----------
+    da_scale: <xr.DataArray>
+        Standard deviation of noise to add
+        Dimension: [nlayer, lat, lon]
+    nveg: <int>
+        Number of veg classes
+    nsnow: <int>
+        Number of snow bands
+    corrcoef: <float>
+        Correlation coefficient across different tiles and soil layers
+
+    Returns
+    ----------
+    P_whole_field: <np.array>
+        Covariance matrix for sm state perturbation for the whole field
+        Dimension: [lat, lon, n, n], where n = nlayer * nveg * nsnow
+        
+    Require
+    ----------
+    calculate_sm_noise_to_add_covariance_matrix
+    '''
+
+    # Extract coordinates
+    lat = da_scale['lat']
+    lon = da_scale['lon']
+    nlayer = da_scale['nlayer']
+    
+    # Determine total number of loops
+    nloop = len(lat) * len(lon)
+    n = len(nlayer) * nveg * nsnow
+    
+    # Convert da_scale to np.array and straighten lat and lon into nloop
+    scale = da_scale.values.reshape([len(nlayer), nloop])  # [nlayer, nloop]
+    scale = np.transpose(scale)  # [nloop, nlayer]
+    
+    # Calculate covariance matrix P
+    P_whole_field = np.array(list(map(calculate_sm_noise_to_add_covariance_matrix,
+                                      scale,
+                                      np.repeat(nveg, nloop),
+                                      np.repeat(nsnow, nloop),
+                                      np.repeat(corrcoef, nloop))))  # [nloop, n, n]
+    P_whole_field = P_whole_field.reshape([len(lat), len(lon), n, n])  # [lat, lon, n, n]
+    
+    return P_whole_field
 
 
 class Forcings(object):
@@ -409,7 +455,7 @@ class Forcings(object):
         noise = np.exp(ar1)
         
         # Add noise to soil moisture field
-        ds_perturbed = self.ds.copy()
+        ds_perturbed = self.ds.copy(deep=True)
         ds_perturbed[varname][:] *= noise
         
         return ds_perturbed
@@ -475,7 +521,7 @@ class VarToPerturb(object):
         '''
 
         # Generate random noise for the whole field
-        da_noise = self.da.copy()
+        da_noise = self.da.copy(deep=True)
         da_noise[:] = np.nan
         for lt in self.lat:
             for lg in self.lon:
@@ -1677,7 +1723,7 @@ def propagate(start_time, end_time, vic_exe, vic_global_template_file,
     check_returncode(returncode, expected=0)
 
 
-def perturb_soil_moisture_states(states_to_perturb_nc, da_scale,
+def perturb_soil_moisture_states(states_to_perturb_nc, P_whole_field,
                                  out_states_nc):
     ''' Perturb all soil_moisture states
 
@@ -1685,9 +1731,9 @@ def perturb_soil_moisture_states(states_to_perturb_nc, da_scale,
     ----------
     states_to_perturb_nc: <str>
         Path of VIC state netCDF file to perturb
-    da_scale: <xr.DataArray>
-        Standard deviation of noise to add
-        Dimension: [nlayer, lat, lon]
+    P_whole_field: <np.array>
+        Covariance matrix for sm state perturbation for the whole field
+        Dimension: [lat, lon, n, n], where n = nlayer * nveg * nsnow
     out_states_nc: <str>
         Path of output perturbed VIC state netCDF file
 
@@ -1703,7 +1749,7 @@ def perturb_soil_moisture_states(states_to_perturb_nc, da_scale,
     # --- Perturb --- #
     # Perturb
     ds_perturbed = class_states.perturb_soil_moisture_Gaussian(
-                            da_scale)
+                            P_whole_field)
 
     # --- Save perturbed state file --- #
     ds_perturbed.to_netcdf(out_states_nc,
@@ -1821,7 +1867,7 @@ def calculate_ensemble_mean_states(list_state_nc, out_state_nc):
     list_ds = []
     for state_nc in list_state_nc:
         list_ds.append(xr.open_dataset(state_nc))
-    ds_mean = list_ds[0].copy()
+    ds_mean = list_ds[0].copy(deep=True)
     # STATE_SOIL_MOISTURE - mean
     ds_mean['STATE_SOIL_MOISTURE'] = (sum(list_ds) / N)['STATE_SOIL_MOISTURE']
     # STATE_SOIL_ICE - mean
@@ -2301,7 +2347,7 @@ def correct_prec_from_SMART(da_prec_orig, window_size, da_prec_corr_window,
     da_prec_orig_window = da_prec_orig_window.rename({'time': 'window'})
     
     # Loop over each window and rescale original prec (skip first window)
-    da_prec_corrected = da_prec_orig.copy()
+    da_prec_corrected = da_prec_orig.copy(deep=True)
     for i in range(1, nwindow):
         # --- Select out this window period from original prec data --- #
         window_start_date = start_date + pd.DateOffset(days=i*window_size)
