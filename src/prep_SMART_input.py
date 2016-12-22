@@ -122,7 +122,7 @@ for var in ['sm_ascend', 'sm_descend']:
     # If missing, put in NAN
     else:
         # Copy the shape of the DataArray from a prec variable
-        da_daily = dict_da_daily['prec_orig'].copy(deep=True)
+        da_daily = dict_da_daily['prec_orig'].copy()
         # Fill in all values with NAN
         da_daily[:] = np.nan
         # Put into dict
@@ -146,7 +146,7 @@ dict_array_active = da_3D_to_2D_for_SMART(dict_da_daily,
 # Make soil moisture uncertainty data
 # ============================================================ #
 # Copy the data for shape
-sm_error = dict_array_active['sm_ascend'].copy(deep=True)
+sm_error = dict_array_active['sm_ascend'].copy()
 # Fill in constant value
 sm_error[:, :] = cfg['SM']['sm_error']
 # Put in final dictionary
