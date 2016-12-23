@@ -56,17 +56,24 @@ meas_subdirs = setup_output_dirs(
                     dirs['synthetic_meas'],
                     mkdirs=['indep_prec_meas'])
 
-# Construct time points for synthetic measurement (daily, last hour)
-meas_times = pd.date_range(
-        '{}{:02d}{:02d}-{:02d}'.format(start_time.year,
-                                       start_time.month,
-                                       start_time.day,
-                                       cfg['TIME_INDEX']['last_hour']),
-        '{}{:02d}{:02d}-{:02d}'.format(end_time.year,
-                                       end_time.month,
-                                       end_time.day,
-                                       cfg['TIME_INDEX']['last_hour']),
-        freq='D')
+# Construct time points for synthetic measurement (daily, at a certain hour)
+# (1) Determine first and last measurement time point
+if start_time.hour >= cfg['TIME_INDEX']['synthetic_meas_hour']:
+    next_day = start_time + pd.DateOffset(days=1)
+    meas_start_time = pd.datetime(next_day.year, next_day.month, next_day.day,
+                                  cfg['TIME_INDEX']['synthetic_meas_hour'])
+else:
+    meas_start_time = pd.datetime(start_time.year, start_time.month, start_time.day,
+                                  cfg['TIME_INDEX']['synthetic_meas_hour'])
+if end_time.hour <= cfg['TIME_INDEX']['synthetic_meas_hour']:
+    last_day = end_time - pd.DateOffset(days=1)
+    meas_end_time = pd.datetime(last_day.year, last_day.month, last_day.day,
+                                cfg['TIME_INDEX']['synthetic_meas_hour'])
+else:
+    meas_end_time = pd.datetime(end_time.year, end_time.month, end_time.day,
+                                cfg['TIME_INDEX']['synthetic_meas_hour'])
+# (2) Construct measurement time series
+meas_times = pd.date_range(meas_start_time, meas_end_time, freq='D')
 
 # VIC global template file
 global_template = os.path.join(cfg['CONTROL']['root_dir'],
@@ -124,8 +131,9 @@ for year in range(start_year, end_year+1):
 list_history_paths = []
 
 # (1) Run VIC until the first measurement time point (with initial state)
+run_end_time = meas_times[0] - pd.DateOffset(days=1/cfg['VIC']['model_steps_per_day'])
 prop_period_stamp = '{}-{}'.format(start_time.strftime('%Y%m%d_%H%S'),
-                                   meas_times[0].strftime('%Y%m%d_%H%S'))
+                                   run_end_time.strftime('%Y%m%d_%H%S'))
 print('\tRun VIC until the first measurement time {}...'.format(prop_period_stamp))
 # Prepare log directories
 log_dir = setup_output_dirs(
@@ -133,7 +141,7 @@ log_dir = setup_output_dirs(
                     mkdirs=['propagate.{}'.format(prop_period_stamp)])\
           ['propagate.{}'.format(prop_period_stamp)]
 # Propagate until the first measurement point
-propagate(start_time=start_time, end_time=meas_times[0],
+propagate(start_time=start_time, end_time=run_end_time,
           vic_exe=vic_exe, vic_global_template_file=global_template,
           vic_model_steps_per_day=cfg['VIC']['model_steps_per_day'],
           init_state_nc=os.path.join(cfg['CONTROL']['root_dir'],
@@ -163,7 +171,7 @@ da_scale = calculate_sm_noise_to_add_magnitude(
                         cfg['FORCINGS_STATES_PERTURB']['vic_history_path']),
                 sigma_percent=cfg['FORCINGS_STATES_PERTURB']['state_perturb_sigma_percent'])
 # Extract veg_class and snow_band information from a state file
-state_time = meas_times[0] + pd.DateOffset(days=1/cfg['VIC']['model_steps_per_day'])
+state_time = meas_times[0]
 state_filename = os.path.join(truth_subdirs['states'],
                               'propagated.state.{}_{:05d}.nc'.format(
                                     state_time.strftime('%Y%m%d'),
@@ -178,22 +186,20 @@ P_whole_field = calculate_sm_noise_to_add_covariance_matrix_whole_field(
 
 # --- Run VIC --- #
 for t in range(len(meas_times)):
-    # --- Determine last, current and next time point (all these are time
+    # --- Determine current and next time point (all these are time
     # points at the beginning of a time step)--- #
-    last_time = meas_times[t]
-    current_time = last_time +\
-                   pd.DateOffset(hours=24/cfg['VIC']['model_steps_per_day'])
+    current_time = meas_times[t]
     if t == len(meas_times)-1:  # if this is the last measurement time
         next_time = end_time
     else:  # if not the last measurement time
-        next_time = meas_times[t+1]
+        next_time = meas_times[t+1] - pd.DateOffset(days=1/cfg['VIC']['model_steps_per_day'])
     # If current_time > next_time, do nothing (we already reach the end of the simulation)
     if current_time > next_time:
         break
     print('\tRun VIC ', current_time, 'to', next_time, '(perturbed forcings and states)')
 
     # --- Perturb states --- #
-    state_time = last_time + pd.DateOffset(days=1/cfg['VIC']['model_steps_per_day'])
+    state_time = current_time
     orig_state_nc = os.path.join(
                             truth_subdirs['states'],
                             'propagated.state.{}_{:05d}.nc'.format(

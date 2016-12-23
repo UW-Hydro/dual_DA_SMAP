@@ -89,8 +89,7 @@ init_state_mean_nc = calculate_ensemble_mean_states(
 # Loop over each measurement time point of updates states
 dict_assigned_state_nc = OrderedDict()  #  An ordered dict of state times and nc files after the initial time
 for t, time in enumerate(pd.to_datetime(da_meas['time'].values)):
-    state_time = pd.to_datetime(time) + \
-                 pd.DateOffset(hours=24/cfg['VIC']['model_steps_per_day'])
+    state_time = pd.to_datetime(time)
     print('\t', state_time)
     # Create a list of state file nc paths
     state_dir = os.path.join(dirs['states'], 'updated.{}_{:05d}'.format(
@@ -103,7 +102,6 @@ for t, time in enumerate(pd.to_datetime(da_meas['time'].values)):
     dict_assigned_state_nc[time] = calculate_ensemble_mean_states(
                                         list_state_nc,
                                         out_state_nc=os.path.join(state_dir, 'state.ens_mean.nc'))
-
 
 # ============================================================ #
 # Post-process fluxes - run VIC with ensemble-mean updated

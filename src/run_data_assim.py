@@ -49,7 +49,7 @@ np.random.seed(cfg['CONTROL']['seed'])
 dirs = setup_output_dirs(os.path.join(cfg['CONTROL']['root_dir'],
                                       cfg['OUTPUT']['output_EnKF_basedir']),
                          mkdirs=['global', 'history', 'states',
-                                 'logs', 'plots'])
+                                 'logs', 'plots', 'temp'])
 
 
 # ============================================================ #
@@ -133,7 +133,9 @@ dict_ens_list_history_files = EnKF_VIC(
          output_vic_history_root_dir=dirs['history'],
          output_vic_log_root_dir=dirs['logs'],
          dict_varnames=dict_varnames,
-         nproc=nproc)
+         nproc=nproc,
+         debug=cfg['CONTROL']['debug'],
+         output_temp_dir=dirs['temp'])
 
 # --- Concatenate all history files for each ensemble and clean up --- #
 out_hist_concat_dir = setup_output_dirs(dirs['history'],

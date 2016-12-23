@@ -549,7 +549,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, R, da_meas,
              output_vic_state_root_dir, output_vic_history_root_dir,
              output_vic_log_root_dir,
              dict_varnames, nproc=1,
-             mpi_proc=None, mpi_exe='mpiexec'):
+             mpi_proc=None, mpi_exe='mpiexec', debug=False, output_temp_dir=None):
     ''' This function runs ensemble kalman filter (EnKF) on VIC (image driver)
 
     Parameters
@@ -601,6 +601,11 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, R, da_meas,
         Number of processors to use for VIC MPI run. None for not using MPI
     mpi_exe: <str>
         Path for MPI exe
+    debug: <bool>
+        True: output temp files for diagnostics; False: do not output temp files
+    output_temp_dir: <str>
+        Directory for temp files (for dignostic purpose); only used when
+        debug = True
 
     Returns
     ----------
@@ -648,11 +653,22 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, R, da_meas,
                             mkdirs=[init_state_dir_name])[init_state_dir_name]
     # For each ensemble member, add Gaussian noise to sm states with covariance P,
     # and save each ensemble member states
+    if debug:
+        debug_dir = setup_output_dirs(
+                        output_temp_dir,
+                        mkdirs=[init_state_dir_name])[init_state_dir_name]
     for i in range(N):
+        # Perturb states and save
         ds = class_states.perturb_soil_moisture_Gaussian(P_whole_field)
         ds.to_netcdf(os.path.join(init_state_dir,
                                   'state.ens{}.nc'.format(i+1)),
                      format='NETCDF4_CLASSIC')
+        # Save soil moisture perturbation
+        if debug:
+            ds_perturb = xr.Dataset({'STATE_SOIL_MOISTURE':
+                                     (ds - class_states.ds)['STATE_SOIL_MOISTURE']})
+            ds_perturb.to_netcdf(os.path.join(debug_dir,
+                                              'pert.ens{}.nc').format(i+1))
 
     # --- Step 2. Propagate (run VIC) until the first measurement time point ---#    
     # Initialize dictionary of history file paths for each ensemble member
@@ -662,7 +678,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, R, da_meas,
 
     # Determine VIC run period
     vic_run_start_time = start_time
-    vic_run_end_time = pd.to_datetime(da_meas[da_meas_time_var].values[0])
+    vic_run_end_time = pd.to_datetime(da_meas[da_meas_time_var].values[0]) - \
+                       pd.DateOffset(hours=24/vic_model_steps_per_day)
     print('\tPropagating (run VIC) until the first measurement time point ',
           vic_run_end_time)
     # Set up output states, history and global files directories
@@ -713,12 +730,12 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, R, da_meas,
     for t, time in enumerate(da_meas[da_meas_time_var]):
 
         # Determine last, current and next measurement time points
-        last_time = pd.to_datetime(time.values)
-        current_time = last_time + pd.DateOffset(hours=24/vic_model_steps_per_day)
+        current_time = pd.to_datetime(time.values)
         if t == len(da_meas[da_meas_time_var])-1:  # if this is the last measurement time
             next_time = end_time
         else:  # if not the last measurement time
-            next_time = pd.to_datetime(da_meas[da_meas_time_var][t+1].values)
+            next_time = pd.to_datetime(da_meas[da_meas_time_var][t+1].values) - \
+                        pd.DateOffset(hours=24/vic_model_steps_per_day)
         print('\tCalculating for ', current_time, 'to', next_time)
 
         # (1) Perturb states
@@ -2015,7 +2032,8 @@ def run_vic_assigned_states(start_time, end_time, vic_exe, init_state_nc,
     
     # --- Run VIC from start_time to the first assigned state time --- #
     run_start_time = start_time
-    run_end_time = list(dict_assigned_state_nc.keys())[0]
+    run_end_time = list(dict_assigned_state_nc.keys())[0] - \
+                   pd.DateOffset(hours=24/vic_model_steps_per_day)
     print('\tRunning VIC from ', run_start_time, 'to', run_end_time)
     propagate(start_time=run_start_time, end_time=run_end_time,
               vic_exe=vic_exe, vic_global_template_file=global_template,
@@ -2037,7 +2055,7 @@ def run_vic_assigned_states(start_time, end_time, vic_exe, init_state_nc,
                             run_start_time.strftime('%Y-%m-%d'),
                             run_start_time.hour*3600+run_start_time.second)))
     # Clean up output state file
-    state_time = run_end_time + pd.DateOffset(hours=24/vic_model_steps_per_day)
+    state_time = list(dict_assigned_state_nc.keys())[0]
     os.remove(os.path.join(output_state_root_dir,
                            'state.tmp.{}_{:05d}.nc'.format(
                                 state_time.strftime('%Y%m%d'),
@@ -2046,19 +2064,19 @@ def run_vic_assigned_states(start_time, end_time, vic_exe, init_state_nc,
     # --- Run VIC from each assigned state time to the next (or to end_time) --- #
     for t, time in enumerate(dict_assigned_state_nc.keys()):
         # --- Determine last, current and next measurement time points --- #
-        last_time = time
-        current_time = last_time + pd.DateOffset(hours=24/vic_model_steps_per_day)
+        current_time = time
         if t == len(dict_assigned_state_nc)-1:  # if this is the last measurement time
             next_time = end_time
         else:  # if not the last measurement time
-            next_time = list(dict_assigned_state_nc.keys())[t+1]
+            next_time = list(dict_assigned_state_nc.keys())[t+1] - \
+                        pd.DateOffset(hours=24/vic_model_steps_per_day)
         # If current_time > next_time, do not propagate (we already reach the end of the simulation)
         if current_time > next_time:
             break
         print('\tRunning VIC from ', current_time, 'to', next_time)
         
         # --- Propagate to the next time from assigned initial states --- #
-        state_nc = dict_assigned_state_nc[last_time]
+        state_nc = dict_assigned_state_nc[current_time]
         propagate(start_time=current_time, end_time=next_time,
                   vic_exe=vic_exe, vic_global_template_file=global_template,
                   vic_model_steps_per_day=vic_model_steps_per_day,
