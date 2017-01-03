@@ -3,7 +3,7 @@
     based on original precipitation forcing.
 
     Usage:
-        $ python run_data_assim.py config_file nproc
+        $ python run_data_assim.py config_file nproc mpi_proc debug
 '''
 
 import sys
@@ -36,6 +36,9 @@ nproc = int(sys.argv[2])
 
 # Number of processors for each VIC run
 mpi_proc = int(sys.argv[3])
+
+# Whether to print out debug temp files or not
+debug = bool(sys.argv[4])
 
 # ============================================================ #
 # Set random generation seed
@@ -134,7 +137,7 @@ dict_ens_list_history_files = EnKF_VIC(
          output_vic_log_root_dir=dirs['logs'],
          dict_varnames=dict_varnames,
          nproc=nproc,
-         debug=cfg['CONTROL']['debug'],
+         debug=debug,
          output_temp_dir=dirs['temp'])
 
 # --- Concatenate all history files for each ensemble and clean up --- #

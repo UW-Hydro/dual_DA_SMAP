@@ -210,7 +210,7 @@ for t in range(len(meas_times)):
                             'perturbed.state.{}_{:05d}.nc'.format(
                                     state_time.strftime('%Y%m%d'),
                                     state_time.hour*3600+state_time.second))
-    perturb_soil_moisture_states(
+    da_perturbation = perturb_soil_moisture_states(
             states_to_perturb_nc=orig_state_nc,
             P_whole_field=P_whole_field,
             out_states_nc=perturbed_state_nc)

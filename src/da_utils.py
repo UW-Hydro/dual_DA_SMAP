@@ -210,6 +210,9 @@ class States(object):
         da_x_updated: <xr.DataArray>
             Updated soil moisture states
             Dimension: [lat, lon, n]
+        da_v: <xr.DataArray>
+           Measurement perturbation in the update step
+           Dimension: [lat, lon, m]
         '''
 
         # --- Extract dimensions --- #
@@ -247,7 +250,12 @@ class States(object):
         x_new[x_new<0] = 0
         da_x_updated[:] = x_new
 
-        return(da_x_updated)
+        # --- Save measurement perturbation v to da --- #
+        v = v.reshape([len(lat_coord), len(lon_coord), m])  # [lat, lon, m]
+        da_v = xr.DataArray(v, coords=[lat_coord, lon_coord, da_y_est['m']],
+                            dims=['lat', 'lon', 'm'])
+
+        return(da_x_updated, da_v)
 
 
 def calculate_sm_noise_to_add_magnitude(vic_history_path, sigma_percent):
@@ -665,10 +673,10 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, R, da_meas,
                      format='NETCDF4_CLASSIC')
         # Save soil moisture perturbation
         if debug:
-            ds_perturb = xr.Dataset({'STATE_SOIL_MOISTURE':
-                                     (ds - class_states.ds)['STATE_SOIL_MOISTURE']})
-            ds_perturb.to_netcdf(os.path.join(debug_dir,
-                                              'pert.ens{}.nc').format(i+1))
+            ds_perturbation = xr.Dataset({'STATE_SOIL_MOISTURE':
+                                         (ds - class_states.ds)['STATE_SOIL_MOISTURE']})
+            ds_perturbation.to_netcdf(os.path.join(debug_dir,
+                                                   'perturbation.ens{}.nc').format(i+1))
 
     # --- Step 2. Propagate (run VIC) until the first measurement time point ---#    
     # Initialize dictionary of history file paths for each ensemble member
@@ -681,7 +689,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, R, da_meas,
     vic_run_end_time = pd.to_datetime(da_meas[da_meas_time_var].values[0]) - \
                        pd.DateOffset(hours=24/vic_model_steps_per_day)
     print('\tPropagating (run VIC) until the first measurement time point ',
-          vic_run_end_time)
+          pd.to_datetime(da_meas[da_meas_time_var].values[0]))
     # Set up output states, history and global files directories
     propagate_output_dir_name = 'propagate.{}_{:05d}-{}'.format(
                         vic_run_start_time.strftime('%Y%m%d'),
@@ -723,6 +731,16 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, R, da_meas,
                             vic_run_start_time.hour*3600+vic_run_start_time.second)))
     
     # --- Step 3. Run EnKF --- #
+    if debug:
+        debug_perturbation_dir = setup_output_dirs(
+                            output_temp_dir,
+                            mkdirs=['perturbation'])['perturbation']
+        debug_update_dir = setup_output_dirs(
+                        output_temp_dir,
+                        mkdirs=['update'])['update']
+        debug_innov_dir = setup_output_dirs(
+                        output_temp_dir,
+                        mkdirs=['innov'])['innov']
     # Initialize
     state_dir_after_prop = out_state_dir
 
@@ -747,21 +765,63 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, R, da_meas,
                             output_vic_state_root_dir,
                             mkdirs=[pert_state_dir_name])[pert_state_dir_name]
         # Perturb states for each ensemble member
-        perturb_soil_moisture_states_ensemble(
+        list_da_perturbation = perturb_soil_moisture_states_ensemble(
                     N,
                     states_to_perturb_dir=state_dir_after_prop,
                     P_whole_field=P_whole_field,
                     out_states_dir=pert_state_dir,
                     state_time=current_time)
+        if debug:
+            da_perturbation = xr.concat(list_da_perturbation, dim='N')
+            da_perturbation['N'] = range(1, N+1)
+            ds_perturbation = xr.Dataset({'soil_moisture_perturbation':
+                                          da_perturbation})
+            ds_perturbation.to_netcdf(os.path.join(
+                        debug_perturbation_dir,
+                        'perturbation.{}_{:05d}.nc').format(
+                                current_time.strftime('%Y%m%d'),
+                                current_time.hour*3600+current_time.second))
         # Delete propogated states
         shutil.rmtree(state_dir_after_prop)
-        
+
         # (2) Calculate gain K
         da_x, da_y_est = get_soil_moisture_and_estimated_meas_all_ensemble(
                                 N,
                                 state_dir=pert_state_dir,
                                 da_tile_frac=da_tile_frac)
         da_K = calculate_gain_K_whole_field(da_x, da_y_est, R)
+        if debug:
+            ds_K = xr.Dataset({'K': da_K})
+            ds_K.to_netcdf(os.path.join(debug_update_dir,
+                                        'K.{}_{:05d}.nc'.format(
+                                            current_time.strftime('%Y%m%d'),
+                                            current_time.hour*3600+current_time.second)))
+
+        # (2.1) Calculate and save normalized innovation
+        # Calculate ensemble mean of y_est
+        da_y_est_ensMean = da_y_est.mean(dim='N')  # [lat, lon, m]
+        # Calculate non-normalized innovation
+        innov = da_meas.loc[time, :, :, :].values - \
+                da_y_est_ensMean.values  # [lat, lon, m]
+        da_innov = xr.DataArray(innov, coords=[da_y_est_ensMean['lat'],
+                                               da_y_est_ensMean['lon'],
+                                               da_y_est_ensMean['m']],
+                                dims=['lat', 'lon', 'm'])
+        # Normalize innovation
+        da_Pyy = da_y_est.var(dim='N', ddof=1)  # [lat, lon, m]
+        innov_norm = innov / np.sqrt(da_Pyy.values + R)  # [lat, lon, m]
+        da_innov_norm = xr.DataArray(innov_norm,
+                                     coords=[da_y_est_ensMean['lat'],
+                                             da_y_est_ensMean['lon'],
+                                             da_y_est_ensMean['m']],
+                                     dims=['lat', 'lon', 'm'])
+        # Save normalized innovation to netCDf file
+        ds_innov_norm = xr.Dataset({'innov_norm': da_innov_norm})
+        ds_innov_norm.to_netcdf(os.path.join(
+                debug_innov_dir,
+                'innov_norm.{}_{:05d}.nc'.format(
+                        current_time.strftime('%Y%m%d'),
+                        current_time.hour*3600+current_time.second)))
 
         # (3) Update states for each ensemble member
         # Set up dir for updated states
@@ -771,13 +831,30 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, R, da_meas,
         out_updated_state_dir = setup_output_dirs(output_vic_state_root_dir,
                                                   mkdirs=[updated_states_dir_name])[updated_states_dir_name]
         # Update states and save to nc files
-        da_x_updated = update_states_ensemble(da_y_est, da_K,
-                                              da_meas.loc[time, :, :, :], R,
-                                              state_dir_before_update=pert_state_dir,
-                                              out_vic_state_dir=out_updated_state_dir)
+        da_x_updated, da_update_increm, da_v = update_states_ensemble(
+                da_y_est, da_K,
+                da_meas.loc[time, :, :, :],
+                R,
+                state_dir_before_update=pert_state_dir,
+                out_vic_state_dir=out_updated_state_dir)
+        if debug:
+            # Save update increment to netCDF file
+            ds_update_increm = xr.Dataset({'update_increment': da_update_increm})
+            ds_update_increm.to_netcdf(os.path.join(
+                    debug_update_dir,
+                    'update_increm.{}_{:05d}.nc'.format(
+                             current_time.strftime('%Y%m%d'),
+                             current_time.hour*3600+current_time.second)))
+            # Save measurement perturbation in the update step to netCDF file
+            ds_v = xr.Dataset({'meas_perturbation': da_v})
+            ds_v.to_netcdf(os.path.join(
+                    debug_update_dir,
+                    'meas_perturbation.{}_{:05d}.nc'.format(
+                             current_time.strftime('%Y%m%d'),
+                             current_time.hour*3600+current_time.second)))
         # Delete perturbed states
         shutil.rmtree(pert_state_dir)
-        
+
         # (3) Propagate each ensemble member to the next measurement time point
         # If current_time > next_time, do not propagate (we already reach the end of the simulation)
         if current_time > next_time:
@@ -1499,7 +1576,7 @@ def calculate_gain_K_whole_field(da_x, da_y_est, R):
 
 
 def update_states_ensemble(da_y_est, da_K, da_meas, R, state_dir_before_update,
-                            out_vic_state_dir):
+                           out_vic_state_dir):
     ''' Update the EnKF states for the whole field for each ensemble member.
     
     Parameters
@@ -1528,6 +1605,12 @@ def update_states_ensemble(da_y_est, da_K, da_meas, R, state_dir_before_update,
     da_x_updated: <xr.DataArray>
         Updated soil moisture states;
         Dimension: [lat, lon, n, N]
+    da_update_increm: <xr.DataArray>
+        Update increment of soil moisture states
+        Dimension: [N, lat, lon, n]
+    da_v: <xr.DataArray>
+        Measurement perturbation in the update step
+        Dimension: [N, lat, lon, m]
     
     Require
     ----------
@@ -1537,6 +1620,8 @@ def update_states_ensemble(da_y_est, da_K, da_meas, R, state_dir_before_update,
     # Extract N
     N = len(da_y_est['N'])
 
+    list_da_update_increm = []  # update increment
+    list_da_v = []  # measurement perturbation in the update step
     # Loop over each ensemble member
     for i in range(N):
         # Load VIC states before update for this ensemble member          
@@ -1546,17 +1631,26 @@ def update_states_ensemble(da_y_est, da_K, da_meas, R, state_dir_before_update,
         # Convert EnKF states back to VIC states
         class_states = States(ds)
         # Update states
-        da_x_updated = class_states.update_soil_moisture_states(
+        da_x_updated, da_v = class_states.update_soil_moisture_states(
                                         da_K, da_meas,
                                         da_y_est.loc[:, :, :, i], R)  # [lat, lon, n]
+        list_da_v.append(da_v)
+        # Save update increment to list
+        da_update_increm = da_x_updated - class_states.da_EnKF
+        list_da_update_increm.append(da_update_increm)
         # Convert updated states to VIC states format
         ds_updated = class_states.convert_new_EnKFstates_sm_to_VICstates(da_x_updated)
         # Save VIC states to netCDF file
         ds_updated.to_netcdf(os.path.join(out_vic_state_dir,
                                           'state.ens{}.nc'.format(i+1)),
                              format='NETCDF4_CLASSIC')
+    # Put update increment and measurement perturbation of all ensemble members into one da
+    da_update_increm = xr.concat(list_da_update_increm, dim='N')
+    da_update_increm['N'] = range(1, N+1)
+    da_v = xr.concat(list_da_v, dim='N')
+    da_v['N'] = range(1, N+1)
     
-    return da_x_updated
+    return da_x_updated, da_update_increm, da_v
 
 
 def perturb_forcings_ensemble(N, orig_forcing, year, dict_varnames, prec_std,
@@ -1651,13 +1745,20 @@ def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir,
         File names: state.ens<i>.nc, where <i> is ensemble index 1, ..., N
     state_time: <pd.datetime>
         State time. This is for identifying state file names.
+
+    Return
+    ----------
+    list_da_perturbation: <list>
+        A list of amount of perturbation added (a list of each ensemble member)
+        Dimension of each da: [veg_class, snow_band, nlayer, lat, lon]
     
     Require
     ----------
     os
     class States
     '''
-    
+   
+    list_da_perturbation = [] 
     for i in range(N):
         states_to_perturb_nc = os.path.join(
                 states_to_perturb_dir,
@@ -1666,8 +1767,12 @@ def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir,
                         state_time.hour*3600+state_time.second))
         out_states_nc = os.path.join(out_states_dir,
                                      'state.ens{}.nc'.format(i+1))
-        perturb_soil_moisture_states(states_to_perturb_nc, P_whole_field,
+        da_perturbation = perturb_soil_moisture_states(
+                                     states_to_perturb_nc, P_whole_field,
                                      out_states_nc)
+        list_da_perturbation.append(da_perturbation)
+
+    return list_da_perturbation
 
 
 def propagate(start_time, end_time, vic_exe, vic_global_template_file,
@@ -1753,6 +1858,13 @@ def perturb_soil_moisture_states(states_to_perturb_nc, P_whole_field,
     out_states_nc: <str>
         Path of output perturbed VIC state netCDF file
 
+    Returns
+    ----------
+    da_perturbation: <da.DataArray>
+        Amount of perturbation added
+        Dimension: [veg_class, snow_band, nlayer, lat, lon]
+    
+
     Require
     ----------
     os
@@ -1770,6 +1882,10 @@ def perturb_soil_moisture_states(states_to_perturb_nc, P_whole_field,
     # --- Save perturbed state file --- #
     ds_perturbed.to_netcdf(out_states_nc,
                            format='NETCDF4_CLASSIC')
+
+    # --- Return perturbation --- #
+    da_perturbation = (ds_perturbed - class_states.ds)['STATE_SOIL_MOISTURE']
+    return da_perturbation
 
 
 def concat_vic_history_files(list_history_nc):
