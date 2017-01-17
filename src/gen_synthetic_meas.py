@@ -1,6 +1,6 @@
 # =========================================================== #
 # This script produces true and synthetic surface soil moisture measurements
-#    - Run VIC with perturbed forcings and states --> "truth"
+#    - Run VIC with "truth" forcings and perturbed states --> "truth"
 #    - Add random noise to "truth" top-layer soil moisture --> synthetic measurements
 # =========================================================== #
 
@@ -51,10 +51,7 @@ dirs = setup_output_dirs(os.path.join(cfg['CONTROL']['root_dir'],
                          mkdirs=['truth', 'synthetic_meas', 'plots'])
 truth_subdirs = setup_output_dirs(dirs['truth'],
                                   mkdirs=['global', 'history', 'states',
-                                          'forcings', 'logs'])
-meas_subdirs = setup_output_dirs(
-                    dirs['synthetic_meas'],
-                    mkdirs=['indep_prec_meas'])
+                                          'logs'])
 
 # Construct time points for synthetic measurement (daily, at a certain hour)
 # (1) Determine first and last measurement time point
@@ -83,50 +80,11 @@ global_template = os.path.join(cfg['CONTROL']['root_dir'],
 # Simulate "truth" - run VIC with perturbed forcings and
 # states
 # =========================================================== #
-print('Simulating \"truth\" - run VIC with perturbed forcings and states...')
+print('Simulating \"truth\" - run VIC with "true" forcings and perturbed states...')
 # --- Create class VIC --- #
 vic_exe = VIC(os.path.join(cfg['CONTROL']['root_dir'], cfg['VIC']['exe']))
 
-# --- Prepare perturbed forcing data - "true" forcing --- #
-# --- Also, simulate an independent set of synthetic precipitation
-# measurement by adding noise to "true" precipitation --- #
-print('\tPreparing perturbed forcing data...')
-start_year = start_time.year
-end_year = end_time.year
-for year in range(start_year, end_year+1):
-    # --- Prepare perturbed forcing - "true" forcing --- #
-    # Construct Forcings class
-    class_forcings_orig = Forcings(xr.open_dataset(
-                os.path.join(cfg['CONTROL']['root_dir'],
-                             '{}{}.nc'.format(cfg['VIC']['orig_forcing_nc_basepath'],
-                                              year))))
-    # Perturb precipitaiton
-    ds_true = class_forcings_orig.perturb_prec_lognormal(
-                                varname=dict_varnames['PREC'],
-                                std=cfg['FORCINGS_STATES_PERTURB']['prec_std'],
-                                phi=cfg['FORCINGS_STATES_PERTURB']['phi'])
-    # Save to nc file
-    ds_true.to_netcdf(os.path.join(truth_subdirs['forcings'],
-                                   'forc_perturbed.{}.nc'.format(year)),
-                      format='NETCDF4_CLASSIC')
-
-    # --- Simulate independent precipitaiton measurement --- #
-    # Construct Forcings class
-    class_forcings_true = Forcings(ds_true)
-    # Perturbe precipitation
-    ds_perturbed = class_forcings_true.perturb_prec_lognormal(
-                                varname=dict_varnames['PREC'],
-                                std=cfg['FORCINGS_STATES_PERTURB']['prec_std'],
-                                phi=cfg['FORCINGS_STATES_PERTURB']['phi'])
-    da_prec_perturbed = ds_perturbed[dict_varnames['PREC']]
-    # Save to nc file
-    ds_simulated = xr.Dataset({'simulated_indep_prec_meas': da_prec_perturbed})
-    ds_simulated.to_netcdf(os.path.join(
-                                meas_subdirs['indep_prec_meas'],
-                                'indep_prec.{}.nc'.format(year)),
-                           format='NETCDF4_CLASSIC')
-
-# --- Run VIC with perturbed forcings and soil moisture states --- #
+# --- Run VIC with "truth" forcings and perturbed soil moisture states --- #
 # Initialize a list of file paths to be concatenated
 list_history_paths = []
 
@@ -152,8 +110,9 @@ propagate(start_time=start_time, end_time=run_end_time,
           out_history_fileprefix='history',
           out_global_basepath=os.path.join(truth_subdirs['global'], 'global'),
           out_log_dir=log_dir,
-          forcing_basepath=os.path.join(truth_subdirs['forcings'],
-                                        'forc_perturbed.'),
+          forcing_basepath=os.path.join(
+                  cfg['CONTROL']['root_dir'],
+                  cfg['VIC']['truth_forcing_nc_basepath']),
           mpi_proc=mpi_proc,
           mpi_exe=cfg['VIC']['mpi_exe'])
 # Concat output history file to the list to be concatenated
@@ -196,7 +155,7 @@ for t in range(len(meas_times)):
     # If current_time > next_time, do nothing (we already reach the end of the simulation)
     if current_time > next_time:
         break
-    print('\tRun VIC ', current_time, 'to', next_time, '(perturbed forcings and states)')
+    print('\tRun VIC ', current_time, 'to', next_time, '("true" forcings and perturbed states)')
 
     # --- Perturb states --- #
     state_time = current_time
@@ -233,8 +192,9 @@ for t in range(len(meas_times)):
               out_history_fileprefix='history',
               out_global_basepath=os.path.join(truth_subdirs['global'], 'global'),
               out_log_dir=log_dir,
-              forcing_basepath=os.path.join(truth_subdirs['forcings'],
-                                            'forc_perturbed.'),
+              forcing_basepath=os.path.join(
+                      cfg['CONTROL']['root_dir'],
+                      cfg['VIC']['truth_forcing_nc_basepath']),
               mpi_proc=mpi_proc,
               mpi_exe=cfg['VIC']['mpi_exe'])
     # Concat output history file to the list to be concatenated
@@ -324,12 +284,12 @@ for lt in lat:
         # plot truth
         da_sm1_true.loc[:, lt, lg].to_series().plot(
                 color='k', style='-',
-                label='Truth (VIC by perturbed forcings and states)',
+                label='Truth (VIC by "true" forcings and perturbed states)',
                 legend=True)
         # plot simulated measurement
         da_sm1_perturbed.loc[:, lt, lg].to_series().plot(
                 color='r', style='--',
-                label='Simulated meas. (perturbed truth)',
+                label='Simulated meas. (truth + noise)',
                 legend=True)
         plt.xlabel('Time')
         plt.ylabel('Soil moisture (mm)')
