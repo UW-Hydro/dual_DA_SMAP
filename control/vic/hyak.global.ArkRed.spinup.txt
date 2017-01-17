@@ -13,9 +13,9 @@ STARTYEAR	1949	# year model simulation starts
 STARTMONTH	1	# month model simulation starts
 STARTDAY	1 	# day model simulation starts
 STARTSEC	0 	# second model simulation starts
-ENDYEAR     1979
-ENDMONTH	12
-ENDDAY		31
+ENDYEAR     1949
+ENDMONTH	1
+ENDDAY		10
 
 CALENDAR    PROLEPTIC_GREGORIAN
 
@@ -41,9 +41,9 @@ DOMAIN_TYPE    XDIM    lon
 ########################################################################
 $init_state
 STATENAME /civil/hydro/ymao/data_assim/output/vic/ArkRed/spinup.1949_1979.Maurer/states/state  # Output state file path/prefix. The time (STATEYEAR,STATEMONTH,STATEDAY,STATESEC) will be appended to the prefix automatically in the format yyyymmdd.
-STATEYEAR   1980    # year to save model state
+STATEYEAR   1949    # year to save model state
 STATEMONTH  1  # month to save model state
-STATEDAY    1  # day to save model state
+STATEDAY    11  # day to save model state
 STATESEC    0  # second to save model state
 STATE_FORMAT           NETCDF4_CLASSIC  # State file format, valid options: NETCDF3_CLASSIC, NETCDF3_64BIT_OFFSET, NETCDF4_CLASSIC, NETCDF4
 
