@@ -1665,8 +1665,8 @@ def update_states_ensemble(da_y_est, da_K, da_meas, R, state_dir_before_update,
     return da_x_updated, da_update_increm, da_v
 
 
-def perturb_forcings_ensemble(N, orig_forcing, year, dict_varnames, prec_std,
-                              out_forcing_basedir):
+def perturb_forcings_ensemble(N, orig_forcing, dict_varnames, prec_std,
+                              prec_phi, out_forcing_basedir):
     ''' Perturb forcings for all ensemble members
 
     Parameters
@@ -1675,13 +1675,13 @@ def perturb_forcings_ensemble(N, orig_forcing, year, dict_varnames, prec_std,
         Number of ensemble members
     orig_forcing: <class 'Forcings'>
         Original (unperturbed) VIC forcings
-    year: <int>
-        Year of forcing
     dict_varnames: <dict>
         A dictionary of forcing names in nc file;
         e.g., {'PREC': 'prcp'; 'AIR_TEMP': 'tas'}
     prec_std: <float>
         Standard deviation of the precipitation perturbing multiplier
+    prec_phi: <float>
+        Parameter in AR(1) process for precipitation noise.
     out_forcing_basedir: <str>
         Base directory for output perturbed forcings;
         Subdirs "ens_<i>" will be created, where <i> is ensemble index, 1, ..., N
@@ -1702,11 +1702,14 @@ def perturb_forcings_ensemble(N, orig_forcing, year, dict_varnames, prec_std,
         # Perturb PREC
         ds_perturbed = orig_forcing.perturb_prec_lognormal(
                                             varname=dict_varnames['PREC'],
-                                            std=prec_std)
+                                            std=prec_std,
+                                            phi=prec_phi)
         # Save to nc file
-        ds_perturbed.to_netcdf(os.path.join(subdir,
-                                            'forc.{}.nc'.format(year)),
-                               format='NETCDF4_CLASSIC')
+        for year, ds in ds_perturbed.groupby('time.year'):
+            ds.to_netcdf(os.path.join(
+                    subdir,
+                    'force.{}.nc'.format(year)),
+                    format='NETCDF4_CLASSIC')
 
 
 def replace_global_values(gp, replace):

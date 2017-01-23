@@ -53,17 +53,24 @@ N = cfg['ENSEMBLE']['N']
 dict_varnames = {}
 dict_varnames['PREC'] = cfg['FORCING']['PREC']
 
-# --- Perturb forcings for each ensemble and each year --- #
+# --- Perturb forcings to generate ensemble (the whole time series is --- #
+# --- perturbed together to allow temporal autocorrelation as a whole --- #
+# Load in original forcings for all years
 start_year = start_time.year
 end_year = end_time.year
 
+list_ds = []
 for year in range(start_year, end_year+1):
-    class_forcings_orig = Forcings(xr.open_dataset(
-            '{}{}.nc'.format(orig_forcing_basedir,
-                             year)))
-    perturb_forcings_ensemble(N, orig_forcing=class_forcings_orig,
-                              year=year, dict_varnames=dict_varnames,
-                              prec_std=cfg['FORCING']['prec_std'],
-                              out_forcing_basedir=output_basedir)
+    ds = xr.open_dataset('{}{}.nc'.format(orig_forcing_basedir, year))
+    list_ds.append(ds)
+ds_all_years = xr.concat(list_ds, 'time')
+
+# Perturb and generate forcing ensemble
+class_forcings_orig = Forcings(ds_all_years)
+perturb_forcings_ensemble(N, orig_forcing=class_forcings_orig,
+                          dict_varnames=dict_varnames,
+                          prec_std=cfg['FORCING']['prec_std'],
+                          prec_phi=cfg['FORCING']['phi'],
+                          out_forcing_basedir=output_basedir)
 
 
