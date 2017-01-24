@@ -22,7 +22,9 @@ from da_utils import (EnKF_VIC, setup_output_dirs, generate_VIC_global_file,
                       check_returncode, propagate, calculate_ensemble_mean_states,
                       run_vic_assigned_states, concat_vic_history_files,
                       calculate_sm_noise_to_add_magnitude,
-                      calculate_sm_noise_to_add_covariance_matrix_whole_field)
+                      calculate_sm_noise_to_add_covariance_matrix_whole_field,
+                      calculate_max_soil_moist_domain,
+                      convert_max_moist_n_state)
 
 
 # ============================================================ #
@@ -108,6 +110,11 @@ nsnow= len(ds_state['snow_band'])
 P_whole_field = calculate_sm_noise_to_add_covariance_matrix_whole_field(
                     da_scale, nveg, nsnow,
                     cfg['EnKF']['state_perturb_corrcoef'])
+# Calculate maximum soil moisture for each tile [lat, lon, n]
+da_max_moist = calculate_max_soil_moist_domain(
+                    os.path.join(cfg['CONTROL']['root_dir'],
+                                 cfg['VIC']['vic_global_template']))
+da_max_moist_n = convert_max_moist_n_state(da_max_moist, nveg, nsnow)
 
 # --- Run EnKF --- #
 start_time = pd.to_datetime(cfg['EnKF']['start_time'])
@@ -121,6 +128,7 @@ dict_ens_list_history_files = EnKF_VIC(
          init_state_nc=os.path.join(cfg['CONTROL']['root_dir'],
                                     cfg['EnKF']['vic_initial_state']),
          P_whole_field=P_whole_field,
+         da_max_moist_n=da_max_moist_n,
          R=R,
          da_meas=da_meas,
          da_meas_time_var='time',

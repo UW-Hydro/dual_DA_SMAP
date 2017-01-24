@@ -19,7 +19,8 @@ from tonic.io import read_configobj
 from da_utils import (Forcings, setup_output_dirs, propagate,
                       calculate_sm_noise_to_add_magnitude,
                       perturb_soil_moisture_states, concat_vic_history_files,
-                      calculate_max_soil_moist_domain, VarToPerturb,
+                      calculate_max_soil_moist_domain,
+                      convert_max_moist_n_state, VarToPerturb,
                       calculate_sm_noise_to_add_covariance_matrix_whole_field)
 
 # =========================================================== #
@@ -142,6 +143,9 @@ nsnow= len(ds_state['snow_band'])
 P_whole_field = calculate_sm_noise_to_add_covariance_matrix_whole_field(
                     da_scale, nveg, nsnow,
                     cfg['FORCINGS_STATES_PERTURB']['state_perturb_corrcoef'])
+# Calculate maximum soil moisture for each tile [lat, lon, n]
+da_max_moist = calculate_max_soil_moist_domain(global_template)
+da_max_moist_n = convert_max_moist_n_state(da_max_moist, nveg, nsnow)
 
 # --- Run VIC --- #
 for t in range(len(meas_times)):
@@ -172,7 +176,8 @@ for t in range(len(meas_times)):
     da_perturbation = perturb_soil_moisture_states(
             states_to_perturb_nc=orig_state_nc,
             P_whole_field=P_whole_field,
-            out_states_nc=perturbed_state_nc)
+            out_states_nc=perturbed_state_nc,
+            da_max_moist_n=da_max_moist_n)
 
     # --- Propagate to the next time point --- #
     # Prepare log directories
@@ -255,7 +260,8 @@ da_sigma = da_sm1_true[0, :, :].copy(deep=True)
 da_sigma[:] = cfg['SYNTHETIC_MEAS']['sigma']
 # Add noise
 VarToPerturb_sm1 = VarToPerturb(da_sm1_true) # create class
-da_sm1_perturbed = VarToPerturb_sm1.add_gaussian_white_noise(da_sigma)
+da_sm1_perturbed = VarToPerturb_sm1.add_gaussian_white_noise(
+                        da_sigma, da_max_moist.sel(nlayer=0))
 
 # --- Save synthetic measurement to netCDF file --- #
 ds_simulated = xr.Dataset({'simulated_surface_sm': da_sm1_perturbed})

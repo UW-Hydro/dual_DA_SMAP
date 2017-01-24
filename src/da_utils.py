@@ -1,4 +1,4 @@
-
+ 
 import numpy as np
 import pandas as pd
 import os
@@ -125,7 +125,7 @@ class States(object):
         return ds
         
 
-    def perturb_soil_moisture_Gaussian(self, P_whole_field):
+    def perturb_soil_moisture_Gaussian(self, P_whole_field, da_max_moist_n):
         ''' Perturb soil moisture states by adding Gaussian noise.
             Each grid cell and soil layer can have different noise magnitude (specified
             by the diagonal of covariance matrix P), but all veg and snow tiles within
@@ -139,6 +139,11 @@ class States(object):
         P_whole_field: <np.array>
             Covariance matrix for sm state perturbation for the whole field
             Dimension: [lat, lon, n, n], where n = nlayer * nveg * nsnow
+        da_max_moist_n: <xarray.DataArray>
+            Maximum soil moisture for the whole domain and each tile
+            [unit: mm]. Soil moistures above maximum after perturbation will
+            be reset to maximum value.
+            Dimension: [lat, lon, n]
 
         Returns
         ----------
@@ -180,6 +185,12 @@ class States(object):
         # Reset negative perturbed soil moistures to zero
         sm_new = da_perturbed.values
         sm_new[sm_new<0] = 0
+
+        # Reset perturbed soil moistures above maximum to maximum
+        max_moist = da_max_moist_n.values
+        sm_new[(sm_new>max_moist)] = max_moist[(sm_new>max_moist)]
+
+        # Put into da
         da_perturbed[:] = sm_new
 
         # Put the perturbed soil moisture states back to VIC states ds
@@ -188,7 +199,8 @@ class States(object):
         return ds
 
     
-    def update_soil_moisture_states(self, da_K, da_y_meas, da_y_est, R):
+    def update_soil_moisture_states(self, da_K, da_y_meas, da_y_est, R,
+                                    da_max_moist_n):
         ''' This function updates soil moisture states for the whole field
             NOTE: this method does not change self
         
@@ -204,6 +216,11 @@ class States(object):
             Dimension: [lat, lon, m]
         R: <float> (for m = 1)
             Measurement error covariance matrix (measurement error ~ N(0, R))
+        da_max_moist_n: <xarray.DataArray>
+            Maximum soil moisture for the whole domain and each tile
+            [unit: mm]. Soil moistures above maximum after perturbation will
+            be reset to maximum value.
+            Dimension: [lat, lon, n]
 
         Return
         ----------
@@ -248,6 +265,12 @@ class States(object):
         # --- Reset negative updated soil moistures to zero --- #
         x_new = da_x_updated[:].values
         x_new[x_new<0] = 0
+
+        # --- Reset updated soil moistures above maximum to maximum --- #
+        max_moist = da_max_moist_n.values
+        x_new[(x_new>max_moist)] = max_moist[(x_new>max_moist)]
+
+        # --- Put into da --- #
         da_x_updated[:] = x_new
 
         # --- Save measurement perturbation v to da --- #
@@ -512,14 +535,18 @@ class VarToPerturb(object):
         self.lon = self.da['lon']
         self.time = self.da['time']
 
-    def add_gaussian_white_noise(self, da_sigma):
-        ''' Add Gaussian noise for all active grid cells
+    def add_gaussian_white_noise(self, da_sigma, da_max_values):
+        ''' Add Gaussian noise for all active grid cells and all time steps
 
         Parameters
         ----------
         sigma: <xarray.DataArray>
             Standard deviation of the Gaussian white noise to add, can be spatially different
             for each grid cell (but temporally constant);
+            Dimension: [lat, lon]
+        da_max_values: <xarray.DataArray>
+            Maximum values of variable for the whole domain. Perturbed values
+            above maximum will be reset to maximum value.
             Dimension: [lat, lon]
         
         Returns
@@ -543,6 +570,12 @@ class VarToPerturb(object):
         # Set negative to zero
         tmp = da_perturbed.values
         tmp[tmp<0] = 0
+        # Set perturbed values above maximum to maximum values
+        max_values = da_max_values.values  # [lat, lon]
+        for i in range(len(self.lat)):
+            for j in range(len(self.lon)):
+                tmp[(tmp[:, i, j]>max_values[i, j]), i, j] = max_values[i, j]
+        # Put into da
         da_perturbed[:] = tmp
         # Add attrs back
         da_perturbed.attrs = self.da.attrs
@@ -550,7 +583,8 @@ class VarToPerturb(object):
         return da_perturbed
 
 
-def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, R, da_meas,
+def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist_n,
+             R, da_meas,
              da_meas_time_var, vic_exe, vic_global_template,
              ens_forcing_basedir, ens_forcing_prefix,
              vic_model_steps_per_day, output_vic_global_root_dir,
@@ -573,6 +607,11 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, R, da_meas,
     P_whole_field: <np.array>
         Covariance matrix for sm state perturbation for the whole field
         Dimension: [lat, lon, n, n], where n = nlayer * nveg * nsnow
+    da_max_moist_n: <xarray.DataArray>
+        Maximum soil moisture for the whole domain and each tile
+        [unit: mm]. Soil moistures above maximum after perturbation will
+        be reset to maximum value.
+        Dimension: [lat, lon, n]
     R: <np.array>  [m*m]
         Measurement error covariance matrix
     da_meas: <xr.DataArray> [time, lat, lon]
@@ -667,7 +706,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, R, da_meas,
                         mkdirs=[init_state_dir_name])[init_state_dir_name]
     for i in range(N):
         # Perturb states and save
-        ds = class_states.perturb_soil_moisture_Gaussian(P_whole_field)
+        ds = class_states.perturb_soil_moisture_Gaussian(
+                                        P_whole_field, da_max_moist_n)
         ds.to_netcdf(os.path.join(init_state_dir,
                                   'state.ens{}.nc'.format(i+1)),
                      format='NETCDF4_CLASSIC')
@@ -810,7 +850,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, R, da_meas,
                 R,
                 state_dir_before_update=state_dir_after_prop,
                 state_time=current_time,
-                out_vic_state_dir=out_updated_state_dir)
+                out_vic_state_dir=out_updated_state_dir,
+                da_max_moist_n=da_max_moist_n)
         if debug:
             # Save update increment to netCDF file
             ds_update_increm = xr.Dataset({'update_increment': da_update_increm})
@@ -842,7 +883,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, R, da_meas,
                     N,
                     states_to_perturb_dir=out_updated_state_dir,
                     P_whole_field=P_whole_field,
-                    out_states_dir=pert_state_dir)
+                    out_states_dir=pert_state_dir,
+                    da_max_moist_n=da_max_moist_n)
         if debug:
             da_perturbation = xr.concat(list_da_perturbation, dim='N')
             da_perturbation['N'] = range(1, N+1)
@@ -1583,7 +1625,7 @@ def calculate_gain_K_whole_field(da_x, da_y_est, R):
 
 
 def update_states_ensemble(da_y_est, da_K, da_meas, R, state_dir_before_update,
-                           state_time, out_vic_state_dir):
+                           state_time, out_vic_state_dir, da_max_moist_n):
     ''' Update the EnKF states for the whole field for each ensemble member.
     
     Parameters
@@ -1608,6 +1650,11 @@ def update_states_ensemble(da_y_est, da_K, da_meas, R, state_dir_before_update,
     output_vic_state_dir: <str>
         Directory for saving updated state files in VIC format;
         State file names will be: state.ens<i>.nc, where <i> is ensemble member index (1, ..., N)
+    da_max_moist_n: <xarray.DataArray>
+        Maximum soil moisture for the whole domain and each tile
+        [unit: mm]. Soil moistures above maximum after perturbation will
+        be reset to maximum value.
+        Dimension: [lat, lon, n]
     
     Returns
     ----------
@@ -1645,7 +1692,8 @@ def update_states_ensemble(da_y_est, da_K, da_meas, R, state_dir_before_update,
         # Update states
         da_x_updated, da_v = class_states.update_soil_moisture_states(
                                         da_K, da_meas,
-                                        da_y_est.loc[:, :, :, i], R)  # [lat, lon, n]
+                                        da_y_est.loc[:, :, :, i], R,
+                                        da_max_moist_n)  # [lat, lon, n]
         list_da_v.append(da_v)
         # Save update increment to list
         da_update_increm = da_x_updated - class_states.da_EnKF
@@ -1742,7 +1790,8 @@ def replace_global_values(gp, replace):
 
 def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir,
                                           P_whole_field,
-                                          out_states_dir):
+                                          out_states_dir,
+                                          da_max_moist_n):
     ''' Perturb all soil_moisture states for each ensemble member
     
     Parameters
@@ -1758,6 +1807,11 @@ def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir,
     out_states_dir: <str>
         Directory for output perturbed VIC state files;
         File names: state.ens<i>.nc, where <i> is ensemble index 1, ..., N
+    da_max_moist_n: <xarray.DataArray>
+        Maximum soil moisture for the whole domain and each tile
+        [unit: mm]. Soil moistures above maximum after perturbation will
+        be reset to maximum value.
+        Dimension: [lat, lon, n]
 
     Return
     ----------
@@ -1780,7 +1834,7 @@ def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir,
                                      'state.ens{}.nc'.format(i+1))
         da_perturbation = perturb_soil_moisture_states(
                                      states_to_perturb_nc, P_whole_field,
-                                     out_states_nc)
+                                     out_states_nc, da_max_moist_n)
         list_da_perturbation.append(da_perturbation)
 
     return list_da_perturbation
@@ -1856,7 +1910,7 @@ def propagate(start_time, end_time, vic_exe, vic_global_template_file,
 
 
 def perturb_soil_moisture_states(states_to_perturb_nc, P_whole_field,
-                                 out_states_nc):
+                                 out_states_nc, da_max_moist_n):
     ''' Perturb all soil_moisture states
 
     Parameters
@@ -1874,6 +1928,11 @@ def perturb_soil_moisture_states(states_to_perturb_nc, P_whole_field,
     da_perturbation: <da.DataArray>
         Amount of perturbation added
         Dimension: [veg_class, snow_band, nlayer, lat, lon]
+    da_max_moist_n: <xarray.DataArray>
+        Maximum soil moisture for the whole domain and each tile
+        [unit: mm]. Soil moistures above maximum after perturbation will
+        be reset to maximum value.
+        Dimension: [lat, lon, n]
     
 
     Require
@@ -1888,7 +1947,7 @@ def perturb_soil_moisture_states(states_to_perturb_nc, P_whole_field,
     # --- Perturb --- #
     # Perturb
     ds_perturbed = class_states.perturb_soil_moisture_Gaussian(
-                            P_whole_field)
+                            P_whole_field, da_max_moist_n)
 
     # --- Save perturbed state file --- #
     ds_perturbed.to_netcdf(out_states_nc,
@@ -1981,6 +2040,48 @@ def calculate_max_soil_moist_domain(global_path):
     da_max_moist = da_depth * da_porosity * 1000  # [mm]
 
     return da_max_moist
+
+
+def convert_max_moist_n_state(da_max_moist, nveg, nsnow):
+    ''' Converts da_max_moist of dimension [nlayer, lat, lon] to [lat, lon, n]
+        (Max moistures for each tile within a certain grid cell and layer are the same)
+
+    Parameters
+    ----------
+    da_max_moist: <xarray.DataArray>
+        Maximum soil moisture for the whole domain and each soil layer [unit: mm];
+        Dimension: [nlayer, lat, lon]
+    nveg: <int>
+        Number of veg classes
+    nsnow: <int>
+        Number of snow bands
+
+    Returns
+    ----------
+    da_max_moist_n: <xarray.DataArray>
+        Maximum soil moisture for the whole domain and each tile [unit: mm];
+        Dimension: [lat, lon, n]
+    '''
+ 
+    # Extract coordinates
+    nlayer = da_max_moist['nlayer']
+    lat = da_max_moist['lat']
+    lon = da_max_moist['lon']
+    n = len(nlayer) * nveg * nsnow
+
+    # Roll dimension to [lat, lon, nlayer]
+    max_moist = np.rollaxis(da_max_moist.values, 0, 3)  # [lat, lon, nlayer]
+
+    # Repeat data for each cell and layer for nveg*nsnow times, and convert
+    # dimension to [lat, lon, n]
+    max_moist_new = np.repeat(max_moist, nveg*nsnow).reshape([len(lat), len(lon), n])
+
+    # Put into da
+    da_max_moist_n = xr.DataArray(max_moist_new,
+                                  coords=[lat, lon, range(n)],
+                                  dims=['lat', 'lon', 'n'])
+
+    return da_max_moist_n
 
 
 def calculate_ensemble_mean_states(list_state_nc, out_state_nc):
