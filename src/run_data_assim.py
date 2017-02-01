@@ -40,7 +40,7 @@ nproc = int(sys.argv[2])
 mpi_proc = int(sys.argv[3])
 
 # Whether to print out debug temp files or not
-debug = bool(sys.argv[4])
+debug = (sys.argv[4].lower() == 'true')
 
 # ============================================================ #
 # Set random generation seed
