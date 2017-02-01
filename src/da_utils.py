@@ -771,6 +771,9 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
                             vic_run_start_time.hour*3600+vic_run_start_time.second)))
     
     # --- Step 3. Run EnKF --- #
+    debug_innov_dir = setup_output_dirs(
+                    output_temp_dir,
+                    mkdirs=['innov'])['innov']
     if debug:
         debug_perturbation_dir = setup_output_dirs(
                             output_temp_dir,
@@ -778,9 +781,6 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
         debug_update_dir = setup_output_dirs(
                         output_temp_dir,
                         mkdirs=['update'])['update']
-        debug_innov_dir = setup_output_dirs(
-                        output_temp_dir,
-                        mkdirs=['innov'])['innov']
     # Initialize
     state_dir_after_prop = out_state_dir
 
@@ -940,6 +940,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
                             i+1,
                             current_time.strftime('%Y-%m-%d'),
                             current_time.hour*3600+current_time.second)))
+        # Delete perturbed states
+        shutil.rmtree(pert_state_dir)
         
         # Point state directory to be updated to the propagated one
         state_dir_after_prop = out_state_dir
