@@ -85,11 +85,6 @@ data = da_meas.values.reshape((len(time), len(lat), len(lon), 1))
 da_meas = xr.DataArray(data, coords=[time, lat, lon, [0]],
                        dims=['time', 'lat', 'lon', 'm'])
 
-# --- Process VIC forcing names and perturbation parameters --- #
-# Construct forcing variable name dictionary
-dict_varnames = {}
-dict_varnames['PREC'] = cfg['FORCINGS']['PREC']
-
 # --- Prepare measurement error covariance matrix R [m*m] --- #
 R = np.array([[cfg['EnKF']['R']]])
 

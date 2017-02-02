@@ -42,10 +42,6 @@ print('Processing config parameters...')
 start_time = pd.to_datetime(cfg['TIME_INDEX']['start_time'])
 end_time = pd.to_datetime(cfg['TIME_INDEX']['end_time'])
 
-# Construct forcing variable name dictionary
-dict_varnames = {}
-dict_varnames['PREC'] = cfg['VIC']['PREC']
-
 # Set up output sub-directories
 dirs = setup_output_dirs(os.path.join(cfg['CONTROL']['root_dir'],
                                       cfg['OUTPUT']['output_basedir']),
