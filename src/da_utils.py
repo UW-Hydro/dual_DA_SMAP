@@ -591,7 +591,9 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
              output_vic_state_root_dir, output_vic_history_root_dir,
              output_vic_log_root_dir,
              dict_varnames, nproc=1,
-             mpi_proc=None, mpi_exe='mpiexec', debug=False, output_temp_dir=None):
+             mpi_proc=None, mpi_exe='mpiexec', debug=False, output_temp_dir=None,
+             linear_model='False', linear_model_prec_varname=None,
+             dict_linear_model_param=None):
     ''' This function runs ensemble kalman filter (EnKF) on VIC (image driver)
 
     Parameters
@@ -653,6 +655,17 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
     output_temp_dir: <str>
         Directory for temp files (for dignostic purpose); only used when
         debug = True
+    linear_model: <bool>
+        Whether to run a linear model instead of VIC for propagation.
+        Default is 'False', which is to run VIC
+        Note: some VIC input arguments will not be used if this option is True
+    linear_model_prec_varname: <str>
+        NOTE: this parameter is only needed if linear_model = True.
+        Precip varname in the forcing netCDF files.
+    dict_linear_model_param: <dict>
+        NOTE: this parameter is only needed if linear_model = True.
+        A dict of linear model parameters.
+        Keys: 'r1', 'r2', 'r3', 'r12', 'r23'
 
     Returns
     ----------
@@ -748,20 +761,41 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
                             output_vic_log_root_dir,
                             mkdirs=[propagate_output_dir_name])[propagate_output_dir_name]
     # Propagate all ensemble members
-    propagate_ensemble(N, start_time=vic_run_start_time, end_time=vic_run_end_time,
-                       vic_exe=vic_exe,
-                       vic_global_template_file=vic_global_template,
-                       vic_model_steps_per_day=vic_model_steps_per_day,
-                       init_state_dir=init_state_dir,
-                       out_state_dir=out_state_dir,
-                       out_history_dir=out_history_dir,
-                       out_global_dir=out_global_dir,
-                       out_log_dir=out_log_dir,
-                       ens_forcing_basedir=ens_forcing_basedir,
-                       ens_forcing_prefix=ens_forcing_prefix,
-                       nproc=nproc,
-                       mpi_proc=mpi_proc,
-                       mpi_exe=mpi_exe)
+    if not linear_model:
+        propagate_ensemble(
+                N,
+                start_time=vic_run_start_time,
+                end_time=vic_run_end_time,
+                vic_exe=vic_exe,
+                vic_global_template_file=vic_global_template,
+                vic_model_steps_per_day=vic_model_steps_per_day,
+                init_state_dir=init_state_dir,
+                out_state_dir=out_state_dir,
+                out_history_dir=out_history_dir,
+                out_global_dir=out_global_dir,
+                out_log_dir=out_log_dir,
+                ens_forcing_basedir=ens_forcing_basedir,
+                ens_forcing_prefix=ens_forcing_prefix,
+                nproc=nproc,
+                mpi_proc=mpi_proc,
+                mpi_exe=mpi_exe)
+    else:
+        propagate_ensemble_linear_model(
+                N, 
+                start_time=vic_run_start_time,
+                end_time=vic_run_end_time,
+                lat_coord=da_meas['lat'],
+                lon_coord=da_meas['lon'],
+                model_steps_per_day=vic_model_steps_per_day,
+                init_state_dir=init_state_dir,
+                out_state_dir=out_state_dir,
+                out_history_dir=out_history_dir,
+                ens_forcing_basedir=ens_forcing_basedir,
+                ens_forcing_prefix=ens_forcing_prefix,
+                prec_varname=linear_model_prec_varname,
+                dict_linear_model_param=dict_linear_model_param,
+                nproc=nproc)
+
     # Put output history file paths into dictionary
     for i in range(N):
         dict_ens_list_history_files['ens{}'.format(i+1)].append(os.path.join(
@@ -918,20 +952,38 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
         out_log_dir = setup_output_dirs(
                                 output_vic_log_root_dir,
                                 mkdirs=[propagate_output_dir_name])[propagate_output_dir_name]
-        propagate_ensemble(N, start_time=current_time, end_time=next_time,
-                       vic_exe=vic_exe,
-                       vic_global_template_file=vic_global_template,
-                       vic_model_steps_per_day=vic_model_steps_per_day,
-                       init_state_dir=pert_state_dir,  # perturbed states as init state
-                       out_state_dir=out_state_dir,
-                       out_history_dir=out_history_dir,
-                       out_global_dir=out_global_dir,
-                       out_log_dir=out_log_dir,
-                       ens_forcing_basedir=ens_forcing_basedir,
-                       ens_forcing_prefix=ens_forcing_prefix,
-                       nproc=nproc,
-                       mpi_proc=mpi_proc,
-                       mpi_exe=mpi_exe)
+        if not linear_model:
+            propagate_ensemble(
+                    N, start_time=current_time, end_time=next_time,
+                    vic_exe=vic_exe,
+                    vic_global_template_file=vic_global_template,
+                    vic_model_steps_per_day=vic_model_steps_per_day,
+                    init_state_dir=pert_state_dir,  # perturbed states as init state
+                    out_state_dir=out_state_dir,
+                    out_history_dir=out_history_dir,
+                    out_global_dir=out_global_dir,
+                    out_log_dir=out_log_dir,
+                    ens_forcing_basedir=ens_forcing_basedir,
+                    ens_forcing_prefix=ens_forcing_prefix,
+                    nproc=nproc,
+                    mpi_proc=mpi_proc,
+                    mpi_exe=mpi_exe)
+        else:
+            propagate_ensemble_linear_model(
+                    N, 
+                    start_time=current_time,
+                    end_time=next_time,
+                    lat_coord=da_meas['lat'],
+                    lon_coord=da_meas['lon'],
+                    model_steps_per_day=vic_model_steps_per_day,
+                    init_state_dir=pert_state_dir,  # perturbed states as init state
+                    out_state_dir=out_state_dir,
+                    out_history_dir=out_history_dir,
+                    ens_forcing_basedir=ens_forcing_basedir,
+                    ens_forcing_prefix=ens_forcing_prefix,
+                    prec_varname=linear_model_prec_varname,
+                    dict_linear_model_param=dict_linear_model_param,
+                    nproc=nproc)
 
         # Put output history file paths into dictionary
         for i in range(N):
@@ -1909,6 +1961,235 @@ def propagate(start_time, end_time, vic_exe, vic_global_template_file,
     returncode = vic_exe.run(global_file, logdir=out_log_dir,
                              **{'mpi_proc': mpi_proc, 'mpi_exe': mpi_exe})
     check_returncode(returncode, expected=0)
+
+
+def propagate_linear_model(start_time, end_time, lat_coord, lon_coord,
+                       model_steps_per_day, init_state_nc, out_state_basepath,
+                       out_history_dir, out_history_fileprefix,
+                       forcing_basepath, prec_varname, dict_linear_model_param):
+    ''' This function propagates (via VIC) from an initial state (or no
+        initial state) to a certain time point for the whole domain.
+        The linear model assumes 3 soil layers and only allows 1 tile per
+        grid cell (i.e., nveg=1 and nsnow=1). Specifically, for each grid cell,
+        the model takes the following form:
+                    sm(t+1) = r * sm(t) + P(t)
+        where sm(t) is an array of dim [3, 1], r is a constant matrix of
+        dim [3, 3], and P(t) is input precipitation and is an array of dim
+        [3, 1].
+
+    Parameters
+    ----------
+    start_time: <pandas.tslib.Timestamp>
+        Start time of this propagation run
+    end_time: <pandas.tslib.Timestamp>
+        End time of this propagation
+    lat_coord: <list/xr.coord>
+        Latitude coordinates
+    lon_coord: <list/xr.coord>
+        Longitude coordinates
+    model_steps_per_day: <str>
+        VIC option - model steps per day
+    init_state_nc: <str>
+        Initial state netCDF file; None for no initial state
+    out_state_basepath: <str>
+        Basepath of output states; ".YYYYMMDD_SSSSS.nc" will be appended
+    out_history_dir: <str>
+        Directory of output history files
+    out_history_fileprefix: <str>
+        History file prefix
+    forcing_basepath: <str>
+        Forcing basepath. <YYYY.nc> will be appended
+    prec_varname: <str>
+        Precip varname in the forcing netCDF files
+    dict_linear_model_param: <dict>
+        A dict of linear model parameters.
+        Keys: 'r1', 'r2', 'r3', 'r12', 'r23'
+    '''
+    
+    # --- Establish linear propagation matrix r[3, 3] --- #
+    r1 = dict_linear_model_param['r1']
+    r2 = dict_linear_model_param['r2']
+    r3 = dict_linear_model_param['r3']
+    r12 = dict_linear_model_param['r12']
+    r23 = dict_linear_model_param['r23']
+    r = np.array([[r1-r12, 0, 0],
+                  [r12, r2-r23, 0],
+                  [0, r23, r3]])
+
+    # --- Establish a list of time steps --- #
+    dt_hour = int(24 / model_steps_per_day)  # delta t in hour
+    times = pd.date_range(start_time, end_time, freq='{}H'.format(dt_hour))
+
+    # --- Set initial states [3, lat, lon] --- #
+    # If not initial states, set all initial soil moistures to zero
+    if init_state_nc is None:
+        sm0 = np.zeros([3, len(lat_coord), len(lon_coord)])
+    # Otherwise, read from an initial state netCDF file
+    else:
+        sm0 = xr.open_dataset(init_state_nc)['STATE_SOIL_MOISTURE']\
+              [0, 0, :, :, :].values
+
+    # --- Load forcing data --- #
+    start_year = start_time.year
+    end_year = end_time.year
+    list_ds = []
+    for year in range(start_year, end_year+1):
+        ds = xr.open_dataset(forcing_basepath + str(year) + '.nc')
+        list_ds.append(ds)
+    ds_force = xr.concat(list_ds, dim='time')
+    
+    # --- Run the linear model --- #
+    sm = np.empty([len(times), 3, len(lat_coord), len(lon_coord)])  # [time, 3, lat, lon]
+    for i, t in enumerate(times):
+        # Extract prec forcing
+        da_prec = ds_force[prec_varname].sel(time=t)  # [lat, lon]
+        # Determine the total number of loops
+        nloop = len(lat_coord) * len(lon_coord)
+        # Convert sm into nloop
+        if i == 0:
+            sm_init = sm0.reshape([3, nloop])  # [3, nloop]
+        else:
+            sm_init = sm[i-1, :, :, :].reshape([3, nloop])
+        # Convert prec into nloop
+        prec = da_prec.values.reshape([nloop])
+        prec2 = np.zeros(nloop)
+        prec3 = np.zeros(nloop)
+        prec = np.array([prec, prec2, prec3])  # [3, nloop]
+        # Use linear model operate to calculate sm(t)
+        sm_new = np.array(list(map(
+                    lambda j: np.dot(r, sm_init[:, j]) + prec[:, j],
+                    range(nloop))))  # [nloop, 3]
+        # Reshape and roll lat and lon to last # [3, lat, lon]
+        sm_new = sm_new.reshape([len(lat_coord), len(lon_coord), 3])
+        sm_new = np.rollaxis(sm_new, 0, 3)
+        sm_new = np.rollaxis(sm_new, 0, 3)
+        sm_new = sm_new.reshape([3, len(lat_coord), len(lon_coord)])
+        # Put sm_new into the final sm matrix
+        sm[i, :, :, :] = sm_new
+    
+    # --- Put simulated sm into history da and save to history file --- #
+    da_sm = xr.DataArray(sm,
+                         coords=[times, [0, 1, 2], lat_coord, lon_coord],
+                         dims=['time', 'nlayer', 'lat', 'lon'])
+    ds_hist = xr.Dataset({'OUT_SOIL_MOIST': da_sm})
+    ds_hist.to_netcdf(os.path.join(
+            out_history_dir,
+            out_history_fileprefix + \
+            '.{}-{:05d}.nc'.format(start_time.strftime('%Y-%m-%d'),
+                               start_time.hour*3600+start_time.second)))
+    
+    # --- Save state file at the end of the last time step --- #
+    state_time = end_time + pd.DateOffset(hours=dt_hour)
+    sm_state = sm[-1, :, :, :].reshape([1, 1, 3, len(lat_coord),
+                                        len(lon_coord)])  # [1, 1, 3, lat, lon]
+    da_sm_state = xr.DataArray(
+            sm_state,
+            coords=[[1], [0], [0, 1, 2], lat_coord, lon_coord],
+            dims=['veg_class', 'snow_band', 'nlayer', 'lat', 'lon'])
+    ds_state = xr.Dataset({'STATE_SOIL_MOISTURE': da_sm_state})
+    ds_state.to_netcdf(
+            out_state_basepath + \
+            '.{}_{:05d}.nc'.format(state_time.strftime('%Y%m%d'),
+                                  state_time.hour*3600+state_time.second))
+
+
+def propagate_ensemble_linear_model(N, start_time, end_time, lat_coord,
+                                   lon_coord, model_steps_per_day,
+                                   init_state_dir, out_state_dir,
+                                   out_history_dir,
+                                   ens_forcing_basedir, ens_forcing_prefix,
+                                   prec_varname, dict_linear_model_param,
+                                   nproc=1):
+    ''' This function propagates (via VIC) an ensemble of states to a certain time point.
+    
+    Parameters
+    ----------
+    N: <int>
+        Number of ensemble members
+    start_time: <pandas.tslib.Timestamp>
+        Start time of this propagation run
+    end_time: <pandas.tslib.Timestamp>
+        End time of this propagation
+    lat_coord: <list/xr.coord>
+        Latitude coordinates
+    lon_coord: <list/xr.coord>
+        Longitude coordinates
+    model_steps_per_day: <str>
+        VIC option - model steps per day
+    init_state_dir: <str>
+        Directory of initial states for each ensemble member
+        State file names are "state.ens<i>", where <i> is 1, 2, ..., N
+    out_state_dir: <str>
+        Directory of output states for each ensemble member
+        State file names will be "state.ens<i>.xxx.nc", where <i> is 1, 2, ..., N
+    out_history_dir: <str>
+        Directory of output history files for each ensemble member
+        History file names will be "history.ens<i>.nc", where <i> is 1, 2, ..., N
+    ens_forcing_basedir: <str>
+        Ensemble forcing basedir ('ens_{}' subdirs should be under basedir)
+    ens_forcing_prefix: <str>
+        Prefix of ensemble forcing filenames under 'ens_{}' subdirs
+        'YYYY.nc' will be appended
+    prec_varname: <str>
+        Precip varname in the forcing netCDF files
+    dict_linear_model_param: <dict>
+        A dict of linear model parameters.
+        Keys: 'r1', 'r2', 'r3', 'r12', 'r23'
+    nproc: <int>
+        Number of processors to use for parallel ensemble
+        Default: 1
+        
+    Require
+    ----------
+    OrderedDict
+    multiprocessing
+    generate_VIC_global_file
+    '''
+
+    # --- If nproc == 1, do a regular ensemble loop --- #
+    if nproc == 1:
+        for i in range(N):
+            # Prepare linear model parameters
+            init_state_nc = os.path.join(init_state_dir,
+                                         'state.ens{}.nc'.format(i+1))
+            out_state_basepath = os.path.join(out_state_dir,
+                                              'state.ens{}'.format(i+1))
+            out_history_fileprefix = 'history.ens{}'.format(i+1)
+            forcing_basepath = os.path.join(
+                    ens_forcing_basedir,
+                    'ens_{}'.format(i+1), ens_forcing_prefix)
+            # Run linear model
+            propagate_linear_model(
+                    start_time, end_time, lat_coord, lon_coord,
+                    model_steps_per_day, init_state_nc, out_state_basepath,
+                    out_history_dir, out_history_fileprefix,
+                    forcing_basepath, prec_varname, dict_linear_model_param)
+
+    # --- If nproc > 1, use multiprocessing --- #
+    elif nproc > 1:
+        # --- Set up multiprocessing --- #
+        pool = mp.Pool(processes=nproc)
+        # --- Loop over each ensemble member --- #
+        for i in range(N):
+            # Prepare linear model parameters
+            init_state_nc = os.path.join(init_state_dir,
+                                         'state.ens{}.nc'.format(i+1))
+            out_state_basepath = os.path.join(out_state_dir,
+                                              'state.ens{}'.format(i+1))
+            out_history_fileprefix = 'history.ens{}'.format(i+1)
+            forcing_basepath = os.path.join(
+                    ens_forcing_basedir,
+                    'ens_{}'.format(i+1), ens_forcing_prefix)
+            # Run linear model
+            pool.apply_async(propagate_linear_model,
+                             (start_time, end_time, lat_coord, lon_coord,
+                              model_steps_per_day, init_state_nc,
+                              out_state_basepath, out_history_dir,
+                              out_history_fileprefix, forcing_basepath,
+                              prec_varname, dict_linear_model_param))
+        # --- Finish multiprocessing --- #
+        pool.close()
+        pool.join()
 
 
 def perturb_soil_moisture_states(states_to_perturb_nc, P_whole_field,

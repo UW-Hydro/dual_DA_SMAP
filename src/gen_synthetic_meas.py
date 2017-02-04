@@ -21,7 +21,8 @@ from da_utils import (Forcings, setup_output_dirs, propagate,
                       perturb_soil_moisture_states, concat_vic_history_files,
                       calculate_max_soil_moist_domain,
                       convert_max_moist_n_state, VarToPerturb,
-                      calculate_sm_noise_to_add_covariance_matrix_whole_field)
+                      calculate_sm_noise_to_add_covariance_matrix_whole_field,
+                      find_global_param_value, propagate_linear_model)
 
 # =========================================================== #
 # Load command line arguments
@@ -73,6 +74,25 @@ meas_times = pd.date_range(meas_start_time, meas_end_time, freq='D')
 global_template = os.path.join(cfg['CONTROL']['root_dir'],
                                cfg['VIC']['vic_global_template'])
 
+# Process linear model subsitute, if specified
+if 'LINEAR_MODEL' in cfg:
+    linear_model = True
+    prec_varname = cfg['LINEAR_MODEL']['prec_varname']
+    dict_linear_model_param={'r1': cfg['LINEAR_MODEL']['r1'],
+                             'r2': cfg['LINEAR_MODEL']['r2'],
+                             'r3': cfg['LINEAR_MODEL']['r3'],
+                             'r12': cfg['LINEAR_MODEL']['r12'],
+                             'r23': cfg['LINEAR_MODEL']['r23']}
+    # Find VIC domain file and extract lat & lon
+    with open(global_template, 'r') as global_file:
+        gp = global_file.read()
+    domain_nc = find_global_param_value(gp, 'DOMAIN')
+    ds_nc = xr.open_dataset(domain_nc)
+    lat_coord = ds_nc['lat']
+    lon_coord = ds_nc['lon']
+else:
+    linear_model = False
+
 # =========================================================== #
 # Simulate "truth" - run VIC with perturbed forcings and
 # states
@@ -96,22 +116,42 @@ log_dir = setup_output_dirs(
                     mkdirs=['propagate.{}'.format(prop_period_stamp)])\
           ['propagate.{}'.format(prop_period_stamp)]
 # Propagate until the first measurement point
-propagate(start_time=start_time, end_time=run_end_time,
-          vic_exe=vic_exe, vic_global_template_file=global_template,
-          vic_model_steps_per_day=cfg['VIC']['model_steps_per_day'],
-          init_state_nc=os.path.join(cfg['CONTROL']['root_dir'],
-                                     cfg['VIC']['vic_initial_state']),
-          out_state_basepath=os.path.join(truth_subdirs['states'],
-                                          'propagated.state'),
-          out_history_dir=truth_subdirs['history'],
-          out_history_fileprefix='history',
-          out_global_basepath=os.path.join(truth_subdirs['global'], 'global'),
-          out_log_dir=log_dir,
-          forcing_basepath=os.path.join(
-                  cfg['CONTROL']['root_dir'],
-                  cfg['VIC']['truth_forcing_nc_basepath']),
-          mpi_proc=mpi_proc,
-          mpi_exe=cfg['VIC']['mpi_exe'])
+if not linear_model:
+    propagate(start_time=start_time, end_time=run_end_time,
+              vic_exe=vic_exe, vic_global_template_file=global_template,
+              vic_model_steps_per_day=cfg['VIC']['model_steps_per_day'],
+              init_state_nc=os.path.join(cfg['CONTROL']['root_dir'],
+                                         cfg['VIC']['vic_initial_state']),
+              out_state_basepath=os.path.join(truth_subdirs['states'],
+                                              'propagated.state'),
+              out_history_dir=truth_subdirs['history'],
+              out_history_fileprefix='history',
+              out_global_basepath=os.path.join(truth_subdirs['global'], 'global'),
+              out_log_dir=log_dir,
+              forcing_basepath=os.path.join(
+                      cfg['CONTROL']['root_dir'],
+                      cfg['VIC']['truth_forcing_nc_basepath']),
+              mpi_proc=mpi_proc,
+              mpi_exe=cfg['VIC']['mpi_exe'])
+else:
+    propagate_linear_model(
+            start_time=start_time,
+            end_time=run_end_time,
+            lat_coord=lat_coord,
+            lon_coord=lon_coord,
+            model_steps_per_day=cfg['VIC']['model_steps_per_day'],
+            init_state_nc=os.path.join(cfg['CONTROL']['root_dir'],
+                                       cfg['LINEAR_MODEL']['initial_state']),
+            out_state_basepath=os.path.join(truth_subdirs['states'],
+                                            'propagated.state'),
+            out_history_dir=truth_subdirs['history'],
+            out_history_fileprefix='history',
+            forcing_basepath=os.path.join(
+                    cfg['CONTROL']['root_dir'],
+                    cfg['VIC']['truth_forcing_nc_basepath']),
+            prec_varname=prec_varname,
+            dict_linear_model_param=dict_linear_model_param)
+
 # Concat output history file to the list to be concatenated
 list_history_paths.append(os.path.join(truth_subdirs['history'],
                                        'history.{}-{:05d}.nc'.format(
@@ -142,6 +182,9 @@ P_whole_field = calculate_sm_noise_to_add_covariance_matrix_whole_field(
 # Calculate maximum soil moisture for each tile [lat, lon, n]
 da_max_moist = calculate_max_soil_moist_domain(global_template)
 da_max_moist_n = convert_max_moist_n_state(da_max_moist, nveg, nsnow)
+# If linear model subsitution, no max moist limit
+if linear_model:
+    da_max_moist_n[:, :, :] = 99999
 
 # --- Run VIC --- #
 for t in range(len(meas_times)):
@@ -174,6 +217,8 @@ for t in range(len(meas_times)):
             P_whole_field=P_whole_field,
             out_states_nc=perturbed_state_nc,
             da_max_moist_n=da_max_moist_n)
+    # Clean up original state file
+    os.remove(orig_state_nc)
 
     # --- Propagate to the next time point --- #
     # Prepare log directories
@@ -183,26 +228,50 @@ for t in range(len(meas_times)):
                     truth_subdirs['logs'],
                     mkdirs=['propagate.{}'.format(prop_period_stamp)])\
               ['propagate.{}'.format(prop_period_stamp)]
-    propagate(start_time=current_time, end_time=next_time,
-              vic_exe=vic_exe, vic_global_template_file=global_template,
-              vic_model_steps_per_day=cfg['VIC']['model_steps_per_day'],
-              init_state_nc=perturbed_state_nc,
-              out_state_basepath=os.path.join(truth_subdirs['states'],
-                                              'propagated.state'),
-              out_history_dir=truth_subdirs['history'],
-              out_history_fileprefix='history',
-              out_global_basepath=os.path.join(truth_subdirs['global'], 'global'),
-              out_log_dir=log_dir,
-              forcing_basepath=os.path.join(
-                      cfg['CONTROL']['root_dir'],
-                      cfg['VIC']['truth_forcing_nc_basepath']),
-              mpi_proc=mpi_proc,
-              mpi_exe=cfg['VIC']['mpi_exe'])
+    if not linear_model:
+        propagate(
+            start_time=current_time, end_time=next_time,
+            vic_exe=vic_exe, vic_global_template_file=global_template,
+            vic_model_steps_per_day=cfg['VIC']['model_steps_per_day'],
+            init_state_nc=perturbed_state_nc,
+            out_state_basepath=os.path.join(truth_subdirs['states'],
+                                            'propagated.state'),
+            out_history_dir=truth_subdirs['history'],
+            out_history_fileprefix='history',
+            out_global_basepath=os.path.join(truth_subdirs['global'], 'global'),
+            out_log_dir=log_dir,
+            forcing_basepath=os.path.join(
+                    cfg['CONTROL']['root_dir'],
+                    cfg['VIC']['truth_forcing_nc_basepath']),
+            mpi_proc=mpi_proc,
+            mpi_exe=cfg['VIC']['mpi_exe'])
+    else:
+        propagate_linear_model(
+            start_time=current_time, end_time=next_time,
+            lat_coord=lat_coord,
+            lon_coord=lon_coord,
+            model_steps_per_day=cfg['VIC']['model_steps_per_day'],
+            init_state_nc=perturbed_state_nc,
+            out_state_basepath=os.path.join(truth_subdirs['states'],
+                                            'propagated.state'),
+            out_history_dir=truth_subdirs['history'],
+            out_history_fileprefix='history',
+            forcing_basepath=os.path.join(
+                    cfg['CONTROL']['root_dir'],
+                    cfg['VIC']['truth_forcing_nc_basepath']),
+            prec_varname=prec_varname,
+            dict_linear_model_param=dict_linear_model_param)
     # Concat output history file to the list to be concatenated
     list_history_paths.append(os.path.join(truth_subdirs['history'],
                                            'history.{}-{:05d}.nc'.format(
                                                 current_time.strftime('%Y-%m-%d'),
                                                 current_time.hour*3600+current_time.second)))
+    ds = xr.open_dataset(os.path.join(truth_subdirs['history'],
+                                           'history.{}-{:05d}.nc'.format(
+                                                current_time.strftime('%Y-%m-%d'),
+                                                current_time.hour*3600+current_time.second)))
+    # Clean up perturbed state file
+    os.remove(perturbed_state_nc)
 
 # (3) Concatenate all history files
 print('Concatenating all history files...')
@@ -236,17 +305,8 @@ print('Simulating synthetic measurements...')
 ds_hist = xr.open_dataset(hist_concat_nc)
 
 # --- Select out times of measurement --- #
-# Extract full times
-orig_times = pd.to_datetime(ds_hist['time'].values)
-# Find indices of measurement time points in orig_times
-list_time_index = []
+ds_hist_meas_times = ds_hist.sel(time=meas_times)
 
-for i, time in enumerate(meas_times):
-    tmp = (abs(orig_times - time).days == 0) & (abs(orig_times - time).seconds <2)
-    list_time_index.append(np.where(tmp==True)[0][0])
-# Select times of measurement from the history file
-ds_hist_meas_times = ds_hist.isel(time=list_time_index)
-    
 # --- Select top-layer soil moisture --- #
 da_sm1_true = ds_hist_meas_times['OUT_SOIL_MOIST'].sel(nlayer=0)
 
