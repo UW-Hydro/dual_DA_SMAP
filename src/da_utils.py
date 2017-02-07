@@ -684,7 +684,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
     Returns
     ----------
     dict_ens_list_history_files: <dict>
-        A dictory of lists;
+        A dictionary of lists;
         Keys: 'ens<i>', where i = 1, 2, ..., N
         Items: a list of output history files (in order) for this ensemble member
 
@@ -716,7 +716,12 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
     pass
     # Check whether the time range of da_meas is within run period
     pass
-    
+   
+    # --- Setup subdirectories --- #
+    out_hist_concat_dir = setup_output_dirs(
+                output_vic_history_root_dir,
+                mkdirs=['EnKF_ensemble_concat'])['EnKF_ensemble_concat']
+ 
     # --- Step 1. Initialize ---#
     init_state_time = start_time
     print('\tGenerating ensemble initial states at ', init_state_time)
@@ -1023,7 +1028,87 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
         # Point state directory to be updated to the propagated one
         state_dir_after_prop = out_state_dir
 
+        # --- Concat and delete individual history files for each year --- #
+        # (If the end of EnKF run, or the end of a calendar year)
+        if (t == (len(da_meas[da_meas_time_var]) - 1)) or \
+           (t < (len(da_meas[da_meas_time_var]) - 1) and \
+           current_time.year != next_time.year):
+            # Determine history file year
+            year = current_time.year
+            # Identify history dirs to delete later
+            list_dir_to_delete = []
+            for f in dict_ens_list_history_files['ens1']:
+                list_dir_to_delete.append(os.path.dirname(f))
+            set_dir_to_delete = set(list_dir_to_delete)  # remove duplicated dirs
+            # --- If nproc == 1, do a regular ensemble loop --- #
+            if nproc == 1:
+                # Concat for each ensemble member and delete individual files
+                for i in range(N):
+                    # Concat and clean up
+                    list_history_files=dict_ens_list_history_files\
+                                       ['ens{}'.format(i+1)]
+                    output_file=os.path.join(
+                                    out_hist_concat_dir,
+                                    'history.ens{}.concat.{}.nc'.format(
+                                        i+1, year))
+                    concat_clean_up_history_file(list_history_files,
+                                                 output_file)
+                    # Reset history file list
+                    dict_ens_list_history_files['ens{}'.format(i+1)] = []
+            # --- If nproc > 1, use multiprocessing --- #
+            elif nproc > 1:
+                # Set up multiprocessing
+                pool = mp.Pool(processes=nproc)
+                # Loop over each ensemble member
+                for i in range(N):
+                    # Concat and clean up
+                    list_history_files=dict_ens_list_history_files\
+                                       ['ens{}'.format(i+1)]
+                    output_file=os.path.join(
+                                    out_hist_concat_dir,
+                                    'history.ens{}.concat.{}.nc'.format(
+                                        i+1, year))
+                    pool.apply_async(concat_clean_up_history_file,
+                                     (list_history_files, output_file))
+                    # Reset history file list
+                    dict_ens_list_history_files['ens{}'.format(i+1)] = []
+                # --- Finish multiprocessing --- #
+                pool.close()
+                pool.join()
+
+            # Delete history dirs containing individual files
+            for d in set_dir_to_delete:
+                shutil.rmtree(d)
+
     return dict_ens_list_history_files
+
+
+def concat_clean_up_history_file(list_history_files, output_file):
+    ''' This function is for wrapping up history file concat and clean up
+        for the use of multiprocessing package
+    
+    Parameters
+    ----------
+    list_history_files: <list>
+        A list of output history files (in order) to concat and delete
+    output_file: <str>
+        Filename for output concatenated netCDF file
+
+    Requires
+    ----------
+    xarray
+    os
+    concat_vic_history_files
+    '''
+
+    # Concat
+    ds_concat = concat_vic_history_files(list_history_files)
+    # Save concatenated file to netCDF
+    ds_concat.to_netcdf(hist_concat_path,
+                        format='NETCDF4_CLASSIC')
+    # Clean up individual history files
+    for f in list_history_files:
+        os.remove(f)
 
 
 def generate_VIC_global_file(global_template_path, model_steps_per_day,

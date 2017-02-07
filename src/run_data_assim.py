@@ -199,27 +199,3 @@ else:
          linear_model_prec_varname=prec_varname,
          dict_linear_model_param=dict_linear_model_param)
 
-# --- Concatenate all history files for each ensemble and clean up --- #
-out_hist_concat_dir = setup_output_dirs(dirs['history'],
-                                        mkdirs=['EnKF_ensemble_concat'])\
-                      ['EnKF_ensemble_concat']
-
-dict_ens_hist_concat = {}  # a dictionary of concatenated hist file for each ensemble member
-for i in range(cfg['EnKF']['N']):
-    # Concatenate
-    ds_concat = concat_vic_history_files(dict_ens_list_history_files['ens{}'.format(i+1)])
-    hist_concat_path = os.path.join(
-                            out_hist_concat_dir,
-                            'history.ens{}.concat.{}_{:05d}-{}_{:05d}.nc'.format(
-                                i+1,
-                                start_time.strftime('%Y%m%d'),
-                                start_time.hour*3600+start_time.second,
-                                end_time.strftime('%Y%m%d'),
-                                end_time.hour*3600+end_time.second))
-    ds_concat.to_netcdf(hist_concat_path, format='NETCDF4_CLASSIC')
-    dict_ens_hist_concat['ens{}'.format(i+1)] = hist_concat_path
-    # Clean up individual history files
-    for f in dict_ens_list_history_files['ens{}'.format(i+1)]:
-        os.remove(f)
-
-
