@@ -77,6 +77,7 @@ global_template = os.path.join(cfg['CONTROL']['root_dir'],
 # Process linear model subsitute, if specified
 if 'LINEAR_MODEL' in cfg:
     linear_model = True
+    adjust_negative = False
     prec_varname = cfg['LINEAR_MODEL']['prec_varname']
     dict_linear_model_param={'r1': cfg['LINEAR_MODEL']['r1'],
                              'r2': cfg['LINEAR_MODEL']['r2'],
@@ -92,6 +93,7 @@ if 'LINEAR_MODEL' in cfg:
     lon_coord = ds_nc['lon']
 else:
     linear_model = False
+    adjust_negative = True
 
 # =========================================================== #
 # Simulate "truth" - run VIC with perturbed forcings and
@@ -216,7 +218,8 @@ for t in range(len(meas_times)):
             states_to_perturb_nc=orig_state_nc,
             P_whole_field=P_whole_field,
             out_states_nc=perturbed_state_nc,
-            da_max_moist_n=da_max_moist_n)
+            da_max_moist_n=da_max_moist_n,
+            adjust_negative=adjust_negative)
     # Clean up original state file
     os.remove(orig_state_nc)
 
@@ -317,7 +320,8 @@ da_sigma[:] = cfg['SYNTHETIC_MEAS']['sigma']
 # Add noise
 VarToPerturb_sm1 = VarToPerturb(da_sm1_true) # create class
 da_sm1_perturbed = VarToPerturb_sm1.add_gaussian_white_noise(
-                        da_sigma, da_max_moist.sel(nlayer=0))
+                        da_sigma, da_max_moist.sel(nlayer=0),
+                        adjust_negative)
 
 # --- Save synthetic measurement to netCDF file --- #
 ds_simulated = xr.Dataset({'simulated_surface_sm': da_sm1_perturbed})

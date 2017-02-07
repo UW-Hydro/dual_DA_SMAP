@@ -125,7 +125,8 @@ class States(object):
         return ds
         
 
-    def perturb_soil_moisture_Gaussian(self, P_whole_field, da_max_moist_n):
+    def perturb_soil_moisture_Gaussian(self, P_whole_field, da_max_moist_n,
+                                       adjust_negative=True):
         ''' Perturb soil moisture states by adding Gaussian noise.
             Each grid cell and soil layer can have different noise magnitude (specified
             by the diagonal of covariance matrix P), but all veg and snow tiles within
@@ -150,6 +151,10 @@ class States(object):
         ds: <xr.dataset>
             A dataset of VIC states, with soil moisture states perturbed, and all the other
             state variables = those in self.ds
+        adjust_negative: <bool>
+            Whether or not to adjust negative soil moistures after
+            perturbation to zero.
+            Default: True (adjust negative to zero)
         '''
 
         # Extract the number of EnKF states
@@ -184,7 +189,8 @@ class States(object):
 
         # Reset negative perturbed soil moistures to zero
         sm_new = da_perturbed.values
-        sm_new[sm_new<0] = 0
+        if adjust_negative:
+            sm_new[sm_new<0] = 0
 
         # Reset perturbed soil moistures above maximum to maximum
         max_moist = da_max_moist_n.values
@@ -200,7 +206,7 @@ class States(object):
 
     
     def update_soil_moisture_states(self, da_K, da_y_meas, da_y_est, R,
-                                    da_max_moist_n):
+                                    da_max_moist_n, adjust_negative=True):
         ''' This function updates soil moisture states for the whole field
             NOTE: this method does not change self
         
@@ -221,6 +227,10 @@ class States(object):
             [unit: mm]. Soil moistures above maximum after perturbation will
             be reset to maximum value.
             Dimension: [lat, lon, n]
+        adjust_negative: <bool>
+            Whether or not to adjust negative soil moistures after updating
+            to zero.
+            Default: True (adjust negative to zero)
 
         Return
         ----------
@@ -264,7 +274,8 @@ class States(object):
 
         # --- Reset negative updated soil moistures to zero --- #
         x_new = da_x_updated[:].values
-        x_new[x_new<0] = 0
+        if adjust_negative:
+            x_new[x_new<0] = 0
 
         # --- Reset updated soil moistures above maximum to maximum --- #
         max_moist = da_max_moist_n.values
@@ -535,7 +546,8 @@ class VarToPerturb(object):
         self.lon = self.da['lon']
         self.time = self.da['time']
 
-    def add_gaussian_white_noise(self, da_sigma, da_max_values):
+    def add_gaussian_white_noise(self, da_sigma, da_max_values,
+                                 adjust_negative=True):
         ''' Add Gaussian noise for all active grid cells and all time steps
 
         Parameters
@@ -554,6 +566,10 @@ class VarToPerturb(object):
         da_perturbed: <xarray.DataArray>
             Perturbed variable for the whole field
             Dimension: [time, lat, lon]
+        adjust_negative: <bool>
+            Whether or not to adjust negative variable values after
+            adding noise to zero.
+            Default: True (adjust negative to zero)
         '''
 
         # Generate random noise for the whole field
@@ -569,7 +585,8 @@ class VarToPerturb(object):
         da_perturbed = self.da + da_noise
         # Set negative to zero
         tmp = da_perturbed.values
-        tmp[tmp<0] = 0
+        if adjust_negative:
+            tmp[tmp<0] = 0
         # Set perturbed values above maximum to maximum values
         max_values = da_max_values.values  # [lat, lon]
         for i in range(len(self.lat)):
@@ -590,7 +607,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
              vic_model_steps_per_day, output_vic_global_root_dir,
              output_vic_state_root_dir, output_vic_history_root_dir,
              output_vic_log_root_dir,
-             dict_varnames, nproc=1,
+             nproc=1,
              mpi_proc=None, mpi_exe='mpiexec', debug=False, output_temp_dir=None,
              linear_model='False', linear_model_prec_varname=None,
              dict_linear_model_param=None):
@@ -641,9 +658,6 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
         Directory for VIC output result files
     output_vic_log_root_dir: <str>
         Directory for VIC output log files
-    dict_varnames: <dict>
-        A dictionary of forcing names in nc file;
-        e.g., {'PREC': 'prcp'; 'AIR_TEMP': 'tas'}
     nproc: <int>
         Number of processors to use
     mpi_proc: <int or None>
@@ -686,7 +700,15 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
     m = 1  # number of measurements
     n_time = len(da_meas[da_meas_time_var])  # number of measurement time points
     # Determine fraction of each veg/snowband tile in each grid cell
-    da_tile_frac = determine_tile_frac(vic_global_template)
+    if not linear_model:
+        da_tile_frac = determine_tile_frac(vic_global_template)
+        adjust_negative = True
+    else:
+        da_tile_frac = xr.DataArray(
+                np.ones([1, 1, len(da_meas['lat']), len(da_meas['lon'])]),
+                coords=[[1], [0], da_meas['lat'], da_meas['lon']],
+                dims=['veg_class', 'snow_band', 'lat', 'lon'])
+        adjust_negative = False
     
     # Check whether the dimension of P_whole_field is consistent with number of soil moisture states
     pass
@@ -720,7 +742,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
     for i in range(N):
         # Perturb states and save
         ds = class_states.perturb_soil_moisture_Gaussian(
-                                        P_whole_field, da_max_moist_n)
+                            P_whole_field, da_max_moist_n,
+                            adjust_negative)
         ds.to_netcdf(os.path.join(init_state_dir,
                                   'state.ens{}.nc'.format(i+1)),
                      format='NETCDF4_CLASSIC')
@@ -885,7 +908,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
                 state_dir_before_update=state_dir_after_prop,
                 state_time=current_time,
                 out_vic_state_dir=out_updated_state_dir,
-                da_max_moist_n=da_max_moist_n)
+                da_max_moist_n=da_max_moist_n,
+                adjust_negative=adjust_negative)
         if debug:
             # Save update increment to netCDF file
             ds_update_increm = xr.Dataset({'update_increment': da_update_increm})
@@ -918,7 +942,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
                     states_to_perturb_dir=out_updated_state_dir,
                     P_whole_field=P_whole_field,
                     out_states_dir=pert_state_dir,
-                    da_max_moist_n=da_max_moist_n)
+                    da_max_moist_n=da_max_moist_n,
+                    adjust_negative=adjust_negative)
         if debug:
             da_perturbation = xr.concat(list_da_perturbation, dim='N')
             da_perturbation['N'] = range(1, N+1)
@@ -1679,7 +1704,8 @@ def calculate_gain_K_whole_field(da_x, da_y_est, R):
 
 
 def update_states_ensemble(da_y_est, da_K, da_meas, R, state_dir_before_update,
-                           state_time, out_vic_state_dir, da_max_moist_n):
+                           state_time, out_vic_state_dir, da_max_moist_n,
+                           adjust_negative=True):
     ''' Update the EnKF states for the whole field for each ensemble member.
     
     Parameters
@@ -1709,6 +1735,10 @@ def update_states_ensemble(da_y_est, da_K, da_meas, R, state_dir_before_update,
         [unit: mm]. Soil moistures above maximum after perturbation will
         be reset to maximum value.
         Dimension: [lat, lon, n]
+    adjust_negative: <bool>
+        Whether or not to adjust negative soil moistures after update
+        to zero.
+        Default: True (adjust negative to zero)
     
     Returns
     ----------
@@ -1747,7 +1777,8 @@ def update_states_ensemble(da_y_est, da_K, da_meas, R, state_dir_before_update,
         da_x_updated, da_v = class_states.update_soil_moisture_states(
                                         da_K, da_meas,
                                         da_y_est.loc[:, :, :, i], R,
-                                        da_max_moist_n)  # [lat, lon, n]
+                                        da_max_moist_n,
+                                        adjust_negative)  # [lat, lon, n]
         list_da_v.append(da_v)
         # Save update increment to list
         da_update_increm = da_x_updated - class_states.da_EnKF
@@ -1845,7 +1876,8 @@ def replace_global_values(gp, replace):
 def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir,
                                           P_whole_field,
                                           out_states_dir,
-                                          da_max_moist_n):
+                                          da_max_moist_n,
+                                          adjust_negative=True):
     ''' Perturb all soil_moisture states for each ensemble member
     
     Parameters
@@ -1866,6 +1898,10 @@ def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir,
         [unit: mm]. Soil moistures above maximum after perturbation will
         be reset to maximum value.
         Dimension: [lat, lon, n]
+    adjust_negative: <bool>
+        Whether or not to adjust negative soil moistures after
+        perturbation to zero.
+        Default: True (adjust negative to zero)
 
     Return
     ----------
@@ -1888,7 +1924,8 @@ def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir,
                                      'state.ens{}.nc'.format(i+1))
         da_perturbation = perturb_soil_moisture_states(
                                      states_to_perturb_nc, P_whole_field,
-                                     out_states_nc, da_max_moist_n)
+                                     out_states_nc, da_max_moist_n,
+                                     adjust_negative)
         list_da_perturbation.append(da_perturbation)
 
     return list_da_perturbation
@@ -2193,7 +2230,8 @@ def propagate_ensemble_linear_model(N, start_time, end_time, lat_coord,
 
 
 def perturb_soil_moisture_states(states_to_perturb_nc, P_whole_field,
-                                 out_states_nc, da_max_moist_n):
+                                 out_states_nc, da_max_moist_n,
+                                 adjust_negative=True):
     ''' Perturb all soil_moisture states
 
     Parameters
@@ -2216,7 +2254,10 @@ def perturb_soil_moisture_states(states_to_perturb_nc, P_whole_field,
         [unit: mm]. Soil moistures above maximum after perturbation will
         be reset to maximum value.
         Dimension: [lat, lon, n]
-    
+    adjust_negative: <bool>
+        Whether or not to adjust negative soil moistures after
+        perturbation to zero.
+        Default: True (adjust negative to zero)
 
     Require
     ----------
@@ -2230,7 +2271,8 @@ def perturb_soil_moisture_states(states_to_perturb_nc, P_whole_field,
     # --- Perturb --- #
     # Perturb
     ds_perturbed = class_states.perturb_soil_moisture_Gaussian(
-                            P_whole_field, da_max_moist_n)
+                            P_whole_field, da_max_moist_n,
+                            adjust_negative)
 
     # --- Save perturbed state file --- #
     ds_perturbed.to_netcdf(out_states_nc,
