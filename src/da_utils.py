@@ -681,13 +681,6 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
         A dict of linear model parameters.
         Keys: 'r1', 'r2', 'r3', 'r12', 'r23'
 
-    Returns
-    ----------
-    dict_ens_list_history_files: <dict>
-        A dictionary of lists;
-        Keys: 'ens<i>', where i = 1, 2, ..., N
-        Items: a list of output history files (in order) for this ensemble member
-
     Required
     ----------
     numpy
@@ -1032,7 +1025,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
         # (If the end of EnKF run, or the end of a calendar year)
         if (t == (len(da_meas[da_meas_time_var]) - 1)) or \
            (t < (len(da_meas[da_meas_time_var]) - 1) and \
-           current_time.year != next_time.year):
+           current_time.year != (next_time + \
+           pd.DateOffset(hours=24/vic_model_steps_per_day)).year):
             # Determine history file year
             year = current_time.year
             # Identify history dirs to delete later
@@ -1080,8 +1074,6 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
             for d in set_dir_to_delete:
                 shutil.rmtree(d)
 
-    return dict_ens_list_history_files
-
 
 def concat_clean_up_history_file(list_history_files, output_file):
     ''' This function is for wrapping up history file concat and clean up
@@ -1104,7 +1096,7 @@ def concat_clean_up_history_file(list_history_files, output_file):
     # Concat
     ds_concat = concat_vic_history_files(list_history_files)
     # Save concatenated file to netCDF
-    ds_concat.to_netcdf(hist_concat_path,
+    ds_concat.to_netcdf(output_file,
                         format='NETCDF4_CLASSIC')
     # Clean up individual history files
     for f in list_history_files:

@@ -92,7 +92,10 @@ else:
                                                 cfg['LINEAR_MODEL']['meas_nc']))
 da_meas_orig = ds_meas_orig[cfg['EnKF']['meas_var_name']]
 # Only select out the period within the EnKF run period
+start_time = pd.to_datetime(cfg['EnKF']['start_time'])
 da_meas = da_meas_orig.sel(time=slice(cfg['EnKF']['start_time'], cfg['EnKF']['end_time']))
+while (pd.to_datetime(da_meas['time'][0].values) - start_time).days <= 0:
+    da_meas = da_meas[1:, :, :]
 # Convert da_meas dimension to [time, lat, lon, m] (currently m = 1)
 time = da_meas['time']
 lat = da_meas['lat']
