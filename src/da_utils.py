@@ -609,7 +609,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
              output_vic_log_root_dir,
              nproc=1,
              mpi_proc=None, mpi_exe='mpiexec', debug=False, output_temp_dir=None,
-             linear_model='False', linear_model_prec_varname=None,
+             linear_model=False, linear_model_prec_varname=None,
              dict_linear_model_param=None):
     ''' This function runs ensemble kalman filter (EnKF) on VIC (image driver)
 
