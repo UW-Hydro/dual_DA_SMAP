@@ -585,32 +585,14 @@ da_prec_ens = ds_force_ens['PREC']
 ts_prec_orig = ds_force_orig['PREC'].to_series()
 ts_prec_truth = ds_force_truth['PREC'].to_series()
 
-# ----- Regular plots ----- #
-# Create figure
-fig = plt.figure(figsize=(12, 6))
-# plot each ensemble member
-for i in range(N):
-    if i == 0:
-        legend=True
-    else:
-        legend=False
-    da_prec_ens.sel(N=i+1).to_series().plot(
-                color='grey', style='-', alpha=0.3,
-                label='Ensemble members',
-                legend=legend)
-# plot truth
-ts_prec_truth.plot(color='k', style='-', label='Truth', legend=True)
-# plot orig.
-ts_prec_orig.plot(color='m', style='--',
-                 label='Original',
-                 legend=True)
-# Make plot looks better
-plt.xlabel('Time')
-plt.ylabel('Precipitation (mm/step)')
-plt.title('Precipitation, {}, {}, N={}'.format(lat, lon, N))
-# Save figure
-fig.savefig(os.path.join(output_dir, '{}_{}.prec.png'.format(lat, lon)),
-            format='png')
+# Calculate EnKF_mean vs. truth
+df_truth_EnKF = pd.concat([ts_prec_truth, da_prec_ens.mean(dim='N').to_series()],
+                          axis=1, keys=['truth', 'EnKF_mean']).dropna()
+rmse_EnKF_mean = rmse(df_truth_EnKF['truth'], df_truth_EnKF['EnKF_mean'])
+# Calculate open-loop vs. truth
+df_truth_openloop = pd.concat([ts_prec_truth, ts_prec_orig], axis=1,
+                              keys=['truth', 'openloop']).dropna()
+rmse_openloop = rmse(df_truth_openloop['truth'], df_truth_openloop['openloop'])
 
 # ----- Interactive version ----- #
 # Create figure
@@ -623,11 +605,12 @@ p = figure(title='Precipitation, {}, {}, N={}'.format(lat, lon, N),
 for i in range(N):
     ens_name = 'ens{}'.format(i+1)
     if i == 0:
-        legend="Ensemble members (perturbed from Newman ens. 100)".format(N)
+        legend="Ensemble members (perturbed from Newman ens. 100)\n" \
+               "mean RMSE = {:.3f} mm".format(rmse_EnKF_mean)
     else:
         legend=False
     ts = da_prec_ens.sel(N=i+1).to_series()
-    p.line(ts.index, ts.values, color="grey", line_dash="solid", alpha=0.3, legend=legend)
+    p.line(ts.index, ts.values, color="blue", line_dash="solid", alpha=0.3, legend=legend)
 # plot truth
 ts = ts_prec_truth
 p.line(ts.index, ts.values, color="black", line_dash="solid",
@@ -635,7 +618,9 @@ p.line(ts.index, ts.values, color="black", line_dash="solid",
 # plot orig.
 ts = ts_prec_orig
 p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
-       legend="Orig. (Newman ens. 100)", line_width=2)
+       legend="Orig. (Newman ens. 100)\n" \
+              "mean RMSE = {:.3f} mm".format(rmse_openloop),
+       line_width=2)
 # Save
 save(p)
 
@@ -887,33 +872,6 @@ if not linear_model:
     df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
     rmse_openloop = rmse(df_truth_openloop['truth'], df_truth_openloop['openloop'])
     
-    # ----- Regular plots ----- #
-    # Create figure
-    fig = plt.figure(figsize=(12, 6))
-    # plot each ensemble member
-    for i in range(N):
-        if i == 0:
-            legend=True
-        else:
-            legend=False
-        da_EnKF.sel(N=i+1).to_series().plot(
-                    color='blue', style='-', alpha=0.3,
-                    label='Ensemble members, mean RMSE={:.3f} mm'.format(rmse_EnKF_mean),
-                    legend=legend)
-    # plot truth
-    ts_truth.plot(color='k', style='-', label='Truth', legend=True)
-    # plot open-loop
-    ts_openloop.plot(color='m', style='--',
-                     label='Open-loop, RMSE={:.3f} mm'.format(rmse_openloop),
-                     legend=True)
-    # Make plot looks better
-    plt.xlabel('Time')
-    plt.ylabel('Runoff (mm)')
-    plt.title('Surface runoff, {}, {}, N={}'.format(lat, lon, N))
-    # Save figure
-    fig.savefig(os.path.join(output_dir, '{}_{}.runoff.png'.format(lat, lon)),
-                format='png')
-    
     # ----- Interactive version ----- #
     # Create figure
     output_file(os.path.join(output_dir, '{}_{}.runoff.html'.format(lat, lon)))
@@ -989,6 +947,154 @@ if not linear_model:
     # Save figure
     fig.savefig(os.path.join(output_dir, '{}_{}.baseflow.png'.format(lat, lon)),
                 format='png')
+
+# ========================================================== #
+# Plot - total runoff
+# ========================================================== #
+if not linear_model:
+    print('\tPlot - total runoff...')
+    # --- RMSE --- #
+    # extract time series
+    ts_truth = (ds_truth['OUT_RUNOFF'] + ds_truth['OUT_BASEFLOW']).sel(
+                    lat=lat, lon=lon,
+                    time=slice(plot_start_time, plot_end_time)).to_series()
+    da_EnKF = (ds_EnKF['OUT_RUNOFF'] + ds_EnKF['OUT_BASEFLOW']).sel(
+                    time=slice(plot_start_time, plot_end_time))
+    ts_EnKF_mean = da_EnKF.mean(dim='N').\
+                   to_series()
+    ts_openloop = (ds_openloop['OUT_RUNOFF'] + ds_openloop['OUT_BASEFLOW']).sel(
+                    lat=lat, lon=lon,
+                    time=slice(plot_start_time, plot_end_time)).to_series()
+    # Calculate EnKF_mean vs. truth
+    df_truth_EnKF = pd.concat([ts_truth, ts_EnKF_mean], axis=1, keys=['truth', 'EnKF_mean']).dropna()
+    rmse_EnKF_mean = rmse(df_truth_EnKF['truth'], df_truth_EnKF['EnKF_mean'])
+    # Calculate open-loop vs. truth
+    df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
+    rmse_openloop = rmse(df_truth_openloop['truth'], df_truth_openloop['openloop'])
+    
+    # ----- Interactive version ----- #
+    # Create figure
+    output_file(os.path.join(output_dir, '{}_{}.total_runoff.html'.format(lat, lon)))
+    
+    p = figure(title='Total runoff, {}, {}, N={}'.format(lat, lon, N),
+               x_axis_label="Time", y_axis_label="Total runoff (mm)",
+               x_axis_type='datetime', width=1000, height=500)
+    # plot each ensemble member
+    for i in range(N):
+        ens_name = 'ens{}'.format(i+1)
+        if i == 0:
+            legend="Ensemble members, mean RMSE={:.3f} mm".format(rmse_EnKF_mean)
+        else:
+            legend=False
+        ts = da_EnKF.sel(N=i+1).to_series()
+        p.line(ts.index, ts.values, color="blue", line_dash="solid", alpha=0.3, legend=legend)
+    # plot truth
+    ts = ts_truth
+    p.line(ts.index, ts.values, color="black", line_dash="solid", legend="Truth", line_width=2)
+    # plot open-loop
+    ts = ts_openloop
+    p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
+           legend="Open-loop, RMSE={:.3f} mm".format(rmse_openloop), line_width=2)
+    # Save
+    save(p)
+
+# ========================================================== #
+# Plot - SWE
+# ========================================================== #
+if not linear_model:
+    print('\tPlot - SWE...')
+    # --- RMSE --- #
+    # extract time series
+    ts_truth = ds_truth['OUT_SWE'].sel(
+                    lat=lat, lon=lon,
+                    time=slice(plot_start_time, plot_end_time)).to_series()
+    da_EnKF = ds_EnKF['OUT_SWE'].sel(time=slice(plot_start_time, plot_end_time))
+    ts_EnKF_mean = da_EnKF.mean(dim='N').\
+                   to_series()
+    ts_openloop = ds_openloop['OUT_SWE'].sel(
+                    lat=lat, lon=lon,
+                    time=slice(plot_start_time, plot_end_time)).to_series()
+    # Calculate EnKF_mean vs. truth
+    df_truth_EnKF = pd.concat([ts_truth, ts_EnKF_mean], axis=1, keys=['truth', 'EnKF_mean']).dropna()
+    rmse_EnKF_mean = rmse(df_truth_EnKF['truth'], df_truth_EnKF['EnKF_mean'])
+    # Calculate open-loop vs. truth
+    df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
+    rmse_openloop = rmse(df_truth_openloop['truth'], df_truth_openloop['openloop'])
+    
+    # ----- Interactive version ----- #
+    # Create figure
+    output_file(os.path.join(output_dir, '{}_{}.swe.html'.format(lat, lon)))
+    
+    p = figure(title='Surface SWE, {}, {}, N={}'.format(lat, lon, N),
+               x_axis_label="Time", y_axis_label="SWE (mm)",
+               x_axis_type='datetime', width=1000, height=500)
+    # plot each ensemble member
+    for i in range(N):
+        ens_name = 'ens{}'.format(i+1)
+        if i == 0:
+            legend="Ensemble members, mean RMSE={:.3f} mm".format(rmse_EnKF_mean)
+        else:
+            legend=False
+        ts = da_EnKF.sel(N=i+1).to_series()
+        p.line(ts.index, ts.values, color="blue", line_dash="solid", alpha=0.3, legend=legend)
+    # plot truth
+    ts = ts_truth
+    p.line(ts.index, ts.values, color="black", line_dash="solid", legend="Truth", line_width=2)
+    # plot open-loop
+    ts = ts_openloop
+    p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
+           legend="Open-loop, RMSE={:.3f} mm".format(rmse_openloop), line_width=2)
+    # Save
+    save(p)
+
+# ========================================================== #
+# Plot - evap
+# ========================================================== #
+if not linear_model:
+    print('\tPlot - EVAP...')
+    # --- RMSE --- #
+    # extract time series
+    ts_truth = ds_truth['OUT_EVAP'].sel(
+                    lat=lat, lon=lon,
+                    time=slice(plot_start_time, plot_end_time)).to_series()
+    da_EnKF = ds_EnKF['OUT_EVAP'].sel(time=slice(plot_start_time, plot_end_time))
+    ts_EnKF_mean = da_EnKF.mean(dim='N').\
+                   to_series()
+    ts_openloop = ds_openloop['OUT_EVAP'].sel(
+                    lat=lat, lon=lon,
+                    time=slice(plot_start_time, plot_end_time)).to_series()
+    # Calculate EnKF_mean vs. truth
+    df_truth_EnKF = pd.concat([ts_truth, ts_EnKF_mean], axis=1, keys=['truth', 'EnKF_mean']).dropna()
+    rmse_EnKF_mean = rmse(df_truth_EnKF['truth'], df_truth_EnKF['EnKF_mean'])
+    # Calculate open-loop vs. truth
+    df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
+    rmse_openloop = rmse(df_truth_openloop['truth'], df_truth_openloop['openloop'])
+    
+    # ----- Interactive version ----- #
+    # Create figure
+    output_file(os.path.join(output_dir, '{}_{}.evap.html'.format(lat, lon)))
+    
+    p = figure(title='ET, {}, {}, N={}'.format(lat, lon, N),
+               x_axis_label="Time", y_axis_label="ET (mm)",
+               x_axis_type='datetime', width=1000, height=500)
+    # plot each ensemble member
+    for i in range(N):
+        ens_name = 'ens{}'.format(i+1)
+        if i == 0:
+            legend="Ensemble members, mean RMSE={:.3f} mm".format(rmse_EnKF_mean)
+        else:
+            legend=False
+        ts = da_EnKF.sel(N=i+1).to_series()
+        p.line(ts.index, ts.values, color="blue", line_dash="solid", alpha=0.3, legend=legend)
+    # plot truth
+    ts = ts_truth
+    p.line(ts.index, ts.values, color="black", line_dash="solid", legend="Truth", line_width=2)
+    # plot open-loop
+    ts = ts_openloop
+    p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
+           legend="Open-loop, RMSE={:.3f} mm".format(rmse_openloop), line_width=2)
+    # Save
+    save(p)
 
 # ========================================================== #
 # Plot - diagnostics
