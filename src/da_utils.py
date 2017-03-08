@@ -1124,7 +1124,8 @@ def generate_VIC_global_file(global_template_path, model_steps_per_day,
         E.g., "# INIT_STATE"  for no initial state;
               or "INIT_STATE /path/filename" for an initial state file
     vic_state_basepath: <str>
-        Output state name directory and file name prefix
+        Output state name directory and file name prefix.
+        None if do not want to output state file.
     vic_history_file_dir: <str>
         Output history file directory
     replace: <collections.OrderedDict>
@@ -1174,6 +1175,12 @@ def generate_VIC_global_file(global_template_path, model_steps_per_day,
     
     # --- Replace global parameters in replace --- #
     global_param = replace_global_values(global_param, replace)
+
+    # --- If vic_state_basepath == None, add "#" in front of STATENAME --- #
+    if vic_state_basepath is None:
+        for i, line in enumerate(global_param):
+            if line.split()[0] == 'STATENAME':
+                global_param[i] = "# STATENAME"
     
     # --- Write global parameter file --- #
     output_global_file = '{}.{}_{}.txt'.format(
@@ -2031,7 +2038,8 @@ def propagate(start_time, end_time, vic_exe, vic_global_template_file,
     init_state_nc: <str>
         Initial state netCDF file; None for no initial state
     out_state_basepath: <str>
-        Basepath of output states; ".YYYYMMDD_SSSSS.nc" will be appended
+        Basepath of output states; ".YYYYMMDD_SSSSS.nc" will be appended.
+        None if do not want to output state file
     out_history_dir: <str>
         Directory of output history files
     out_history_fileprefix: <str>
@@ -2369,16 +2377,16 @@ def concat_vic_history_files(list_history_nc):
         A list of history files to be concatenated, in order
     '''
     
+    print('\tConcatenating {} files...'.format(len(list_history_nc)))
+
     # --- Open all history files --- #
     list_ds = []
     for file in list_history_nc:
-        print("\tOpening file {}".format(file))
         list_ds.append(xr.open_dataset(file))
 
     # --- Loop over each history file and concatenate --- #
     list_ds_to_concat = []  # list of ds to concat, with no overlapping periods
     for i in range(len(list_ds[:-1])):
-        print("\tChecking history file {}".format(i))
         # Determine and truncate data, if needed
         times_current = pd.to_datetime(list_ds[i]['time'].values)  # times of current ds
         times_next = pd.to_datetime(list_ds[i+1]['time'].values)  # times of next ds
@@ -2399,8 +2407,6 @@ def concat_vic_history_files(list_history_nc):
     list_ds_to_concat.append(list_ds[-1])
    
     # Concat all ds's
-    print('\tConcatenating...')
-    
     ds_concat = xr.concat(list_ds_to_concat, dim='time')
     
     return ds_concat
@@ -2608,10 +2614,10 @@ def calculate_ensemble_mean_states(list_state_nc, out_state_nc):
 def run_vic_assigned_states(start_time, end_time, vic_exe, init_state_nc,
                             dict_assigned_state_nc, global_template,
                             vic_forcing_basepath, vic_model_steps_per_day,
-                            output_global_root_dir, output_state_root_dir,
+                            output_global_root_dir,
                             output_vic_history_root_dir,
                             output_vic_log_root_dir, mpi_proc=None, mpi_exe=None):
-    ''' Run VIC with assigned initial states and other assigned state files during the simulation time
+    ''' Run VIC with assigned initial states and other assigned state files during the simulation time. All VIC runs do not output state file in the end.
     
     Parameters
     ----------
@@ -2635,8 +2641,6 @@ def run_vic_assigned_states(start_time, end_time, vic_exe, init_state_nc,
         VIC model steps per day
     output_global_root_dir: <str>
         Directory for VIC global files
-    output_state_root_dir: <str>
-        Directory for VIC output state files
     output_vic_history_root_dir: <str>
         Directory for VIC output history files
     output_vic_log_root_dir: <str>
@@ -2669,9 +2673,7 @@ def run_vic_assigned_states(start_time, end_time, vic_exe, init_state_nc,
               vic_exe=vic_exe, vic_global_template_file=global_template,
               vic_model_steps_per_day=vic_model_steps_per_day,
               init_state_nc=init_state_nc,
-              out_state_basepath=os.path.join(output_state_root_dir, 'state.tmp'),
-                            # 'tmp' indicates this output state file is not usefull, since it will be replaced
-                            # by assinged states
+              out_state_basepath=None,
               out_history_dir=output_vic_history_root_dir,
               out_history_fileprefix='history',
               out_global_basepath=os.path.join(output_global_root_dir, 'global'),
@@ -2684,12 +2686,6 @@ def run_vic_assigned_states(start_time, end_time, vic_exe, init_state_nc,
                     'history.{}-{:05d}.nc'.format(
                             run_start_time.strftime('%Y-%m-%d'),
                             run_start_time.hour*3600+run_start_time.second)))
-    # Clean up output state file
-    state_time = list(dict_assigned_state_nc.keys())[0]
-    os.remove(os.path.join(output_state_root_dir,
-                           'state.tmp.{}_{:05d}.nc'.format(
-                                state_time.strftime('%Y%m%d'),
-                                state_time.hour*3600+state_time.second)))
     
     # --- Run VIC from each assigned state time to the next (or to end_time) --- #
     for t, time in enumerate(dict_assigned_state_nc.keys()):
@@ -2711,9 +2707,7 @@ def run_vic_assigned_states(start_time, end_time, vic_exe, init_state_nc,
                   vic_exe=vic_exe, vic_global_template_file=global_template,
                   vic_model_steps_per_day=vic_model_steps_per_day,
                   init_state_nc=state_nc,
-                  out_state_basepath=os.path.join(output_state_root_dir, 'state.tmp'),
-                            # 'tmp' indicates this output state file is not usefull, since it will be replaced
-                            # by assinged states
+                  out_state_basepath=None,
                   out_history_dir=output_vic_history_root_dir,
                   out_history_fileprefix='history',
                   out_global_basepath=os.path.join(output_global_root_dir, 'global'),
@@ -2726,14 +2720,22 @@ def run_vic_assigned_states(start_time, end_time, vic_exe, init_state_nc,
                     'history.{}-{:05d}.nc'.format(
                             current_time.strftime('%Y-%m-%d'),
                             current_time.hour*3600+current_time.second)))
-        # Clean up output state file
-        state_time = next_time + pd.DateOffset(hours=24/vic_model_steps_per_day)
-        os.remove(os.path.join(output_state_root_dir,
-                           'state.tmp.{}_{:05d}.nc'.format(
-                                state_time.strftime('%Y%m%d'),
-                                state_time.hour*3600+state_time.second)))
-    
-    return list_history_files
+        # --- Concat and delete individual history files for each year --- #
+        # (If the end of EnKF run, or the end of a calendar year)
+        if (t == (len(dict_assigned_state_nc.keys()) - 1)) or \
+           (t < (len(dict_assigned_state_nc.keys()) - 1) and \
+           current_time.year != (next_time + \
+           pd.DateOffset(hours=24/vic_model_steps_per_day)).year):
+            # Determine history file year
+            year = current_time.year
+            # Concat individual history files
+            output_file=os.path.join(
+                            output_vic_history_root_dir,
+                            'history.concat.{}.nc'.format(year))
+            concat_clean_up_history_file(list_history_files,
+                                         output_file)
+            # Reset history file list
+            list_history_files = []
 
 
 def rmse(true, est):
