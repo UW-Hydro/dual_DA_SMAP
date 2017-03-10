@@ -518,7 +518,7 @@ fig.savefig(os.path.join(output_dir, '{}_{}.post.sm3.png'.format(lat, lon)),
             format='png')
 
 # ========================================================== #
-# Plot - runoff
+# Plot - runoff, subdaily
 # ========================================================== #
 if not linear_model:
     print('\tPlot - surface runoff...')
@@ -545,6 +545,58 @@ if not linear_model:
     output_file(os.path.join(output_dir, '{}_{}.post.runoff.html'.format(lat, lon)))
     
     p = figure(title='Surface runoff, {}, {}, N={}'.format(lat, lon, N),
+               x_axis_label="Time", y_axis_label="Runoff (mm)",
+               x_axis_type='datetime', width=1000, height=500)
+    # plot each ensemble member
+    for i in range(N):
+        ens_name = 'ens{}'.format(i+1)
+        if i == 0:
+            legend="Post-processed, mean RMSE={:.3f} mm".format(rmse_post_mean)
+        else:
+            legend=False
+        ts = da_post.sel(N=i+1).to_series()
+        p.line(ts.index, ts.values, color="blue", line_dash="solid", alpha=0.3, legend=legend)
+    # plot truth
+    ts = ts_truth
+    p.line(ts.index, ts.values, color="black", line_dash="solid", legend="Truth", line_width=2)
+    # plot open-loop
+    ts = ts_openloop
+    p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
+           legend="Open-loop, RMSE={:.3f} mm".format(rmse_openloop), line_width=2)
+    # Save
+    save(p)
+
+# ========================================================== #
+# Plot - runoff, aggregated to daily
+# ========================================================== #
+if not linear_model:
+    print('\tPlot - surface runoff, aggregated to daily...')
+    # --- RMSE --- #
+    # extract time series
+    ts_truth = ds_truth['OUT_RUNOFF'].sel(
+                    lat=lat, lon=lon,
+                    time=slice(plot_start_time, plot_end_time)).to_series().\
+               resample("D", how='sum')
+    da_post = ds_post['OUT_RUNOFF'].sel(time=slice(plot_start_time, plot_end_time)).\
+              resample(freq="D", how='sum', dim='time')
+    ts_post_mean = da_post.mean(dim='N').\
+                   to_series()
+    ts_openloop = ds_openloop['OUT_RUNOFF'].sel(
+                    lat=lat, lon=lon,
+                    time=slice(plot_start_time, plot_end_time)).to_series().\
+                  resample("D", how='sum')
+    # Calculate post_mean vs. truth
+    df_truth_post = pd.concat([ts_truth, ts_post_mean], axis=1, keys=['truth', 'post_mean']).dropna()
+    rmse_post_mean = rmse(df_truth_post['truth'], df_truth_post['post_mean'])
+    # Calculate open-loop vs. truth
+    df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
+    rmse_openloop = rmse(df_truth_openloop['truth'], df_truth_openloop['openloop'])
+    
+    # ----- Interactive version ----- #
+    # Create figure
+    output_file(os.path.join(output_dir, '{}_{}.post.runoff_daily.html'.format(lat, lon)))
+    
+    p = figure(title='Surface runoff, daily, {}, {}, N={}'.format(lat, lon, N),
                x_axis_label="Time", y_axis_label="Runoff (mm)",
                x_axis_type='datetime', width=1000, height=500)
     # plot each ensemble member

@@ -625,6 +625,54 @@ p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
 save(p)
 
 # ========================================================== #
+# Plot - precipitation, aggregated to daily
+# ========================================================== #
+print('\tPlot - precipitation, aggregated to daily...')
+
+da_prec_ens = ds_force_ens['PREC'].resample(freq="D", how='sum', dim='time')
+ts_prec_orig = ds_force_orig['PREC'].to_series().resample("D", how='sum')
+ts_prec_truth = ds_force_truth['PREC'].to_series().resample("D", how='sum')
+
+# Calculate EnKF_mean vs. truth
+df_truth_EnKF = pd.concat([ts_prec_truth, da_prec_ens.mean(dim='N').to_series()],
+                          axis=1, keys=['truth', 'EnKF_mean']).dropna()
+rmse_EnKF_mean = rmse(df_truth_EnKF['truth'], df_truth_EnKF['EnKF_mean'])
+# Calculate open-loop vs. truth
+df_truth_openloop = pd.concat([ts_prec_truth, ts_prec_orig], axis=1,
+                              keys=['truth', 'openloop']).dropna()
+rmse_openloop = rmse(df_truth_openloop['truth'], df_truth_openloop['openloop'])
+
+# ----- Interactive version ----- #
+# Create figure
+output_file(os.path.join(output_dir, '{}_{}.prec_daily.html'.format(lat, lon)))
+
+p = figure(title='Precipitation, daily, {}, {}, N={}'.format(lat, lon, N),
+           x_axis_label="Time", y_axis_label="Precipitation (mm/step)",
+           x_axis_type='datetime', width=1000, height=500)
+# plot each ensemble member
+for i in range(N):
+    ens_name = 'ens{}'.format(i+1)
+    if i == 0:
+        legend="Ensemble members (perturbed from Newman ens. 100)\n" \
+               "mean RMSE = {:.3f} mm".format(rmse_EnKF_mean)
+    else:
+        legend=False
+    ts = da_prec_ens.sel(N=i+1).to_series()
+    p.line(ts.index, ts.values, color="blue", line_dash="solid", alpha=0.3, legend=legend)
+# plot truth
+ts = ts_prec_truth
+p.line(ts.index, ts.values, color="black", line_dash="solid",
+       legend="Truth (perturbed from Newman ens. 100)", line_width=2)
+# plot orig.
+ts = ts_prec_orig
+p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
+       legend="Orig. (Newman ens. 100)\n" \
+              "mean RMSE = {:.3f} mm".format(rmse_openloop),
+       line_width=2)
+# Save
+save(p)
+
+# ========================================================== #
 # Plot - sm1
 # ========================================================== #
 print('\tPlot - sm1...')
@@ -877,6 +925,58 @@ if not linear_model:
     output_file(os.path.join(output_dir, '{}_{}.runoff.html'.format(lat, lon)))
     
     p = figure(title='Surface runoff, {}, {}, N={}'.format(lat, lon, N),
+               x_axis_label="Time", y_axis_label="Runoff (mm)",
+               x_axis_type='datetime', width=1000, height=500)
+    # plot each ensemble member
+    for i in range(N):
+        ens_name = 'ens{}'.format(i+1)
+        if i == 0:
+            legend="Ensemble members, mean RMSE={:.3f} mm".format(rmse_EnKF_mean)
+        else:
+            legend=False
+        ts = da_EnKF.sel(N=i+1).to_series()
+        p.line(ts.index, ts.values, color="blue", line_dash="solid", alpha=0.3, legend=legend)
+    # plot truth
+    ts = ts_truth
+    p.line(ts.index, ts.values, color="black", line_dash="solid", legend="Truth", line_width=2)
+    # plot open-loop
+    ts = ts_openloop
+    p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
+           legend="Open-loop, RMSE={:.3f} mm".format(rmse_openloop), line_width=2)
+    # Save
+    save(p)
+
+# ========================================================== #
+# Plot - runoff, aggregated to daily
+# ========================================================== #
+if not linear_model:
+    print('\tPlot - surface runoff, aggregated to daily...')
+    # --- RMSE --- #
+    # extract time series
+    ts_truth = ds_truth['OUT_RUNOFF'].sel(
+                    lat=lat, lon=lon,
+                    time=slice(plot_start_time, plot_end_time)).to_series().\
+               resample("D", how='sum')
+    da_EnKF = ds_EnKF['OUT_RUNOFF'].sel(time=slice(plot_start_time, plot_end_time)).\
+              resample(freq="D", how='sum', dim='time')
+    ts_EnKF_mean = da_EnKF.mean(dim='N').\
+                   to_series()
+    ts_openloop = ds_openloop['OUT_RUNOFF'].sel(
+                    lat=lat, lon=lon,
+                    time=slice(plot_start_time, plot_end_time)).to_series().\
+                  resample("D", how='sum')
+    # Calculate EnKF_mean vs. truth
+    df_truth_EnKF = pd.concat([ts_truth, ts_EnKF_mean], axis=1, keys=['truth', 'EnKF_mean']).dropna()
+    rmse_EnKF_mean = rmse(df_truth_EnKF['truth'], df_truth_EnKF['EnKF_mean'])
+    # Calculate open-loop vs. truth
+    df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
+    rmse_openloop = rmse(df_truth_openloop['truth'], df_truth_openloop['openloop'])
+    
+    # ----- Interactive version ----- #
+    # Create figure
+    output_file(os.path.join(output_dir, '{}_{}.runoff_daily.html'.format(lat, lon)))
+    
+    p = figure(title='Surface runoff, daily, {}, {}, N={}'.format(lat, lon, N),
                x_axis_label="Time", y_axis_label="Runoff (mm)",
                x_axis_type='datetime', width=1000, height=500)
     # plot each ensemble member
