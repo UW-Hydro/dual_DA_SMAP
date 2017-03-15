@@ -75,6 +75,8 @@ SNOW_BAND	    False
 RESULT_DIR  $result_dir
 OUTFILE     fluxes
 AGGFREQ     NHOURS 3
+OUT_FORMAT           NETCDF4
+COMPRESS             1
 
 OUTVAR      OUT_RAINF
 # OUTVAR      OUT_SNOWF
