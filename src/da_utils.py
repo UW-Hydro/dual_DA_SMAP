@@ -11,6 +11,8 @@ import shutil
 
 from tonic.models.vic.vic import VIC, default_vic_valgrind_error_code
 
+import timeit
+
 
 class VICReturnCodeError(Exception):
     pass
@@ -718,6 +720,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
     # --- Step 1. Initialize ---#
     init_state_time = start_time
     print('\tGenerating ensemble initial states at ', init_state_time)
+    time1 = timeit.default_timer()
     # Load initial state file
     ds_states = xr.open_dataset(init_state_nc)
     class_states = States(ds_states)
@@ -751,6 +754,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
                                          (ds - class_states.ds)['STATE_SOIL_MOISTURE']})
             ds_perturbation.to_netcdf(os.path.join(debug_dir,
                                                    'perturbation.ens{}.nc').format(i+1))
+    time2 = timeit.default_timer()
+    print('\t\tTime of perturbing init state: {}'.format(time2-time1))
 
     # --- Step 2. Propagate (run VIC) until the first measurement time point ---#    
     # Initialize dictionary of history file paths for each ensemble member
@@ -764,6 +769,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
                        pd.DateOffset(hours=24/vic_model_steps_per_day)
     print('\tPropagating (run VIC) until the first measurement time point ',
           pd.to_datetime(da_meas[da_meas_time_var].values[0]))
+    time1 = timeit.default_timer()
     # Set up output states, history and global files directories
     propagate_output_dir_name = 'propagate.{}_{:05d}-{}'.format(
                         vic_run_start_time.strftime('%Y%m%d'),
@@ -824,6 +830,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
                             i+1,
                             vic_run_start_time.strftime('%Y-%m-%d'),
                             vic_run_start_time.hour*3600+vic_run_start_time.second)))
+    time2 = timeit.default_timer()
+    print('\t\tTime of propagation: {}'.format(time2-time1))
     
     # --- Step 3. Run EnKF --- #
     debug_innov_dir = setup_output_dirs(
@@ -852,6 +860,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
         print('\tCalculating for ', current_time, 'to', next_time)
 
         # (1.1) Calculate gain K
+        time1 = timeit.default_timer()
         da_x, da_y_est = get_soil_moisture_and_estimated_meas_all_ensemble(
                                 N,
                                 state_dir=state_dir_after_prop,
@@ -864,7 +873,10 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
                                         'K.{}_{:05d}.nc'.format(
                                             current_time.strftime('%Y%m%d'),
                                             current_time.hour*3600+current_time.second)))
+        time2 = timeit.default_timer()
+        print('\t\tTime of calculating gain K: {}'.format(time2-time1))
         # (1.2) Calculate and save normalized innovation
+        time1 = timeit.default_timer()
         # Calculate ensemble mean of y_est
         da_y_est_ensMean = da_y_est.mean(dim='N')  # [lat, lon, m]
         # Calculate non-normalized innovation
@@ -889,9 +901,12 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
                 'innov_norm.{}_{:05d}.nc'.format(
                         current_time.strftime('%Y%m%d'),
                         current_time.hour*3600+current_time.second)))
+        time2 = timeit.default_timer()
+        print('\t\tTime of calculating innovation: {}'.format(time2-time1))
 
         # (1.3) Update states for each ensemble member
         # Set up dir for updated states
+        time1 = timeit.default_timer()
         updated_states_dir_name = 'updated.{}_{:05d}'.format(
                             current_time.strftime('%Y%m%d'),
                             current_time.hour*3600+current_time.second)
@@ -925,8 +940,11 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
                              current_time.hour*3600+current_time.second)))
         # Delete propagated states
         shutil.rmtree(state_dir_after_prop)
+        time2 = timeit.default_timer()
+        print('\t\tTime of updating states: {}'.format(time2-time1))
 
         # (2) Perturb states
+        time1 = timeit.default_timer()
         # Set up perturbed state subdirectories
         pert_state_dir_name = 'perturbed.{}_{:05d}'.format(
                                         current_time.strftime('%Y%m%d'),
@@ -952,13 +970,15 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
                         'perturbation.{}_{:05d}.nc').format(
                                 current_time.strftime('%Y%m%d'),
                                 current_time.hour*3600+current_time.second))
-
+        time2 = timeit.default_timer()
+        print('\t\tTime of perturbing states: {}'.format(time2-time1))
 
         # (3) Propagate each ensemble member to the next measurement time point
         # If current_time > next_time, do not propagate (we already reach the end of the simulation)
         if current_time > next_time:
             break
         # --- Propagate to the next time point --- #
+        time1 = timeit.default_timer()
         propagate_output_dir_name = 'propagate.{}_{:05d}-{}'.format(
                                             current_time.strftime('%Y%m%d'),
                                             current_time.hour*3600+current_time.second,
@@ -1017,6 +1037,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
                             current_time.hour*3600+current_time.second)))
         # Delete perturbed states
         shutil.rmtree(pert_state_dir)
+        time2 = timeit.default_timer()
+        print('\t\tTime of propagation: {}'.format(time2-time1))
         
         # Point state directory to be updated to the propagated one
         state_dir_after_prop = out_state_dir
@@ -1027,6 +1049,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
            (t < (len(da_meas[da_meas_time_var]) - 1) and \
            current_time.year != (next_time + \
            pd.DateOffset(hours=24/vic_model_steps_per_day)).year):
+            print('\tConcatenating history files...')
+            time1 = timeit.default_timer()
             # Determine history file year
             year = current_time.year
             # Identify history dirs to delete later
@@ -1069,10 +1093,15 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
                 # --- Finish multiprocessing --- #
                 pool.close()
                 pool.join()
+            time2 = timeit.default_timer()
+            print('\t\tTime of propagation: {}'.format(time2-time1))
 
             # Delete history dirs containing individual files
+            time1 = timeit.default_timer()
             for d in set_dir_to_delete:
                 shutil.rmtree(d)
+            time2 = timeit.default_timer()
+            print('\t\tTime of deleting history directories: {}'.format(time2-time1))
 
 
 def concat_clean_up_history_file(list_history_files, output_file):
