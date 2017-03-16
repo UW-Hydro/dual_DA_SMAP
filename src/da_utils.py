@@ -1138,7 +1138,6 @@ def concat_clean_up_history_file(list_history_files, output_file):
                 chunksizes.append(1)
             else:
                 chunksizes.append(len(ds_concat[dim]))
-        print(var, chunksizes)
         # create encoding dict
         dict_encode[var] = {'zlib': True,
                             'complevel': 1,
