@@ -18,11 +18,12 @@ from tonic.io import read_configobj
 
 from da_utils import (Forcings, setup_output_dirs, propagate,
                       calculate_sm_noise_to_add_magnitude,
-                      perturb_soil_moisture_states, concat_vic_history_files,
+                      perturb_soil_moisture_states,
                       calculate_max_soil_moist_domain,
                       convert_max_moist_n_state, VarToPerturb,
                       calculate_sm_noise_to_add_covariance_matrix_whole_field,
-                      find_global_param_value, propagate_linear_model)
+                      find_global_param_value, propagate_linear_model,
+                      concat_clean_up_history_file)
 
 # =========================================================== #
 # Load command line arguments
@@ -277,24 +278,14 @@ for t in range(len(meas_times)):
     os.remove(perturbed_state_nc)
 
 # (3) Concatenate all history files
-print('Concatenating all history files...')
-ds_concat = concat_vic_history_files(list_history_paths)
-
-# Save to history output directory
-print('Saving history file to netCDF...')
-first_time = pd.to_datetime(ds_concat['time'][0].values)
-last_time = pd.to_datetime(ds_concat['time'][-1].values)
 hist_concat_nc = os.path.join(truth_subdirs['history'],
                                  'history.concat.{}_{:05d}-{}_{:05d}.nc'.format(
-                                        first_time.strftime('%Y%m%d'),
-                                        first_time.hour*3600+first_time.second,
-                                        last_time.strftime('%Y%m%d'),
-                                        last_time.hour*3600+last_time.second))
-ds_concat.to_netcdf(hist_concat_nc)
-
-# (4) Clean up individual history files
-for f in list_history_paths:
-    os.remove(f)
+                                        start_time.strftime('%Y%m%d'),
+                                        start_time.hour*3600+start_time.second,
+                                        end_time.strftime('%Y%m%d'),
+                                        end_time.hour*3600+end_time.second))
+concat_clean_up_history_file(list_history_paths,
+                             hist_concat_nc)
 
 
 # =========================================================== #

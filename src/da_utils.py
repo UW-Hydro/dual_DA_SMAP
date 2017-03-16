@@ -1077,7 +1077,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
 
 def concat_clean_up_history_file(list_history_files, output_file):
     ''' This function is for wrapping up history file concat and clean up
-        for the use of multiprocessing package
+        for the use of multiprocessing package; history file output is
+        compressed.
     
     Parameters
     ----------
@@ -1093,11 +1094,29 @@ def concat_clean_up_history_file(list_history_files, output_file):
     concat_vic_history_files
     '''
 
-    # Concat
+    # --- Concat --- #
     ds_concat = concat_vic_history_files(list_history_files)
-    # Save concatenated file to netCDF
+    # --- Save concatenated file to netCDF (with compression) --- #
+    dict_encode = {}
+    for var in ds_concat.data_vars:
+        # skip variables not starting with "OUT_"
+        if var.split('_')[0] != 'OUT':
+            continue
+        # determine chunksizes
+        chunksizes = []
+        for i, dim in enumerate(ds_concat[var].dims):
+            if dim == 'time':  # for time dimension, chunksize = 1
+                chunksizes.append(1)
+            else:
+                chunksizes.append(len(ds_concat[dim]))
+        print(var, chunksizes)
+        # create encoding dict
+        dict_encode[var] = {'zlib': True,
+                            'complevel': 1,
+                            'chunksizes': chunksizes}
     ds_concat.to_netcdf(output_file,
-                        format='NETCDF4_CLASSIC')
+                        format='NETCDF4_CLASSIC',
+                        encoding=dict_encode)
     # Clean up individual history files
     for f in list_history_files:
         os.remove(f)
@@ -2083,6 +2102,9 @@ def propagate(start_time, end_time, vic_exe, vic_global_template_file,
     returncode = vic_exe.run(global_file, logdir=out_log_dir,
                              **{'mpi_proc': mpi_proc, 'mpi_exe': mpi_exe})
     check_returncode(returncode, expected=0)
+
+    # Delete log files (to save space)
+    shutil.rmtree(out_log_dir)
 
 
 def propagate_linear_model(start_time, end_time, lat_coord, lon_coord,
