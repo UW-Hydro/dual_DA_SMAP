@@ -925,7 +925,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                                 N,
                                 state_dir=state_dir_after_prop,
                                 state_time=current_time,
-                                da_tile_frac=da_tile_frac)
+                                da_tile_frac=da_tile_frac,
+                                nproc=nproc)
         da_K = calculate_gain_K_whole_field(da_x, da_y_est, R)
         if debug:
             ds_K = xr.Dataset({'K': da_K})
@@ -935,6 +936,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                                             current_time.hour*3600+current_time.second)))
         time2 = timeit.default_timer()
         print('\t\tTime of calculating gain K: {}'.format(time2-time1))
+
         # (1.2) Calculate and save normalized innovation
         time1 = timeit.default_timer()
         # Calculate ensemble mean of y_est
@@ -982,7 +984,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                 state_time=current_time,
                 out_vic_state_dir=out_updated_state_dir,
                 da_max_moist_n=da_max_moist_n,
-                adjust_negative=adjust_negative)
+                adjust_negative=adjust_negative,
+                nproc=nproc)
         if debug:
             # Save update increment to netCDF file
             ds_update_increm = xr.Dataset({'update_increment': da_update_increm})
@@ -1590,7 +1593,7 @@ def determine_tile_frac(global_path):
 
 
 def get_soil_moisture_and_estimated_meas_all_ensemble(N, state_dir, state_time,
-                                                      da_tile_frac):
+                                                      da_tile_frac, nproc):
     ''' This function extracts soil moisture states from netCDF state files for all ensemble
         members, for all grid cells, veg and snow band tiles.
     
@@ -1606,6 +1609,9 @@ def get_soil_moisture_and_estimated_meas_all_ensemble(N, state_dir, state_time,
     da_tile_frac: <xr.DataArray>
         Fraction of each veg/snowband in each grid cell for the whole domain
         Dimension: [veg_class, snow_band, lat, lon]
+    nproc: <int>
+        Number of processors to use for parallel ensemble
+        Default: 1
 
     Returns
     ----------
@@ -1656,23 +1662,55 @@ def get_soil_moisture_and_estimated_meas_all_ensemble(N, state_dir, state_time,
                         dims=['lat', 'lon', 'm', 'N'])
     
     # --- Loop over each ensemble member --- #
-    for i in range(N):
-        # --- Load state file --- #
-        state_name = 'state.ens{}.{}_{:05d}.nc'.format(
-                i+1,
-                state_time.strftime('%Y%m%d'),
-                state_time.hour*3600+state_time.second)
-        ds = xr.open_dataset(os.path.join(state_dir, state_name))
-        class_states = States(ds)
-        
-        # --- Fill x and y_est data in --- #
-        # Fill in states x
-        da_x.loc[:, :, :, i] = class_states.da_EnKF
-        # Fill in measurement estimates y
-        da_y_est[:, :, :, i] = calculate_y_est_whole_field(
-                                        class_states.ds['STATE_SOIL_MOISTURE'],
-                                        da_tile_frac)
-        
+    # --- If nproc == 1, do a regular ensemble loop --- #
+    if nproc == 1:
+        for i in range(N):
+            # Load state file
+            state_name = 'state.ens{}.{}_{:05d}.nc'.format(
+                    i+1,
+                    state_time.strftime('%Y%m%d'),
+                    state_time.hour*3600+state_time.second)
+            ds = xr.open_dataset(os.path.join(state_dir, state_name))
+            class_states = States(ds)
+            
+            # Fill x and y_est data in
+            # Fill in states x
+            da_x.loc[:, :, :, i] = class_states.da_EnKF
+            # Fill in measurement estimates y
+            da_y_est[:, :, :, i] = calculate_y_est_whole_field(
+                                            class_states.ds['STATE_SOIL_MOISTURE'],
+                                            da_tile_frac)
+    # --- If nproc > 1, use multiprocessing --- #
+    elif nproc > 1:
+        results = {}
+        # --- Set up multiprocessing --- #
+        pool = mp.Pool(processes=nproc)
+        # --- Loop over each ensemble member --- #
+        for i in range(N):
+            # Load state file
+            state_name = 'state.ens{}.{}_{:05d}.nc'.format(
+                    i+1,
+                    state_time.strftime('%Y%m%d'),
+                    state_time.hour*3600+state_time.second)
+            ds = xr.open_dataset(os.path.join(state_dir, state_name))
+            class_states = States(ds)
+ 
+            # Fill x and y_est data in
+            # Fill in states x
+            da_x.loc[:, :, :, i] = class_states.da_EnKF
+            # Fill in measurement estimates y
+            results[i] = pool.apply_async(
+                            calculate_y_est_whole_field,
+                            (class_states.ds['STATE_SOIL_MOISTURE'],
+                             da_tile_frac))
+        # --- Finish multiprocessing --- #
+        pool.close()
+        pool.join()
+        # --- Get return values --- #
+        list_da_perturbation = []
+        for i, result in results.items():
+            da_y_est[:, :, :, i] = result.get()
+
     return da_x, da_y_est
 
 
@@ -1896,9 +1934,77 @@ def calculate_gain_K_whole_field(da_x, da_y_est, R):
     return da_K
 
 
+def update_states(da_y_est, da_K, da_meas, R, state_nc_before_update,
+                  out_vic_state_nc, da_max_moist_n,
+                  adjust_negative=True):
+    ''' Update the EnKF states for the whole field.
+    
+    Parameters
+    ----------
+    da_y_est: <xr.DataArray>
+        Estimated measurement from pre-updated states (y = Hx);
+        Dimension: [lat, lon, m]
+    da_K: <xr.DataArray>
+        Gain K for the whole field
+        Dimension: [lat, lon, n, m], where [n, m] is the Kalman gain K
+    da_meas: <xr.DataArray> [lat, lon, m]
+        Measurements at current time
+    R: <float> (for m = 1)
+        Measurement error covariance matrix (measurement error ~ N(0, R))
+    state_nc_before_update: <str>
+        VIC state file before update
+    out_vic_state_nc: <str>
+        Path for saving updated state file in VIC format;
+    da_max_moist_n: <xarray.DataArray>
+        Maximum soil moisture for the whole domain and each tile
+        [unit: mm]. Soil moistures above maximum after perturbation will
+        be reset to maximum value.
+        Dimension: [lat, lon, n]
+    adjust_negative: <bool>
+        Whether or not to adjust negative soil moistures after update
+        to zero.
+        Default: True (adjust negative to zero)
+    
+    Returns
+    ----------
+    da_x_updated: <xr.DataArray>
+        Updated soil moisture states;
+        Dimension: [lat, lon, n]
+    da_update_increm: <xr.DataArray>
+        Update increment of soil moisture states
+        Dimension: [lat, lon, n]
+    da_v: <xr.DataArray>
+        Measurement perturbation in the update step
+        Dimension: [lat, lon, m]
+    
+    Require
+    ----------
+    numpy
+    '''
+
+    # Load VIC states before update for this ensemble member          
+    ds = xr.open_dataset(state_nc_before_update)
+    # Convert EnKF states back to VIC states
+    class_states = States(ds)
+    # Update states
+    da_x_updated, da_v = class_states.update_soil_moisture_states(
+                                        da_K, da_meas,
+                                        da_y_est, R,
+                                        da_max_moist_n,
+                                        adjust_negative)  # [lat, lon, n]
+    da_update_increm = da_x_updated - class_states.da_EnKF
+    # Convert updated states to VIC states format
+    ds_updated = class_states.convert_new_EnKFstates_sm_to_VICstates(da_x_updated)
+    # Save VIC states to netCDF file
+    ds_updated.to_netcdf(out_vic_state_nc,
+                         format='NETCDF4_CLASSIC')
+    
+    return da_x_updated, da_update_increm, da_v
+
+
 def update_states_ensemble(da_y_est, da_K, da_meas, R, state_dir_before_update,
                            state_time, out_vic_state_dir, da_max_moist_n,
-                           adjust_negative=True):
+                           adjust_negative=True, nproc=1):
     ''' Update the EnKF states for the whole field for each ensemble member.
     
     Parameters
@@ -1932,12 +2038,15 @@ def update_states_ensemble(da_y_est, da_K, da_meas, R, state_dir_before_update,
         Whether or not to adjust negative soil moistures after update
         to zero.
         Default: True (adjust negative to zero)
+    nproc: <int>
+        Number of processors to use for parallel ensemble
+        Default: 1
     
     Returns
     ----------
     da_x_updated: <xr.DataArray>
         Updated soil moisture states;
-        Dimension: [lat, lon, n, N]
+        Dimension: [N, lat, lon, n]
     da_update_increm: <xr.DataArray>
         Update increment of soil moisture states
         Dimension: [N, lat, lon, n]
@@ -1955,34 +2064,68 @@ def update_states_ensemble(da_y_est, da_K, da_meas, R, state_dir_before_update,
 
     list_da_update_increm = []  # update increment
     list_da_v = []  # measurement perturbation in the update step
-    # Loop over each ensemble member
-    for i in range(N):
-        # Load VIC states before update for this ensemble member          
-        ds = xr.open_dataset(os.path.join(
-                state_dir_before_update,
-                'state.ens{}.{}_{:05d}.nc'.format(
-                        i+1,
-                        state_time.strftime('%Y%m%d'),
-                        state_time.hour*3600+state_time.second)))
-        # Convert EnKF states back to VIC states
-        class_states = States(ds)
-        # Update states
-        da_x_updated, da_v = class_states.update_soil_moisture_states(
-                                        da_K, da_meas,
-                                        da_y_est.loc[:, :, :, i], R,
-                                        da_max_moist_n,
-                                        adjust_negative)  # [lat, lon, n]
-        list_da_v.append(da_v)
-        # Save update increment to list
-        da_update_increm = da_x_updated - class_states.da_EnKF
-        list_da_update_increm.append(da_update_increm)
-        # Convert updated states to VIC states format
-        ds_updated = class_states.convert_new_EnKFstates_sm_to_VICstates(da_x_updated)
-        # Save VIC states to netCDF file
-        ds_updated.to_netcdf(os.path.join(out_vic_state_dir,
-                                          'state.ens{}.nc'.format(i+1)),
-                             format='NETCDF4_CLASSIC')
-    # Put update increment and measurement perturbation of all ensemble members into one da
+    list_da_x_updated = []  # measurement perturbation in the update step
+
+    # --- If nproc == 1, do a regular ensemble loop --- #
+    if nproc == 1:
+        for i in range(N):
+            # Set up parameters
+            state_nc_before_update = os.path.join(
+                    state_dir_before_update,
+                    'state.ens{}.{}_{:05d}.nc'.format(
+                            i+1,
+                            state_time.strftime('%Y%m%d'),
+                            state_time.hour*3600+state_time.second))
+            out_vic_state_nc = os.path.join(out_vic_state_dir,
+                                            'state.ens{}.nc'.format(i+1))
+            # Update states
+            da_x_updated, da_update_increm, da_v = update_states(
+                        da_y_est.loc[:, :, :, i], da_K, da_meas, R,
+                        state_nc_before_update,
+                        out_vic_state_nc, da_max_moist_n,
+                        adjust_negative)
+            # Put results to list
+            list_da_v.append(da_v)
+            list_da_x_updated.append(da_x_updated)
+            list_da_update_increm.append(da_update_increm)
+    # --- If nproc > 1, use multiprocessing --- #
+    elif nproc > 1:
+        results = {}
+        # --- Set up multiprocessing --- #
+        pool = mp.Pool(processes=nproc)
+        # --- Loop over each ensemble member --- #
+        for i in range(N):
+            # Set up parameters
+            state_nc_before_update = os.path.join(
+                    state_dir_before_update,
+                    'state.ens{}.{}_{:05d}.nc'.format(
+                            i+1,
+                            state_time.strftime('%Y%m%d'),
+                            state_time.hour*3600+state_time.second))
+            out_vic_state_nc = os.path.join(out_vic_state_dir,
+                                            'state.ens{}.nc'.format(i+1))
+            # Update states
+            results[i] = pool.apply_async(
+                            update_states,
+                            (da_y_est.loc[:, :, :, i], da_K, da_meas, R,
+                            state_nc_before_update,
+                            out_vic_state_nc, da_max_moist_n,
+                            adjust_negative))
+        # --- Finish multiprocessing --- #
+        pool.close()
+        pool.join()
+        # --- Get return values --- #
+        for i, result in results.items():
+            da_x_updated, da_update_increm, da_v = result.get()
+            # Put results to list
+            list_da_v.append(da_v)
+            list_da_x_updated.append(da_x_updated)
+            list_da_update_increm.append(da_update_increm)
+
+    # --- Put update increment and measurement perturbation of all ensemble
+    # members into one da --- #
+    da_x_updated = xr.concat(list_da_x_updated, dim='N')
+    da_x_updated['N'] = range(1, N+1)
     da_update_increm = xr.concat(list_da_update_increm, dim='N')
     da_update_increm['N'] = range(1, N+1)
     da_v = xr.concat(list_da_v, dim='N')
