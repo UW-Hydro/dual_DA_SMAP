@@ -8,6 +8,7 @@ import xarray as xr
 import datetime as dt
 import multiprocessing as mp
 import shutil
+import scipy.linalg as la
 
 from tonic.models.vic.vic import VIC, default_vic_valgrind_error_code
 
@@ -127,7 +128,7 @@ class States(object):
         return ds
         
 
-    def perturb_soil_moisture_Gaussian(self, P_whole_field, da_max_moist_n,
+    def perturb_soil_moisture_Gaussian(self, L, scale_n_nloop, da_max_moist_n,
                                        adjust_negative=True):
         ''' Perturb soil moisture states by adding Gaussian noise.
             Each grid cell and soil layer can have different noise magnitude (specified
@@ -139,9 +140,16 @@ class States(object):
 
         Parameters
         ----------
-        P_whole_field: <np.array>
-            Covariance matrix for sm state perturbation for the whole field
-            Dimension: [lat, lon, n, n], where n = nlayer * nveg * nsnow
+        L: <np.array>
+            Cholesky decomposed matrix of covariance matrix P of all states:
+                            P = L * L.T
+            Thus, L * Z (where Z is i.i.d. standard normal random variables of
+            dimension [n, n]) is multivariate normal random variables with
+            mean zero and covariance matrix P.
+            Dimension: [n, n]
+        scale_n_nloop: <np.array>
+            Standard deviation of noise to add.
+            Dimension: [nloop, n] (where nloop = lat * lon)
         da_max_moist_n: <xarray.DataArray>
             Maximum soil moisture for the whole domain and each tile
             [unit: mm]. Soil moistures above maximum after perturbation will
@@ -162,9 +170,6 @@ class States(object):
         # Extract the number of EnKF states
         n = len(self.da_EnKF['n'])
 
-        # Check if P_whole_field is in shape [lat, lno, n, n]
-        pass
-
         # Extract coordinates
         lat = self.ds['lat']
         lon = self.ds['lon']
@@ -176,13 +181,19 @@ class States(object):
         nloop = len(lat) * len(lon)
         n = len(nlayer) * len(veg_class) * len(snow_band)
         
-        # Convert straighten lat and lon into nloop for P
-        P = P_whole_field.reshape([nloop, n, n])  # [nloop, n, n]
-    
-        # Generate random noise for the whole field
-        noise = np.array(list(map(np.random.multivariate_normal,
-                                  np.zeros([nloop, n]),
-                                  P)))  # [nloop, n]
+        # Generate N(0, 1) random noise for whole domain and all states
+        noise = np.array(list(map(
+                    np.random.normal,
+                    np.zeros(nloop*n),
+                    np.ones(nloop*n))))  # [nloop*n]
+        noise = noise.reshape([nloop, n])  # [nloop, n]
+        # Apply transformation --> multivariate random noise
+        noise = np.array(list(map(
+            lambda j: np.dot(L, noise[j, :].reshape([n, 1])),
+            range(nloop))))  # [nloop, n, 1]
+        noise = noise.reshape([nloop, n])  # [nloop, n]
+        # Apply layer perturbation scale
+        noise = noise * scale_n_nloop  # [nloop, n]
         noise = noise.reshape([len(lat), len(lon), n])  # [lat, lon, n]
 
         # Add noise to soil moisture field
@@ -336,7 +347,38 @@ def calculate_sm_noise_to_add_magnitude(vic_history_path, sigma_percent):
     return da_scale
 
 
-def calculate_sm_noise_to_add_covariance_matrix(layer_scale, nveg, nsnow, corrcoef):
+def calculate_cholesky_L(n, corrcoef):
+    ''' Calculates covariance matrix for sm state perturbation for one grid cell.
+
+    Parameters
+    ----------
+    n: <int>
+        Total number of EnKF states
+    corrcoef: <float>
+        Correlation coefficient across different tiles and soil layers
+
+    Returns
+    ----------
+    L: <np.array>
+        Cholesky decomposed matrix of covariance matrix P of all states:
+                        P = L * L.T
+        Thus, L * Z (where Z is i.i.d. standard normal random variables of
+        dimension [n, n]) is multivariate normal random variables with
+        mean zero and covariance matrix P.
+        Dimension: [n, n]
+    '''
+
+    # Calculate P as an correlation coefficient matrix
+    P = np.identity(n)
+    P[P==0] = corrcoef  # [n, n]
+
+    # Calculate L (Cholesky decomposition: P = L * L.T)
+    L = la.cholesky(P).T  # [n, n]
+
+    return L
+
+
+def calculate_scale_n(layer_scale, nveg, nsnow):
     ''' Calculates covariance matrix for sm state perturbation for one grid cell.
 
     Parameters
@@ -348,35 +390,24 @@ def calculate_sm_noise_to_add_covariance_matrix(layer_scale, nveg, nsnow, corrco
         Number of veg classes
     nsnow: <int>
         Number of snow bands
-    corrcoef: <float>
-        Correlation coefficient across different tiles and soil layers
 
     Returns
     ----------
-    P: <np.array>
-        Covariance matrix for sm state perturbation
-        Dimension: [n, n], where n = nlayer * nveg * nsnow
+    scale_n: <np.array>
+        Standard deviation of noise to add for a certain grid cell.
+        Dimension: [n]
     '''
 
     nlayer = len(layer_scale)
     n = nlayer * nveg * nsnow
 
-    # Initialize P as an correlation coefficient matrix
-    P = np.identity(n)
-    P[P==0] = corrcoef
+    # Calculate scale_n
+    scale_n = np.repeat(layer_scale, nveg*nsnow)  # [n]
 
-    # Calculate multiplier for each location in the matrix
-    # (corresponding to flattened sm states in the order of [nlayer, veg, snow])
-    scales = np.repeat(layer_scale, nveg*nsnow).reshape([n, 1])  # [n, 1]
-    mult = np.dot(scales, np.transpose(scales))  # [n, n]
-
-    # Calculate covariance matrix
-    P = P * mult
-
-    return P
+    return scale_n
 
 
-def calculate_sm_noise_to_add_covariance_matrix_whole_field(da_scale, nveg, nsnow, corrcoef):
+def calculate_scale_n_whole_field(da_scale, nveg, nsnow):
     ''' Calculates covariance matrix for sm state perturbation for one grid cell.
 
     Parameters
@@ -388,14 +419,12 @@ def calculate_sm_noise_to_add_covariance_matrix_whole_field(da_scale, nveg, nsno
         Number of veg classes
     nsnow: <int>
         Number of snow bands
-    corrcoef: <float>
-        Correlation coefficient across different tiles and soil layers
 
     Returns
     ----------
-    P_whole_field: <np.array>
-        Covariance matrix for sm state perturbation for the whole field
-        Dimension: [lat, lon, n, n], where n = nlayer * nveg * nsnow
+    scale_n_nloop: <np.array>
+        Standard deviation of noise to add for the whole field.
+        Dimension: [nloop, n] (where nloop = lat * lon)
         
     Require
     ----------
@@ -416,15 +445,13 @@ def calculate_sm_noise_to_add_covariance_matrix_whole_field(da_scale, nveg, nsno
     scale = np.transpose(scale)  # [nloop, nlayer]
     scale[np.isnan(scale)] = 0  # set inactive cell to zero
     
-    # Calculate covariance matrix P
-    P_whole_field = np.array(list(map(calculate_sm_noise_to_add_covariance_matrix,
+    # Calculate scale_n for the whole field
+    scale_n_nloop = np.array(list(map(calculate_scale_n,
                                       scale,
                                       np.repeat(nveg, nloop),
-                                      np.repeat(nsnow, nloop),
-                                      np.repeat(corrcoef, nloop))))  # [nloop, n, n]
-    P_whole_field = P_whole_field.reshape([len(lat), len(lon), n, n])  # [lat, lon, n, n]
-    
-    return P_whole_field
+                                      np.repeat(nsnow, nloop))))  # [nloop, n]
+
+    return scale_n_nloop
 
 
 class Forcings(object):
@@ -602,7 +629,7 @@ class VarToPerturb(object):
         return da_perturbed
 
 
-def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist_n,
+def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_moist_n,
              R, da_meas,
              da_meas_time_var, vic_exe, vic_global_template,
              ens_forcing_basedir, ens_forcing_prefix,
@@ -625,9 +652,16 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
         End time of EnKF run
     init_state_nc: <str>
         Initial state netCDF file
-    P_whole_field: <np.array>
-        Covariance matrix for sm state perturbation for the whole field
-        Dimension: [lat, lon, n, n], where n = nlayer * nveg * nsnow
+    L: <np.array>
+        Cholesky decomposed matrix of covariance matrix P of all states:
+                        P = L * L.T
+        Thus, L * Z (where Z is i.i.d. standard normal random variables of
+        dimension [n, n]) is multivariate normal random variables with
+        mean zero and covariance matrix P.
+        Dimension: [n, n]
+    scale_n_nloop: <np.array>
+        Standard deviation of noise to add for the whole field.
+        Dimension: [nloop, n] (where nloop = lat * lon)
     da_max_moist_n: <xarray.DataArray>
         Maximum soil moisture for the whole domain and each tile
         [unit: mm]. Soil moistures above maximum after perturbation will
@@ -705,8 +739,6 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
                 dims=['veg_class', 'snow_band', 'lat', 'lon'])
         adjust_negative = False
     
-    # Check whether the dimension of P_whole_field is consistent with number of soil moisture states
-    pass
     # Check whether the run period is consistent with VIC setup
     pass
     # Check whether the time range of da_meas is within run period
@@ -740,20 +772,48 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
         debug_dir = setup_output_dirs(
                         output_temp_dir,
                         mkdirs=[init_state_dir_name])[init_state_dir_name]
-    for i in range(N):
-        # Perturb states and save
-        ds = class_states.perturb_soil_moisture_Gaussian(
-                            P_whole_field, da_max_moist_n,
-                            adjust_negative)
-        ds.to_netcdf(os.path.join(init_state_dir,
-                                  'state.ens{}.nc'.format(i+1)),
-                     format='NETCDF4_CLASSIC')
-        # Save soil moisture perturbation
-        if debug:
-            ds_perturbation = xr.Dataset({'STATE_SOIL_MOISTURE':
-                                         (ds - class_states.ds)['STATE_SOIL_MOISTURE']})
-            ds_perturbation.to_netcdf(os.path.join(debug_dir,
-                                                   'perturbation.ens{}.nc').format(i+1))
+    # --- If nproc == 1, do a regular ensemble loop --- #
+    if nproc == 1:
+        for i in range(N):
+            da_perturbation = perturb_soil_moisture_states(
+                    states_to_perturb_nc=init_state_nc,
+                    L=L,
+                    scale_n_nloop=scale_n_nloop,
+                    out_states_nc=os.path.join(init_state_dir,
+                                               'state.ens{}.nc'.format(i+1)),
+                    da_max_moist_n=da_max_moist_n,
+                    adjust_negative=adjust_negative)
+            # Save soil moisture perturbation
+            if debug:
+                ds_perturbation = xr.Dataset({'STATE_SOIL_MOISTURE':
+                                             (ds - class_states.ds)\
+                                  ['STATE_SOIL_MOISTURE']})
+                ds_perturbation.to_netcdf(os.path.join(
+                        debug_dir,
+                        'perturbation.ens{}.nc').format(i+1))
+    # --- If nproc > 1, use multiprocessing --- #
+    elif nproc > 1:
+        # --- Set up multiprocessing --- #
+        pool = mp.Pool(processes=nproc)
+        # --- Loop over each ensemble member --- #
+        for i in range(N):
+            pool.apply_async(
+                perturb_soil_moisture_states,
+                (init_state_nc, L, scale_n_nloop,
+                 os.path.join(init_state_dir, 'state.ens{}.nc'.format(i+1)),
+                 da_max_moist_n, adjust_negative))
+            # Save soil moisture perturbation
+            if debug:
+                ds_perturbation = xr.Dataset({'STATE_SOIL_MOISTURE':
+                                             (ds - class_states.ds)\
+                                  ['STATE_SOIL_MOISTURE']})
+                ds_perturbation.to_netcdf(os.path.join(
+                        debug_dir,
+                        'perturbation.ens{}.nc').format(i+1))
+        # --- Finish multiprocessing --- #
+        pool.close()
+        pool.join()
+
     time2 = timeit.default_timer()
     print('\t\tTime of perturbing init state: {}'.format(time2-time1))
 
@@ -956,10 +1016,12 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, P_whole_field, da_max_moist
         list_da_perturbation = perturb_soil_moisture_states_ensemble(
                     N,
                     states_to_perturb_dir=out_updated_state_dir,
-                    P_whole_field=P_whole_field,
+                    L=L,
+                    scale_n_nloop=scale_n_nloop,
                     out_states_dir=pert_state_dir,
                     da_max_moist_n=da_max_moist_n,
-                    adjust_negative=adjust_negative)
+                    adjust_negative=adjust_negative,
+                    nproc=nproc)
         if debug:
             da_perturbation = xr.concat(list_da_perturbation, dim='N')
             da_perturbation['N'] = range(1, N+1)
@@ -2005,10 +2067,11 @@ def replace_global_values(gp, replace):
 
 
 def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir,
-                                          P_whole_field,
+                                          L, scale_n_nloop,
                                           out_states_dir,
                                           da_max_moist_n,
-                                          adjust_negative=True):
+                                          adjust_negative=True,
+                                          nproc=1):
     ''' Perturb all soil_moisture states for each ensemble member
     
     Parameters
@@ -2018,9 +2081,16 @@ def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir,
     states_to_perturb_dir: <str>
         Directory for VIC state files to perturb.
         File names: state.ens<i>.nc, where <i> is ensemble index 1, ..., N
-    P_whole_field: <np.array>
-        Covariance matrix for sm state perturbation for the whole field
-        Dimension: [lat, lon, n, n], where n = nlayer * nveg * nsnow
+    L: <np.array>
+        Cholesky decomposed matrix of covariance matrix P of all states:
+                        P = L * L.T
+        Thus, L * Z (where Z is i.i.d. standard normal random variables of
+        dimension [n, n]) is multivariate normal random variables with
+        mean zero and covariance matrix P.
+        Dimension: [n, n]
+    scale_n_nloop: <np.array>
+        Standard deviation of noise to add for the whole field.
+        Dimension: [nloop, n] (where nloop = lat * lon)
     out_states_dir: <str>
         Directory for output perturbed VIC state files;
         File names: state.ens<i>.nc, where <i> is ensemble index 1, ..., N
@@ -2033,6 +2103,9 @@ def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir,
         Whether or not to adjust negative soil moistures after
         perturbation to zero.
         Default: True (adjust negative to zero)
+    nproc: <int>
+        Number of processors to use for parallel ensemble
+        Default: 1
 
     Return
     ----------
@@ -2045,19 +2118,46 @@ def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir,
     os
     class States
     '''
-   
-    list_da_perturbation = [] 
-    for i in range(N):
-        states_to_perturb_nc = os.path.join(
-                states_to_perturb_dir,
-                'state.ens{}.nc'.format(i+1))
-        out_states_nc = os.path.join(out_states_dir,
-                                     'state.ens{}.nc'.format(i+1))
-        da_perturbation = perturb_soil_moisture_states(
-                                     states_to_perturb_nc, P_whole_field,
-                                     out_states_nc, da_max_moist_n,
-                                     adjust_negative)
-        list_da_perturbation.append(da_perturbation)
+
+    # --- If nproc == 1, do a regular ensemble loop --- #
+    if nproc == 1:
+        list_da_perturbation = [] 
+        for i in range(N):
+            states_to_perturb_nc = os.path.join(
+                    states_to_perturb_dir,
+                    'state.ens{}.nc'.format(i+1))
+            out_states_nc = os.path.join(out_states_dir,
+                                         'state.ens{}.nc'.format(i+1))
+            da_perturbation = perturb_soil_moisture_states(
+                                         states_to_perturb_nc, L, scale_n_nloop,
+                                         out_states_nc, da_max_moist_n,
+                                         adjust_negative)
+            list_da_perturbation.append(da_perturbation)
+    # --- If nproc > 1, use multiprocessing --- #
+    elif nproc > 1:
+        results = {}
+        # --- Set up multiprocessing --- #
+        pool = mp.Pool(processes=nproc)
+        # --- Loop over each ensemble member --- #
+        for i in range(N):
+            states_to_perturb_nc = os.path.join(
+                    states_to_perturb_dir,
+                    'state.ens{}.nc'.format(i+1))
+            out_states_nc = os.path.join(out_states_dir,
+                                         'state.ens{}.nc'.format(i+1))
+            results[i] = pool.apply_async(
+                    perturb_soil_moisture_states,
+                    (states_to_perturb_nc, L, scale_n_nloop,
+                     out_states_nc, da_max_moist_n,
+                     adjust_negative))
+        # --- Finish multiprocessing --- #
+        pool.close()
+        pool.join()
+
+        # --- Get return values --- #
+        list_da_perturbation = [] 
+        for i, result in results.items():
+            list_da_perturbation.append(result.get())
 
     return list_da_perturbation
 
@@ -2364,7 +2464,7 @@ def propagate_ensemble_linear_model(N, start_time, end_time, lat_coord,
         pool.join()
 
 
-def perturb_soil_moisture_states(states_to_perturb_nc, P_whole_field,
+def perturb_soil_moisture_states(states_to_perturb_nc, L, scale_n_nloop,
                                  out_states_nc, da_max_moist_n,
                                  adjust_negative=True):
     ''' Perturb all soil_moisture states
@@ -2373,17 +2473,18 @@ def perturb_soil_moisture_states(states_to_perturb_nc, P_whole_field,
     ----------
     states_to_perturb_nc: <str>
         Path of VIC state netCDF file to perturb
-    P_whole_field: <np.array>
-        Covariance matrix for sm state perturbation for the whole field
-        Dimension: [lat, lon, n, n], where n = nlayer * nveg * nsnow
+    L: <np.array>
+        Cholesky decomposed matrix of covariance matrix P of all states:
+                        P = L * L.T
+        Thus, L * Z (where Z is i.i.d. standard normal random variables of
+        dimension [n, n]) is multivariate normal random variables with
+        mean zero and covariance matrix P.
+        Dimension: [n, n]
+    scale_n_nloop: <np.array>
+        Standard deviation of noise to add for the whole field.
+        Dimension: [nloop, n] (where nloop = lat * lon)
     out_states_nc: <str>
         Path of output perturbed VIC state netCDF file
-
-    Returns
-    ----------
-    da_perturbation: <da.DataArray>
-        Amount of perturbation added
-        Dimension: [veg_class, snow_band, nlayer, lat, lon]
     da_max_moist_n: <xarray.DataArray>
         Maximum soil moisture for the whole domain and each tile
         [unit: mm]. Soil moistures above maximum after perturbation will
@@ -2394,19 +2495,25 @@ def perturb_soil_moisture_states(states_to_perturb_nc, P_whole_field,
         perturbation to zero.
         Default: True (adjust negative to zero)
 
+    Returns
+    ----------
+    da_perturbation: <da.DataArray>
+        Amount of perturbation added
+        Dimension: [veg_class, snow_band, nlayer, lat, lon]
+
     Require
     ----------
     os
     class States
     '''
-    
+
     # --- Load in original state file --- #
     class_states = States(xr.open_dataset(states_to_perturb_nc))
 
     # --- Perturb --- #
     # Perturb
     ds_perturbed = class_states.perturb_soil_moisture_Gaussian(
-                            P_whole_field, da_max_moist_n,
+                            L, scale_n_nloop, da_max_moist_n,
                             adjust_negative)
 
     # --- Save perturbed state file --- #
@@ -2415,6 +2522,7 @@ def perturb_soil_moisture_states(states_to_perturb_nc, P_whole_field,
 
     # --- Return perturbation --- #
     da_perturbation = (ds_perturbed - class_states.ds)['STATE_SOIL_MOISTURE']
+
     return da_perturbation
 
 

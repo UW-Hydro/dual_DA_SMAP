@@ -22,9 +22,10 @@ from da_utils import (EnKF_VIC, setup_output_dirs, generate_VIC_global_file,
                       check_returncode, propagate, calculate_ensemble_mean_states,
                       run_vic_assigned_states, concat_vic_history_files,
                       calculate_sm_noise_to_add_magnitude,
-                      calculate_sm_noise_to_add_covariance_matrix_whole_field,
                       calculate_max_soil_moist_domain,
-                      convert_max_moist_n_state)
+                      convert_max_moist_n_state,
+                      calculate_scale_n_whole_field,
+                      calculate_cholesky_L)
 
 
 # ============================================================ #
@@ -126,12 +127,15 @@ else:
     init_state_nc = os.path.join(cfg['CONTROL']['root_dir'],
                                  cfg['LINEAR_MODEL']['initial_state'])
 ds_state = xr.open_dataset(init_state_nc)
+nlayer = len(ds_state['nlayer'])
 nveg = len(ds_state['veg_class'])
-nsnow= len(ds_state['snow_band'])
-# Calculate covariance matrix
-P_whole_field = calculate_sm_noise_to_add_covariance_matrix_whole_field(
-                    da_scale, nveg, nsnow,
-                    cfg['EnKF']['state_perturb_corrcoef'])
+nsnow = len(ds_state['snow_band'])
+n = nlayer * nveg * nsnow
+# Calculate Cholesky L
+L = calculate_cholesky_L(n, cfg['EnKF']['state_perturb_corrcoef'])
+# Calculate scale for state perturbation
+scale_n_nloop = calculate_scale_n_whole_field(
+                    da_scale, nveg, nsnow)  # [nloop, n]
 # Calculate maximum soil moisture for each tile [lat, lon, n]
 da_max_moist = calculate_max_soil_moist_domain(
                     os.path.join(cfg['CONTROL']['root_dir'],
@@ -153,7 +157,8 @@ if not linear_model:
          end_time=end_time,
          init_state_nc=os.path.join(cfg['CONTROL']['root_dir'],
                                     cfg['EnKF']['vic_initial_state']),
-         P_whole_field=P_whole_field,
+         L=L,
+         scale_n_nloop=scale_n_nloop,
          da_max_moist_n=da_max_moist_n,
          R=R,
          da_meas=da_meas,
@@ -179,7 +184,8 @@ else:
          end_time=end_time,
          init_state_nc=os.path.join(cfg['CONTROL']['root_dir'],
                                     cfg['LINEAR_MODEL']['initial_state']),
-         P_whole_field=P_whole_field,
+         L=L,
+         scale_n_nloop=scale_n_nloop,
          da_max_moist_n=da_max_moist_n,
          R=R,
          da_meas=da_meas,

@@ -21,9 +21,10 @@ from da_utils import (Forcings, setup_output_dirs, propagate,
                       perturb_soil_moisture_states,
                       calculate_max_soil_moist_domain,
                       convert_max_moist_n_state, VarToPerturb,
-                      calculate_sm_noise_to_add_covariance_matrix_whole_field,
                       find_global_param_value, propagate_linear_model,
-                      concat_clean_up_history_file)
+                      concat_clean_up_history_file,
+                      calculate_scale_n_whole_field,
+                      calculate_cholesky_L)
 
 # =========================================================== #
 # Load command line arguments
@@ -176,12 +177,15 @@ state_filename = os.path.join(truth_subdirs['states'],
                                     state_time.strftime('%Y%m%d'),
                                     state_time.hour*3600+state_time.second))
 ds_state = xr.open_dataset(state_filename)
+nlayer = len(ds_state['nlayer'])
 nveg = len(ds_state['veg_class'])
 nsnow= len(ds_state['snow_band'])
-# Calculate covariance matrix
-P_whole_field = calculate_sm_noise_to_add_covariance_matrix_whole_field(
-                    da_scale, nveg, nsnow,
-                    cfg['FORCINGS_STATES_PERTURB']['state_perturb_corrcoef'])
+n = nlayer * nveg * nsnow
+# Calculate Cholesky L
+L = calculate_cholesky_L(n, cfg['FORCINGS_STATES_PERTURB']['state_perturb_corrcoef'])
+# Calculate scale for state perturbation
+scale_n_nloop = calculate_scale_n_whole_field(
+                    da_scale, nveg, nsnow)  # [nloop, n]
 # Calculate maximum soil moisture for each tile [lat, lon, n]
 da_max_moist = calculate_max_soil_moist_domain(global_template)
 da_max_moist_n = convert_max_moist_n_state(da_max_moist, nveg, nsnow)
@@ -217,7 +221,8 @@ for t in range(len(meas_times)):
                                     state_time.hour*3600+state_time.second))
     da_perturbation = perturb_soil_moisture_states(
             states_to_perturb_nc=orig_state_nc,
-            P_whole_field=P_whole_field,
+            L=L,
+            scale_n_nloop=scale_n_nloop,
             out_states_nc=perturbed_state_nc,
             da_max_moist_n=da_max_moist_n,
             adjust_negative=adjust_negative)
