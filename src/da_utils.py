@@ -775,8 +775,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
     # --- If nproc == 1, do a regular ensemble loop --- #
     if nproc == 1:
         for i in range(N):
-            da_perturbation = perturb_soil_moisture_states(
-                    states_to_perturb_nc=init_state_nc,
+            da_perturbation = perturb_soil_moisture_states_class_input(
+                    class_states=class_states,
                     L=L,
                     scale_n_nloop=scale_n_nloop,
                     out_states_nc=os.path.join(init_state_dir,
@@ -798,8 +798,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         # --- Loop over each ensemble member --- #
         for i in range(N):
             pool.apply_async(
-                perturb_soil_moisture_states,
-                (init_state_nc, L, scale_n_nloop,
+                perturb_soil_moisture_states_class_input,
+                (class_states, L, scale_n_nloop,
                  os.path.join(init_state_dir, 'state.ens{}.nc'.format(i+1)),
                  da_max_moist_n, adjust_negative))
             # Save soil moisture perturbation
@@ -1169,6 +1169,63 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
             print('\t\tTime of deleting history directories: {}'.format(time2-time1))
 
 
+def to_netcdf_history_file_compress(ds_hist, out_nc):
+    ''' This function saves a VIC-history-file-format ds to netCDF, with
+        compression.
+
+    Parameters
+    ----------
+    ds_hist: <xr.Dataset>
+        History dataset to save
+    out_nc: <str>
+        Path of output netCDF file
+    '''
+
+    dict_encode = {}
+    for var in ds_hist.data_vars:
+        # skip variables not starting with "OUT_"
+        if var.split('_')[0] != 'OUT':
+            continue
+        # determine chunksizes
+        chunksizes = []
+        for i, dim in enumerate(ds_hist[var].dims):
+            if dim == 'time':  # for time dimension, chunksize = 1
+                chunksizes.append(1)
+            else:
+                chunksizes.append(len(ds_hist[dim]))
+        # create encoding dict
+        dict_encode[var] = {'zlib': True,
+                            'complevel': 1,
+                            'chunksizes': chunksizes}
+    ds_hist.to_netcdf(out_nc,
+                      format='NETCDF4',
+                      encoding=dict_encode)
+
+
+def to_netcdf_state_file_compress(ds_state, out_nc):
+    ''' This function saves a VIC-state-file-format ds to netCDF, with
+        compression.
+
+    Parameters
+    ----------
+    ds_state: <xr.Dataset>
+        State dataset to save
+    out_nc: <str>
+        Path of output netCDF file
+    '''
+
+    dict_encode = {}
+    for var in ds_state.data_vars:
+        if var.split('_')[0] != 'STATE':
+            continue
+        # create encoding dict
+        dict_encode[var] = {'zlib': True,
+                            'complevel': 1}
+    ds_state.to_netcdf(out_nc,
+                       format='NETCDF4',
+                       encoding=dict_encode)
+
+
 def concat_clean_up_history_file(list_history_files, output_file):
     ''' This function is for wrapping up history file concat and clean up
         for the use of multiprocessing package; history file output is
@@ -1191,25 +1248,7 @@ def concat_clean_up_history_file(list_history_files, output_file):
     # --- Concat --- #
     ds_concat = concat_vic_history_files(list_history_files)
     # --- Save concatenated file to netCDF (with compression) --- #
-    dict_encode = {}
-    for var in ds_concat.data_vars:
-        # skip variables not starting with "OUT_"
-        if var.split('_')[0] != 'OUT':
-            continue
-        # determine chunksizes
-        chunksizes = []
-        for i, dim in enumerate(ds_concat[var].dims):
-            if dim == 'time':  # for time dimension, chunksize = 1
-                chunksizes.append(1)
-            else:
-                chunksizes.append(len(ds_concat[dim]))
-        # create encoding dict
-        dict_encode[var] = {'zlib': True,
-                            'complevel': 1,
-                            'chunksizes': chunksizes}
-    ds_concat.to_netcdf(output_file,
-                        format='NETCDF4_CLASSIC',
-                        encoding=dict_encode)
+    to_netcdf_history_file_compress(ds_concat, output_file)
     # Clean up individual history files
     for f in list_history_files:
         os.remove(f)
@@ -1995,10 +2034,9 @@ def update_states(da_y_est, da_K, da_meas, R, state_nc_before_update,
     da_update_increm = da_x_updated - class_states.da_EnKF
     # Convert updated states to VIC states format
     ds_updated = class_states.convert_new_EnKFstates_sm_to_VICstates(da_x_updated)
-    # Save VIC states to netCDF file
-    ds_updated.to_netcdf(out_vic_state_nc,
-                         format='NETCDF4_CLASSIC')
-    
+    # Save VIC states to netCDF file (with compression)
+    to_netcdf_state_file_compress(ds_updated, out_vic_state_nc)
+
     return da_x_updated, da_update_increm, da_v
 
 
@@ -2652,6 +2690,67 @@ def perturb_soil_moisture_states(states_to_perturb_nc, L, scale_n_nloop,
 
     # --- Load in original state file --- #
     class_states = States(xr.open_dataset(states_to_perturb_nc))
+
+    # --- Perturb --- #
+    # Perturb
+    ds_perturbed = class_states.perturb_soil_moisture_Gaussian(
+                            L, scale_n_nloop, da_max_moist_n,
+                            adjust_negative)
+
+    # --- Save perturbed state file --- #
+    ds_perturbed.to_netcdf(out_states_nc,
+                           format='NETCDF4_CLASSIC')
+
+    # --- Return perturbation --- #
+    da_perturbation = (ds_perturbed - class_states.ds)['STATE_SOIL_MOISTURE']
+
+    return da_perturbation
+
+
+def perturb_soil_moisture_states_class_input(class_states, L, scale_n_nloop,
+                                 out_states_nc, da_max_moist_n,
+                                 adjust_negative=True):
+    ''' Perturb all soil_moisture states (same as funciton
+        perturb_soil_moisture_states except here inputing class_states
+        instead of an netCDF path for states to perturb)
+
+    Parameters
+    ----------
+    class_states: <class States>
+        VIC state netCDF file to perturb
+    L: <np.array>
+        Cholesky decomposed matrix of covariance matrix P of all states:
+                        P = L * L.T
+        Thus, L * Z (where Z is i.i.d. standard normal random variables of
+        dimension [n, n]) is multivariate normal random variables with
+        mean zero and covariance matrix P.
+        Dimension: [n, n]
+    scale_n_nloop: <np.array>
+        Standard deviation of noise to add for the whole field.
+        Dimension: [nloop, n] (where nloop = lat * lon)
+    out_states_nc: <str>
+        Path of output perturbed VIC state netCDF file
+    da_max_moist_n: <xarray.DataArray>
+        Maximum soil moisture for the whole domain and each tile
+        [unit: mm]. Soil moistures above maximum after perturbation will
+        be reset to maximum value.
+        Dimension: [lat, lon, n]
+    adjust_negative: <bool>
+        Whether or not to adjust negative soil moistures after
+        perturbation to zero.
+        Default: True (adjust negative to zero)
+
+    Returns
+    ----------
+    da_perturbation: <da.DataArray>
+        Amount of perturbation added
+        Dimension: [veg_class, snow_band, nlayer, lat, lon]
+
+    Require
+    ----------
+    os
+    class States
+    '''
 
     # --- Perturb --- #
     # Perturb
