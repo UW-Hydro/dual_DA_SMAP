@@ -129,7 +129,7 @@ class States(object):
         
 
     def perturb_soil_moisture_Gaussian(self, L, scale_n_nloop, da_max_moist_n,
-                                       adjust_negative=True):
+                                       adjust_negative=True, seed=None):
         ''' Perturb soil moisture states by adding Gaussian noise.
             Each grid cell and soil layer can have different noise magnitude (specified
             by the diagonal of covariance matrix P), but all veg and snow tiles within
@@ -155,6 +155,11 @@ class States(object):
             [unit: mm]. Soil moistures above maximum after perturbation will
             be reset to maximum value.
             Dimension: [lat, lon, n]
+        seed: <int or None>
+            Seed for random number generator; this seed will only be used locally
+            in this function and will not affect the upper-level code.
+            None for not re-assign seed in this function, but using the global seed)
+            Default: None
 
         Returns
         ----------
@@ -182,10 +187,17 @@ class States(object):
         n = len(nlayer) * len(veg_class) * len(snow_band)
         
         # Generate N(0, 1) random noise for whole domain and all states
-        noise = np.array(list(map(
-                    np.random.normal,
-                    np.zeros(nloop*n),
-                    np.ones(nloop*n))))  # [nloop*n]
+        if seed is None:
+            noise = np.array(list(map(
+                        np.random.normal,
+                        np.zeros(nloop*n),
+                        np.ones(nloop*n))))  # [nloop*n]
+        else:
+            rng = np.random.RandomState(seed)
+            noise = np.array(list(map(
+                        rng.normal,
+                        np.zeros(nloop*n),
+                        np.ones(nloop*n))))  # [nloop*n]
         noise = noise.reshape([nloop, n])  # [nloop, n]
         # Apply transformation --> multivariate random noise
         noise = np.array(list(map(
@@ -219,7 +231,8 @@ class States(object):
 
     
     def update_soil_moisture_states(self, da_K, da_y_meas, da_y_est, R,
-                                    da_max_moist_n, adjust_negative=True):
+                                    da_max_moist_n, adjust_negative=True,
+                                    seed=None):
         ''' This function updates soil moisture states for the whole field
             NOTE: this method does not change self
         
@@ -244,6 +257,11 @@ class States(object):
             Whether or not to adjust negative soil moistures after updating
             to zero.
             Default: True (adjust negative to zero)
+        seed: <int or None>
+            Seed for random number generator; this seed will only be used locally
+            in this function and will not affect the upper-level code.
+            None for not re-assign seed in this function, but using the global seed)
+            Default: None
 
         Return
         ----------
@@ -268,8 +286,13 @@ class States(object):
         # Determine the total number of loops
         nloop = len(lat_coord) * len(lon_coord)
         # Generate random measurement perturbation
-        v = np.random.multivariate_normal(
-                np.zeros(m), R,size=nloop).reshape([nloop, m, 1])  # [nloop, m, 1]
+        if seed is None:
+            v = np.random.multivariate_normal(
+                    np.zeros(m), R,size=nloop).reshape([nloop, m, 1])  # [nloop, m, 1]
+        else:
+            rng = np.random.RandomState(seed)
+            v = rng.multivariate_normal(
+                    np.zeros(m), R,size=nloop).reshape([nloop, m, 1])  # [nloop, m, 1]
         # Convert xr.DataArray's to np.array's and straighten lat and lon into nloop
         K = da_K.values.reshape([nloop, n, m])  # [nloop, n, m]
         y_meas = da_y_meas.values.reshape([nloop, m, 1])  # [nloop, m, 1]
@@ -486,7 +509,7 @@ class Forcings(object):
         self.ds['time'] = pd.to_datetime(self.ds['time'].values)
         
     
-    def perturb_prec_lognormal(self, varname, std=1, phi=0):
+    def perturb_prec_lognormal(self, varname, std=1, phi=0, seed=None):
         ''' Perturb precipitation forcing data
         
         Parameters
@@ -500,6 +523,11 @@ class Forcings(object):
             real mean of the multiplier is 1)
         phi: <float>
             Parameter in AR(1) process. Default: 0 (no autocorrelation).
+        seed: <int or None>
+            Seed for random number generator; this seed will only be used locally
+            in this function and will not affect the upper-level code.
+            None for not re-assign seed in this function, but using the global seed)
+            Default: None
         '''
         
         # --- Calculate mu and sigma for the lognormal distribution --- #
@@ -509,7 +537,13 @@ class Forcings(object):
 
         # Calculate std of white noise and generate random white noise
         scale = sigma * np.sqrt(1 - phi * phi)
-        white_noise = np.random.normal(
+        if seed is None:
+            white_noise = np.random.normal(
+                            loc=0, scale=scale,
+                            size=(self.time_len, self.lat_len, self.lon_len))
+        else:
+            rng = np.random.RandomState(seed)
+            white_noise = rng.normal(
                             loc=0, scale=scale,
                             size=(self.time_len, self.lat_len, self.lon_len))
 
@@ -576,7 +610,7 @@ class VarToPerturb(object):
         self.time = self.da['time']
 
     def add_gaussian_white_noise(self, da_sigma, da_max_values,
-                                 adjust_negative=True):
+                                 adjust_negative=True, seed=None):
         ''' Add Gaussian noise for all active grid cells and all time steps
 
         Parameters
@@ -599,6 +633,11 @@ class VarToPerturb(object):
             Whether or not to adjust negative variable values after
             adding noise to zero.
             Default: True (adjust negative to zero)
+        seed: <int or None>
+            Seed for random number generator; this seed will only be used locally
+            in this function and will not affect the upper-level code.
+            None for not re-assign seed in this function, but using the global seed)
+            Default: None
         '''
 
         # Generate random noise for the whole field
@@ -609,7 +648,13 @@ class VarToPerturb(object):
                 sigma = da_sigma.loc[lt, lg].values
                 if np.isnan(sigma) == True or sigma <= 0:  # if inactive cell, skip
                     continue
-                da_noise.loc[:, lt, lg] = np.random.normal(loc=0, scale=sigma, size=len(self.time))
+                if seed is None:
+                    da_noise.loc[:, lt, lg] = np.random.normal(
+                            loc=0, scale=sigma, size=len(self.time))
+                else:
+                    rng = np.random.RandomState(seed)
+                    da_noise.loc[:, lt, lg] = rng.normal(
+                            loc=0, scale=sigma, size=len(self.time))
         # Add noise to the original da
         da_perturbed = self.da + da_noise
         # Set negative to zero
@@ -775,6 +820,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
     # --- If nproc == 1, do a regular ensemble loop --- #
     if nproc == 1:
         for i in range(N):
+            seed = np.random.randint(low=100000)
             da_perturbation = perturb_soil_moisture_states_class_input(
                     class_states=class_states,
                     L=L,
@@ -782,7 +828,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                     out_states_nc=os.path.join(init_state_dir,
                                                'state.ens{}.nc'.format(i+1)),
                     da_max_moist_n=da_max_moist_n,
-                    adjust_negative=adjust_negative)
+                    adjust_negative=adjust_negative,
+                    seed=seed)
             # Save soil moisture perturbation
             if debug:
                 ds_perturbation = xr.Dataset({'STATE_SOIL_MOISTURE':
@@ -797,11 +844,12 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         pool = mp.Pool(processes=nproc)
         # --- Loop over each ensemble member --- #
         for i in range(N):
+            seed = np.random.randint(low=100000)
             pool.apply_async(
                 perturb_soil_moisture_states_class_input,
                 (class_states, L, scale_n_nloop,
                  os.path.join(init_state_dir, 'state.ens{}.nc'.format(i+1)),
-                 da_max_moist_n, adjust_negative))
+                 da_max_moist_n, adjust_negative, seed))
             # Save soil moisture perturbation
             if debug:
                 ds_perturbation = xr.Dataset({'STATE_SOIL_MOISTURE':
@@ -1975,7 +2023,7 @@ def calculate_gain_K_whole_field(da_x, da_y_est, R):
 
 def update_states(da_y_est, da_K, da_meas, R, state_nc_before_update,
                   out_vic_state_nc, da_max_moist_n,
-                  adjust_negative=True):
+                  adjust_negative=True, seed=None):
     ''' Update the EnKF states for the whole field.
     
     Parameters
@@ -2003,6 +2051,11 @@ def update_states(da_y_est, da_K, da_meas, R, state_nc_before_update,
         Whether or not to adjust negative soil moistures after update
         to zero.
         Default: True (adjust negative to zero)
+    seed: <int or None>
+        Seed for random number generator; this seed will only be used locally
+        in this function and will not affect the upper-level code.
+        None for not re-assign seed in this function, but using the global seed)
+        Default: None
     
     Returns
     ----------
@@ -2030,7 +2083,7 @@ def update_states(da_y_est, da_K, da_meas, R, state_nc_before_update,
                                         da_K, da_meas,
                                         da_y_est, R,
                                         da_max_moist_n,
-                                        adjust_negative)  # [lat, lon, n]
+                                        adjust_negative, seed)  # [lat, lon, n]
     da_update_increm = da_x_updated - class_states.da_EnKF
     # Convert updated states to VIC states format
     ds_updated = class_states.convert_new_EnKFstates_sm_to_VICstates(da_x_updated)
@@ -2117,11 +2170,12 @@ def update_states_ensemble(da_y_est, da_K, da_meas, R, state_dir_before_update,
             out_vic_state_nc = os.path.join(out_vic_state_dir,
                                             'state.ens{}.nc'.format(i+1))
             # Update states
+            seed = np.random.randint(low=100000)
             da_x_updated, da_update_increm, da_v = update_states(
                         da_y_est.loc[:, :, :, i], da_K, da_meas, R,
                         state_nc_before_update,
                         out_vic_state_nc, da_max_moist_n,
-                        adjust_negative)
+                        adjust_negative, seed)
             # Put results to list
             list_da_v.append(da_v)
             list_da_x_updated.append(da_x_updated)
@@ -2143,12 +2197,13 @@ def update_states_ensemble(da_y_est, da_K, da_meas, R, state_dir_before_update,
             out_vic_state_nc = os.path.join(out_vic_state_dir,
                                             'state.ens{}.nc'.format(i+1))
             # Update states
+            seed = np.random.randint(low=100000)
             results[i] = pool.apply_async(
                             update_states,
                             (da_y_est.loc[:, :, :, i], da_K, da_meas, R,
                             state_nc_before_update,
                             out_vic_state_nc, da_max_moist_n,
-                            adjust_negative))
+                            adjust_negative, seed))
         # --- Finish multiprocessing --- #
         pool.close()
         pool.join()
@@ -2309,10 +2364,11 @@ def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir,
                     'state.ens{}.nc'.format(i+1))
             out_states_nc = os.path.join(out_states_dir,
                                          'state.ens{}.nc'.format(i+1))
+            seed = np.random.randint(low=100000)
             da_perturbation = perturb_soil_moisture_states(
                                          states_to_perturb_nc, L, scale_n_nloop,
                                          out_states_nc, da_max_moist_n,
-                                         adjust_negative)
+                                         adjust_negative, seed)
             list_da_perturbation.append(da_perturbation)
     # --- If nproc > 1, use multiprocessing --- #
     elif nproc > 1:
@@ -2326,11 +2382,12 @@ def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir,
                     'state.ens{}.nc'.format(i+1))
             out_states_nc = os.path.join(out_states_dir,
                                          'state.ens{}.nc'.format(i+1))
+            seed = np.random.randint(low=100000)
             results[i] = pool.apply_async(
                     perturb_soil_moisture_states,
                     (states_to_perturb_nc, L, scale_n_nloop,
                      out_states_nc, da_max_moist_n,
-                     adjust_negative))
+                     adjust_negative, seed))
         # --- Finish multiprocessing --- #
         pool.close()
         pool.join()
@@ -2647,7 +2704,7 @@ def propagate_ensemble_linear_model(N, start_time, end_time, lat_coord,
 
 def perturb_soil_moisture_states(states_to_perturb_nc, L, scale_n_nloop,
                                  out_states_nc, da_max_moist_n,
-                                 adjust_negative=True):
+                                 adjust_negative=True, seed=None):
     ''' Perturb all soil_moisture states
 
     Parameters
@@ -2675,6 +2732,11 @@ def perturb_soil_moisture_states(states_to_perturb_nc, L, scale_n_nloop,
         Whether or not to adjust negative soil moistures after
         perturbation to zero.
         Default: True (adjust negative to zero)
+    seed: <int or None>
+        Seed for random number generator; this seed will only be used locally
+        in this function and will not affect the upper-level code.
+        None for not re-assign seed in this function, but using the global seed)
+        Default: None
 
     Returns
     ----------
@@ -2695,7 +2757,7 @@ def perturb_soil_moisture_states(states_to_perturb_nc, L, scale_n_nloop,
     # Perturb
     ds_perturbed = class_states.perturb_soil_moisture_Gaussian(
                             L, scale_n_nloop, da_max_moist_n,
-                            adjust_negative)
+                            adjust_negative, seed)
 
     # --- Save perturbed state file --- #
     ds_perturbed.to_netcdf(out_states_nc,
@@ -2709,7 +2771,7 @@ def perturb_soil_moisture_states(states_to_perturb_nc, L, scale_n_nloop,
 
 def perturb_soil_moisture_states_class_input(class_states, L, scale_n_nloop,
                                  out_states_nc, da_max_moist_n,
-                                 adjust_negative=True):
+                                 adjust_negative=True, seed=None):
     ''' Perturb all soil_moisture states (same as funciton
         perturb_soil_moisture_states except here inputing class_states
         instead of an netCDF path for states to perturb)
@@ -2739,6 +2801,11 @@ def perturb_soil_moisture_states_class_input(class_states, L, scale_n_nloop,
         Whether or not to adjust negative soil moistures after
         perturbation to zero.
         Default: True (adjust negative to zero)
+    seed: <int or None>
+        Seed for random number generator; this seed will only be used locally
+        in this function and will not affect the upper-level code.
+        None for not re-assign seed in this function, but using the global seed)
+        Default: None
 
     Returns
     ----------
@@ -2756,7 +2823,7 @@ def perturb_soil_moisture_states_class_input(class_states, L, scale_n_nloop,
     # Perturb
     ds_perturbed = class_states.perturb_soil_moisture_Gaussian(
                             L, scale_n_nloop, da_max_moist_n,
-                            adjust_negative)
+                            adjust_negative, seed)
 
     # --- Save perturbed state file --- #
     ds_perturbed.to_netcdf(out_states_nc,

@@ -225,7 +225,8 @@ for t in range(len(meas_times)):
             scale_n_nloop=scale_n_nloop,
             out_states_nc=perturbed_state_nc,
             da_max_moist_n=da_max_moist_n,
-            adjust_negative=adjust_negative)
+            adjust_negative=adjust_negative,
+            seed=None)
     # Clean up original state file
     os.remove(orig_state_nc)
 
