@@ -9,6 +9,7 @@ import datetime as dt
 import multiprocessing as mp
 import shutil
 import scipy.linalg as la
+import glob
 
 from tonic.models.vic.vic import VIC, default_vic_valgrind_error_code
 
@@ -930,6 +931,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                 prec_varname=linear_model_prec_varname,
                 dict_linear_model_param=dict_linear_model_param,
                 nproc=nproc)
+    # Clean up log dir
+    shutil.rmtree(out_log_dir)
 
     # Put output history file paths into dictionary
     for i in range(N):
@@ -2470,7 +2473,8 @@ def propagate(start_time, end_time, vic_exe, vic_global_template_file,
     check_returncode(returncode, expected=0)
 
     # Delete log files (to save space)
-    shutil.rmtree(out_log_dir)
+    for f in glob.glob(os.path.join(out_log_dir, "*")):
+        os.remove
 
 
 def propagate_linear_model(start_time, end_time, lat_coord, lon_coord,

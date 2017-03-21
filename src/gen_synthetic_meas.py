@@ -155,6 +155,8 @@ else:
                     cfg['VIC']['truth_forcing_nc_basepath']),
             prec_varname=prec_varname,
             dict_linear_model_param=dict_linear_model_param)
+# Clean up log dir
+shutil.rmtree(log_dir)
 
 # Concat output history file to the list to be concatenated
 list_history_paths.append(os.path.join(truth_subdirs['history'],
@@ -271,6 +273,8 @@ for t in range(len(meas_times)):
                     cfg['VIC']['truth_forcing_nc_basepath']),
             prec_varname=prec_varname,
             dict_linear_model_param=dict_linear_model_param)
+    # Clean up log dir
+    shutil.rmtree(log_dir)
     # Concat output history file to the list to be concatenated
     list_history_paths.append(os.path.join(truth_subdirs['history'],
                                            'history.{}-{:05d}.nc'.format(

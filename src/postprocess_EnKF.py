@@ -279,5 +279,6 @@ else:
                 pool.close()
                 pool.join()
 
-
+# Clean up log dir
+shutil.rmtree(dirs['logs'])
 
