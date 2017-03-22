@@ -15,6 +15,7 @@ import os
 import xarray as xr
 import sys
 import multiprocessing as mp
+import shutil
 
 from tonic.io import read_config, read_configobj
 from tonic.models.vic.vic import VIC
