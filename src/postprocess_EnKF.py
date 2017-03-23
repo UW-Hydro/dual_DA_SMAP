@@ -219,7 +219,7 @@ else:
                     mpi_proc=mpi_proc,
                     mpi_exe=cfg['VIC']['mpi_exe'])
         # --- If multiple processors --- #
-        else:
+        elif nproc > 1:
             # Set up multiprocessing
             pool = mp.Pool(processes=nproc)
 
@@ -276,9 +276,8 @@ else:
                                   hist_subdir, log_subdir, mpi_proc,
                                   cfg['VIC']['mpi_exe']))
             # Finish multiprocessing
-            if nproc > 1:
-                pool.close()
-                pool.join()
+            pool.close()
+            pool.join()
 
 # Clean up log dir
 shutil.rmtree(dirs['logs'])
