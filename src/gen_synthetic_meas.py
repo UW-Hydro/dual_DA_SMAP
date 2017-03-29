@@ -12,6 +12,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import pandas as pd
+import shutil
 
 from tonic.models.vic.vic import VIC
 from tonic.io import read_configobj
@@ -284,8 +285,6 @@ for t in range(len(meas_times)):
                                            'history.{}-{:05d}.nc'.format(
                                                 current_time.strftime('%Y-%m-%d'),
                                                 current_time.hour*3600+current_time.second)))
-    # Clean up perturbed state file
-    os.remove(perturbed_state_nc)
 
 # (3) Concatenate all history files
 hist_concat_nc = os.path.join(truth_subdirs['history'],

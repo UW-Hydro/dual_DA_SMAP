@@ -2868,8 +2868,7 @@ def perturb_soil_moisture_states_class_input(class_states, L, scale_n_nloop,
                             adjust_negative, seed)
 
     # --- Save perturbed state file --- #
-    ds_perturbed.to_netcdf(out_states_nc,
-                           format='NETCDF4_CLASSIC')
+    to_netcdf_state_file_compress(ds_perturbed, out_states_nc)
 
     # --- Return perturbation --- #
     da_perturbation = (ds_perturbed - class_states.ds)['STATE_SOIL_MOISTURE']
