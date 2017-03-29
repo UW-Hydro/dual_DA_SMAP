@@ -17,6 +17,7 @@ import multiprocessing as mp
 from collections import OrderedDict
 
 from tonic.io import read_config, read_configobj
+import timeit
 
 
 def rmse(true, est):
@@ -534,6 +535,210 @@ cs = (da_rmse_post_mean - da_rmse_openloop).plot(
 cbar = plt.colorbar(cs, extend='both').set_label('RMSE (mm/mm)', fontsize=20)
 plt.title('sm3, RMSE diff. (post. mean - openloop, both wrt. truth)', fontsize=20)
 fig.savefig(os.path.join(output_dir, 'rmse_sm3_diff_post_mean_openloop.png'),
+            format='png')
+
+
+# ======================================================== #
+# Plot error map - surface runoff
+# ======================================================== #
+
+# --- Extract variables --- #
+da_truth = ds_truth['OUT_RUNOFF']
+da_openloop = ds_openloop['OUT_RUNOFF']
+da_post_mean = ds_post_mean['OUT_RUNOFF']
+
+# --- Calculate RMSE --- #
+# Determine the total number of loops
+nloop = len(lat_coord) * len(lon_coord)
+# Reshape variables
+truth = da_truth.values.reshape([len(time_coord), nloop])  # [time, nloop]
+openloop = da_openloop.values.reshape([len(time_coord), nloop])  # [time, nloop]
+post_mean = da_post_mean.values.reshape([len(time_coord), nloop])  # [time, nloop]
+
+# Calculate RMSE for all grid cells
+rmse_openloop = np.array(list(map(
+            lambda j: rmse(truth[:, j], openloop[:, j]),
+            range(nloop))))  # [nloop]
+rmse_post_mean = np.array(list(map(
+            lambda j: rmse(truth[:, j], post_mean[:, j]),
+            range(nloop))))  # [nloop]
+
+# Reshape RMSE's
+rmse_openloop = rmse_openloop.reshape([len(lat_coord), len(lon_coord)])  # [lat, lon]
+rmse_post_mean = rmse_post_mean.reshape([len(lat_coord), len(lon_coord)])  # [lat, lon]
+# Put results into da's
+da_rmse_openloop = xr.DataArray(rmse_openloop, coords=[lat_coord, lon_coord],
+                                dims=['lat', 'lon'])
+da_rmse_post_mean = xr.DataArray(rmse_post_mean, coords=[lat_coord, lon_coord],
+                                 dims=['lat', 'lon'])
+
+# --- Plot maps --- #
+# Openloop
+fig = plt.figure(figsize=(14, 7))
+cs = da_rmse_openloop.plot(add_colorbar=False, cmap='viridis', vmin=0, vmax=0.5)
+cbar = plt.colorbar(cs, extend='max').set_label('RMSE (mm)', fontsize=20)
+plt.title('Surface runoff, RMSE of openloop (wrt. truth)', fontsize=20)
+fig.savefig(os.path.join(output_dir, 'runoff.rmse.openloop.png'), format='png')
+
+# post_mean
+fig = plt.figure(figsize=(14, 7))
+cs = da_rmse_post_mean.plot(add_colorbar=False, cmap='viridis', vmin=0, vmax=0.5)
+cbar = plt.colorbar(cs, extend='max').set_label('RMSE (mm)', fontsize=20)
+plt.title('Surface runoff, RMSE of postprocessed mean (wrt. truth)', fontsize=20)
+fig.savefig(os.path.join(output_dir, 'runoff.rmse.post_mean.png'), format='png')
+
+# Diff - (post mean - openloop)
+fig = plt.figure(figsize=(14, 7))
+cs = (da_rmse_post_mean - da_rmse_openloop).plot(
+            add_colorbar=False, cmap='bwr')
+cbar = plt.colorbar(cs, extend='both').set_label('RMSE (mm)', fontsize=20)
+plt.title('Surface runoff, RMSE diff. (post mean - openloop, both wrt. truth)', fontsize=20)
+fig.savefig(os.path.join(output_dir, 'runoff.rmse_diff.post_mean_openloop.png'),
+            format='png')
+
+
+# ======================================================== #
+# Plot error map - surface runoff, daily
+# ======================================================== #
+print('Plotting surface runoff, daily...')
+
+# --- Extract variables --- #
+time1 = timeit.default_timer()
+da_truth = ds_truth['OUT_RUNOFF'].resample('1D', dim='time', how='sum')
+da_openloop = ds_openloop['OUT_RUNOFF'].resample('1D', dim='time', how='sum')
+da_post_mean = ds_post_mean['OUT_RUNOFF'].resample('1D', dim='time', how='sum')
+time2 = timeit.default_timer()
+print('part 1 time: {}'.format(time2-time1))
+
+# --- Calculate RMSE --- #
+time1 = timeit.default_timer()
+# Determine the total number of loops
+nloop = len(lat_coord) * len(lon_coord)
+# Reshape variables
+truth = da_truth.values.reshape([len(da_openloop['time']), nloop])  # [time, nloop]
+openloop = da_openloop.values.reshape([len(da_openloop['time']), nloop])  # [time, nloop]
+post_mean = da_post_mean.values.reshape([len(da_openloop['time']), nloop])  # [time, nloop]
+time2 = timeit.default_timer()
+print('part 2 time: {}'.format(time2-time1))
+
+time1 = timeit.default_timer()
+# Calculate RMSE for all grid cells
+rmse_openloop = np.array(list(map(
+            lambda j: rmse(truth[:, j], openloop[:, j]),
+            range(nloop))))  # [nloop]
+rmse_post_mean = np.array(list(map(
+            lambda j: rmse(truth[:, j], post_mean[:, j]),
+            range(nloop))))  # [nloop]
+time2 = timeit.default_timer()
+print('part 3 time: {}'.format(time2-time1))
+
+time1 = timeit.default_timer()
+# Reshape RMSE's
+rmse_openloop = rmse_openloop.reshape([len(lat_coord), len(lon_coord)])  # [lat, lon]
+rmse_post_mean = rmse_post_mean.reshape([len(lat_coord), len(lon_coord)])  # [lat, lon]
+# Put results into da's
+da_rmse_openloop = xr.DataArray(rmse_openloop, coords=[lat_coord, lon_coord],
+                                dims=['lat', 'lon'])
+da_rmse_post_mean = xr.DataArray(rmse_post_mean, coords=[lat_coord, lon_coord],
+                                 dims=['lat', 'lon'])
+time2 = timeit.default_timer()
+print('part 4 time: {}'.format(time2-time1))
+
+# --- Plot maps --- #
+# Openloop
+fig = plt.figure(figsize=(14, 7))
+cs = da_rmse_openloop.plot(add_colorbar=False, cmap='viridis', vmin=0, vmax=3.5)
+cbar = plt.colorbar(cs, extend='max').set_label('RMSE (mm)', fontsize=20)
+plt.title('Surface runoff daily, RMSE of openloop (wrt. truth)', fontsize=20)
+fig.savefig(os.path.join(output_dir, 'runoff_daily.rmse.openloop.png'), format='png')
+
+# post_mean
+fig = plt.figure(figsize=(14, 7))
+cs = da_rmse_post_mean.plot(add_colorbar=False, cmap='viridis', vmin=0, vmax=3.5)
+cbar = plt.colorbar(cs, extend='max').set_label('RMSE (mm)', fontsize=20)
+plt.title('Surface runoff daily, RMSE of postprocessed mean (wrt. truth)', fontsize=20)
+fig.savefig(os.path.join(output_dir, 'runoff_daily.rmse.post_mean.png'), format='png')
+
+# Diff - (post mean - openloop)
+fig = plt.figure(figsize=(14, 7))
+cs = (da_rmse_post_mean - da_rmse_openloop).plot(
+            add_colorbar=False, cmap='bwr')
+cbar = plt.colorbar(cs, extend='both').set_label('RMSE (mm)', fontsize=20)
+plt.title('Surface runoff daily, RMSE diff. (post mean - openloop, both wrt. truth)',
+          fontsize=20)
+fig.savefig(os.path.join(output_dir, 'runoff_daily.rmse_diff.post_mean_openloop.png'),
+            format='png')
+
+# ======================================================== #
+# Plot error map - surface runoff, weekly
+# ======================================================== #
+print('Plotting surface runoff, weekly...')
+
+# --- Extract variables --- #
+time1 = timeit.default_timer()
+da_truth = ds_truth['OUT_RUNOFF'].resample('7D', dim='time', how='sum')
+da_openloop = ds_openloop['OUT_RUNOFF'].resample('7D', dim='time', how='sum')
+da_post_mean = ds_post_mean['OUT_RUNOFF'].resample('7D', dim='time', how='sum')
+time2 = timeit.default_timer()
+print('part 1 time: {}'.format(time2-time1))
+
+# --- Calculate RMSE --- #
+time1 = timeit.default_timer()
+# Determine the total number of loops
+nloop = len(lat_coord) * len(lon_coord)
+# Reshape variables
+truth = da_truth.values.reshape([len(da_openloop['time']), nloop])  # [time, nloop]
+openloop = da_openloop.values.reshape([len(da_openloop['time']), nloop])  # [time, nloop]
+post_mean = da_post_mean.values.reshape([len(da_openloop['time']), nloop])  # [time, nloop]
+time2 = timeit.default_timer()
+print('part 2 time: {}'.format(time2-time1))
+
+time1 = timeit.default_timer()
+# Calculate RMSE for all grid cells
+rmse_openloop = np.array(list(map(
+            lambda j: rmse(truth[:, j], openloop[:, j]),
+            range(nloop))))  # [nloop]
+rmse_post_mean = np.array(list(map(
+            lambda j: rmse(truth[:, j], post_mean[:, j]),
+            range(nloop))))  # [nloop]
+time2 = timeit.default_timer()
+print('part 3 time: {}'.format(time2-time1))
+
+time1 = timeit.default_timer()
+# Reshape RMSE's
+rmse_openloop = rmse_openloop.reshape([len(lat_coord), len(lon_coord)])  # [lat, lon]
+rmse_post_mean = rmse_post_mean.reshape([len(lat_coord), len(lon_coord)])  # [lat, lon]
+# Put results into da's
+da_rmse_openloop = xr.DataArray(rmse_openloop, coords=[lat_coord, lon_coord],
+                                dims=['lat', 'lon'])
+da_rmse_post_mean = xr.DataArray(rmse_post_mean, coords=[lat_coord, lon_coord],
+                                 dims=['lat', 'lon'])
+time2 = timeit.default_timer()
+print('part 4 time: {}'.format(time2-time1))
+
+# --- Plot maps --- #
+# Openloop
+fig = plt.figure(figsize=(14, 7))
+cs = da_rmse_openloop.plot(add_colorbar=False, cmap='viridis', vmin=0, vmax=25)
+cbar = plt.colorbar(cs, extend='max').set_label('RMSE (mm)', fontsize=20)
+plt.title('Surface runoff weekly, RMSE of openloop (wrt. truth)', fontsize=20)
+fig.savefig(os.path.join(output_dir, 'runoff_weekly.rmse.openloop.png'), format='png')
+
+# post_mean
+fig = plt.figure(figsize=(14, 7))
+cs = da_rmse_post_mean.plot(add_colorbar=False, cmap='viridis', vmin=0, vmax=25)
+cbar = plt.colorbar(cs, extend='max').set_label('RMSE (mm)', fontsize=20)
+plt.title('Surface runoff weekly, RMSE of postprocessed mean (wrt. truth)', fontsize=20)
+fig.savefig(os.path.join(output_dir, 'runoff_weekly.rmse.post_mean.png'), format='png')
+
+# Diff - (post mean - openloop)
+fig = plt.figure(figsize=(14, 7))
+cs = (da_rmse_post_mean - da_rmse_openloop).plot(
+            add_colorbar=False, cmap='bwr')
+cbar = plt.colorbar(cs, extend='both').set_label('RMSE (mm)', fontsize=20)
+plt.title('Surface runoff weekly, RMSE diff. (post mean - openloop, both wrt. truth)',
+          fontsize=20)
+fig.savefig(os.path.join(output_dir, 'runoff_weekly.rmse_diff.post_mean_openloop.png'),
             format='png')
 
 
