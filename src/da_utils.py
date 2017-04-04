@@ -1315,6 +1315,36 @@ def to_netcdf_state_file_compress(ds_state, out_nc):
                        encoding=dict_encode)
 
 
+def to_netcdf_forcing_file_compress(ds_force, out_nc):
+    ''' This function saves a VIC-forcing-file-format ds to netCDF, with
+        compression.
+
+    Parameters
+    ----------
+    ds_force: <xr.Dataset>
+        Forcing dataset to save
+    out_nc: <str>
+        Path of output netCDF file
+    '''
+
+    dict_encode = {}
+    for var in ds_force.data_vars:
+        # determine chunksizes
+        chunksizes = []
+        for i, dim in enumerate(ds_force[var].dims):
+            if dim == 'time':  # for time dimension, chunksize = 1
+                chunksizes.append(1)
+            else:
+                chunksizes.append(len(ds_force[dim]))
+        # create encoding dict
+        dict_encode[var] = {'zlib': True,
+                            'complevel': 1,
+                            'chunksizes': chunksizes}
+    ds_force.to_netcdf(out_nc,
+                      format='NETCDF4',
+                      encoding=dict_encode)
+
+
 def concat_clean_up_history_file(list_history_files, output_file):
     ''' This function is for wrapping up history file concat and clean up
         for the use of multiprocessing package; history file output is
@@ -2309,10 +2339,9 @@ def perturb_forcings_ensemble(N, orig_forcing, dict_varnames, prec_std,
                                             phi=prec_phi)
         # Save to nc file
         for year, ds in ds_perturbed.groupby('time.year'):
-            ds.to_netcdf(os.path.join(
-                    subdir,
-                    'force.{}.nc'.format(year)),
-                    format='NETCDF4_CLASSIC')
+            to_netcdf_forcing_file_compress(
+                    ds, os.path.join(subdir,
+                    'force.{}.nc'.format(year)))
 
 
 def replace_global_values(gp, replace):
