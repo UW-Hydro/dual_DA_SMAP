@@ -355,11 +355,11 @@ print('\tMeasurements...')
 ds_meas = xr.open_dataset(os.path.join(gen_synth_basedir, 'synthetic_meas',
                                        synth_meas_nc_filename))
 
-# --- EnKF results --- #
-print('\tEnKF results...')
-ds_EnKF_mean = xr.open_dataset(os.path.join(
-                    output_rootdir, 'data.EnKF_results', 'ens_mean',
-                    'ens_mean.concat.{}_{}.nc'.format(start_year, end_year)))
+## --- EnKF results --- #
+#print('\tEnKF results...')
+#ds_EnKF_mean = xr.open_dataset(os.path.join(
+#                    output_rootdir, 'data.EnKF_results', 'ens_mean',
+#                    'ens_mean.concat.{}_{}.nc'.format(start_year, end_year)))
 
 
 # ======================================================== #
@@ -394,6 +394,8 @@ plt.title('Temporal variance of normalized innovation, '
           fontsize=20)
 fig.savefig(os.path.join(output_dir, 'innov_norm_var.png'), format='png')
 
+
+exit()
 
 # ======================================================== #
 # Extract soil layer depths
@@ -508,7 +510,8 @@ fig.savefig(os.path.join(output_dir, 'rmse_sm2_EnKF_mean.png'), format='png')
 # Diff - (EnKF mean - openloop)
 fig = plt.figure(figsize=(14, 7))
 cs = (da_rmse_EnKF_mean - da_rmse_openloop).plot(
-            add_colorbar=False, cmap='bwr')
+            add_colorbar=False, cmap='bwr',
+            vmin=-0.04, vmax=0.04)
 cbar = plt.colorbar(cs, extend='both').set_label('RMSE (mm/mm)', fontsize=20)
 plt.title('sm2, RMSE diff. (EnKF mean - openloop, both wrt. truth)', fontsize=20)
 fig.savefig(os.path.join(output_dir, 'rmse_sm2_diff_EnKF_mean_openloop.png'),
@@ -563,7 +566,8 @@ fig.savefig(os.path.join(output_dir, 'rmse_sm3_EnKF_mean.png'), format='png')
 # Diff - (EnKF mean - openloop)
 fig = plt.figure(figsize=(14, 7))
 cs = (da_rmse_EnKF_mean - da_rmse_openloop).plot(
-            add_colorbar=False, cmap='bwr')
+            add_colorbar=False, cmap='bwr',
+            vmin=-0.08, vmax=0.08)
 cbar = plt.colorbar(cs, extend='both').set_label('RMSE (mm/mm)', fontsize=20)
 plt.title('sm3, RMSE diff. (EnKF mean - openloop, both wrt. truth)', fontsize=20)
 fig.savefig(os.path.join(output_dir, 'rmse_sm3_diff_EnKF_mean_openloop.png'),
@@ -622,7 +626,8 @@ fig.savefig(os.path.join(output_dir, 'runoff.rmse.EnKF_mean.png'), format='png')
 # Diff - (EnKF mean - openloop)
 fig = plt.figure(figsize=(14, 7))
 cs = (da_rmse_EnKF_mean - da_rmse_openloop).plot(
-            add_colorbar=False, cmap='bwr')
+            add_colorbar=False, cmap='bwr',
+            vmin=-0.03, vmax=0.03)
 cbar = plt.colorbar(cs, extend='both').set_label('RMSE (mm)', fontsize=20)
 plt.title('Surface runoff, RMSE diff. (EnKF mean - openloop, both wrt. truth)', fontsize=20)
 fig.savefig(os.path.join(output_dir, 'runoff.rmse_diff.EnKF_mean_openloop.png'),
@@ -694,7 +699,8 @@ fig.savefig(os.path.join(output_dir, 'runoff_daily.rmse.EnKF_mean.png'), format=
 # Diff - (EnKF mean - openloop)
 fig = plt.figure(figsize=(14, 7))
 cs = (da_rmse_EnKF_mean - da_rmse_openloop).plot(
-            add_colorbar=False, cmap='bwr')
+            add_colorbar=False, cmap='bwr',
+            vmin=-0.12, vmax=0.12)
 cbar = plt.colorbar(cs, extend='both').set_label('RMSE (mm)', fontsize=20)
 plt.title('Surface runoff daily, RMSE diff. (EnKF mean - openloop, both wrt. truth)',
           fontsize=20)
@@ -767,7 +773,8 @@ fig.savefig(os.path.join(output_dir, 'runoff_weekly.rmse.EnKF_mean.png'), format
 # Diff - (EnKF mean - openloop)
 fig = plt.figure(figsize=(14, 7))
 cs = (da_rmse_EnKF_mean - da_rmse_openloop).plot(
-            add_colorbar=False, cmap='bwr')
+            add_colorbar=False, cmap='bwr',
+            vmin=-0.8, vmax=0.8)
 cbar = plt.colorbar(cs, extend='both').set_label('RMSE (mm)', fontsize=20)
 plt.title('Surface runoff weekly, RMSE diff. (EnKF mean - openloop, both wrt. truth)',
           fontsize=20)
