@@ -679,13 +679,15 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
              R, da_meas,
              da_meas_time_var, vic_exe, vic_global_template,
              ens_forcing_basedir, ens_forcing_prefix,
+             orig_forcing_basepath,
              vic_model_steps_per_day, output_vic_global_root_dir,
              output_vic_state_root_dir, output_vic_history_root_dir,
              output_vic_log_root_dir,
              nproc=1,
              mpi_proc=None, mpi_exe='mpiexec', debug=False, output_temp_dir=None,
              linear_model=False, linear_model_prec_varname=None,
-             dict_linear_model_param=None):
+             dict_linear_model_param=None,
+             bias_correct=False):
     ''' This function runs ensemble kalman filter (EnKF) on VIC (image driver)
 
     Parameters
@@ -730,6 +732,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
     ens_forcing_prefix: <str>
         Prefix of ensemble forcing filenames under 'ens_{}' subdirs
         'YYYY.nc' will be appended
+    orig_forcing_basepath: <str>
+        Original forcing file basepath. "YYYY.nc" wll be appended.
     vic_model_steps_per_day: <int>
         VIC model steps per day
     output_vic_global_root_dir: <str>
@@ -866,7 +870,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
     time2 = timeit.default_timer()
     print('\t\tTime of perturbing init state: {}'.format(time2-time1))
 
-    # --- Step 2. Propagate (run VIC) until the first measurement time point ---#    
+    # --- Step 2.1. Propagate (run VIC) until the first measurement time point ---#    
     # Initialize dictionary of history file paths for each ensemble member
     dict_ens_list_history_files = {}
     for i in range(N):
@@ -887,6 +891,11 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
     out_state_dir = setup_output_dirs(
                             output_vic_state_root_dir,
                             mkdirs=[propagate_output_dir_name])[propagate_output_dir_name]
+    if bias_correct:
+        output_bc_state_dir = setup_output_dirs(
+                            output_vic_state_root_dir,
+                            mkdirs=[propagate_output_dir_name + '.bc'])\
+                            [propagate_output_dir_name + '.bc']
     out_history_dir = setup_output_dirs(
                             output_vic_history_root_dir,
                             mkdirs=[propagate_output_dir_name])[propagate_output_dir_name]
@@ -914,7 +923,9 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                 ens_forcing_prefix=ens_forcing_prefix,
                 nproc=nproc,
                 mpi_proc=mpi_proc,
-                mpi_exe=mpi_exe)
+                mpi_exe=mpi_exe,
+                bias_correct=bias_correct,
+                orig_forcing_basepath=orig_forcing_basepath)
     else:
         propagate_ensemble_linear_model(
                 N, 
@@ -933,7 +944,6 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                 nproc=nproc)
     # Clean up log dir
     shutil.rmtree(out_log_dir)
-
     # Put output history file paths into dictionary
     for i in range(N):
         dict_ens_list_history_files['ens{}'.format(i+1)].append(os.path.join(
@@ -943,7 +953,19 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                             vic_run_start_time.hour*3600+vic_run_start_time.second)))
     time2 = timeit.default_timer()
     print('\t\tTime of propagation: {}'.format(time2-time1))
-    
+
+    # --- Step 2.2. Bias correction of propagated ensemble states, if specified --- #
+    time1 = timeit.default_timer()
+    if bias_correct:
+        state_time = vic_run_end_time + pd.DateOffset(hours=24/vic_model_steps_per_day)
+        bias_correct_propagated_states(
+            N, state_time, out_state_dir,
+            output_bc_state_dir, nproc)
+        # Clean up before-correction states
+        shutil.rmtree(out_state_dir)
+    time2 = timeit.default_timer()
+    print('\t\tTime of bias correction: {}'.format(time2-time1))
+
     # --- Step 3. Run EnKF --- #
     debug_innov_dir = setup_output_dirs(
                     output_temp_dir,
@@ -956,7 +978,10 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                         output_temp_dir,
                         mkdirs=['update'])['update']
     # Initialize
-    state_dir_after_prop = out_state_dir
+    if bias_correct:
+        state_dir_after_prop = output_bc_state_dir
+    else:
+        state_dir_after_prop = out_state_dir
 
     # Loop over each measurement time point
     for t, time in enumerate(da_meas[da_meas_time_var]):
@@ -1102,6 +1127,11 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         out_state_dir = setup_output_dirs(
                                 output_vic_state_root_dir,
                                 mkdirs=[propagate_output_dir_name])[propagate_output_dir_name]
+        if bias_correct:
+            out_bc_state_dir = setup_output_dirs(
+                            output_vic_state_root_dir,
+                            mkdirs=[propagate_output_dir_name + '.bc'])\
+                            [propagate_output_dir_name + '.bc']
         out_history_dir = setup_output_dirs(
                                 output_vic_history_root_dir,
                                 mkdirs=[propagate_output_dir_name])[propagate_output_dir_name]
@@ -1126,7 +1156,9 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                     ens_forcing_prefix=ens_forcing_prefix,
                     nproc=nproc,
                     mpi_proc=mpi_proc,
-                    mpi_exe=mpi_exe)
+                    mpi_exe=mpi_exe,
+                    bias_correct=bias_correct,
+                    orig_forcing_basepath=orig_forcing_basepath)
         else:
             propagate_ensemble_linear_model(
                     N, 
@@ -1158,8 +1190,24 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         time2 = timeit.default_timer()
         print('\t\tTime of propagation: {}'.format(time2-time1))
         
+        # (4) Bias-correct states, if specified
+        time1 = timeit.default_timer()
+        if bias_correct:
+            state_time = next_time + pd.DateOffset(hours=24/vic_model_steps_per_day)
+            bias_correct_propagated_states(
+                N, state_time, out_state_dir,
+                out_bc_state_dir, nproc)
+            # Clean up before-correction states
+            shutil.rmtree(out_state_dir)
+        time2 = timeit.default_timer()
+        print('\t\tTime of bias correction: {}'.format(time2-time1))
+
+        # (5) Some postprocessing
         # Point state directory to be updated to the propagated one
-        state_dir_after_prop = out_state_dir
+        if bias_correct:
+            state_dir_after_prop = out_bc_state_dir
+        else:
+            state_dir_after_prop = out_state_dir
 
         # --- Concat and delete individual history files for each year --- #
         # (If the end of EnKF run, or the end of a calendar year)
@@ -1552,7 +1600,8 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
                        vic_model_steps_per_day, init_state_dir, out_state_dir,
                        out_history_dir, out_global_dir, out_log_dir,
                        ens_forcing_basedir, ens_forcing_prefix, nproc=1,
-                       mpi_proc=None, mpi_exe='mpiexec'):
+                       mpi_proc=None, mpi_exe='mpiexec',
+                       bias_correct=False, orig_forcing_basepath=None):
     ''' This function propagates (via VIC) an ensemble of states to a certain time point.
     
     Parameters
@@ -1597,6 +1646,13 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
         Default: None
     mpi_exe: <str>
         Path for MPI exe. Only used if mpi_proc is not None
+    bias_correct: <bool>
+        True: will run an extra VIC run from ensemble-average initial state
+        False: will not run the extra VIC run
+        Default: False
+    orig_forcing_basepath: <str>
+        Basepath of original forcing. "YYYY.nc" will be appended.
+        Only required if bias_correct = True
         
     Require
     ----------
@@ -1605,15 +1661,44 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
     generate_VIC_global_file
     '''
 
+    # --- Prepare for bias correction, if specified --- #
+    time1 = timeit.default_timer()
+    # Number of VIC runs
+    n_vic_runs = N
+    # List of ensemble
+    ens_list = list(range(1, N+1))
+    # List of forcing basepaths
+    force_list = []
+    for i in range(N):
+        force_list.append(os.path.join(
+            ens_forcing_basedir,
+            'ens_{}'.format(ens_list[i]),
+            ens_forcing_prefix))
+    # If bias correction, prepare
+    if bias_correct:
+        # Append info for the extra run
+        n_vic_runs += 1
+        ens_list.append('avg')
+        force_list.append(orig_forcing_basepath)
+        # Calculate ensemble avg. initial state
+        list_init_state_ens = []
+        for i in range(N):
+            list_init_state_ens.append(os.path.join(
+                    init_state_dir,
+                    'state.ens{}.nc'.format(i+1)))
+        out_state_nc = os.path.join(
+                init_state_dir,
+                'state.ensavg.nc')
+        calculate_ensemble_mean_states(list_init_state_ens, out_state_nc)
+    time2 = timeit.default_timer()
+    print('\t\tTime of calculating ens. avg. states: {}'.format(time2-time1))
+
     # --- If nproc == 1, do a regular ensemble loop --- #
     if nproc == 1:
-        for i in range(N):
+        for i in range(n_vic_runs):
             # Generate VIC global param file
-            replace = OrderedDict([('FORCING1', os.path.join(
-                                            ens_forcing_basedir,
-                                            'ens_{}'.format(i+1),
-                                            ens_forcing_prefix)),
-                                   ('OUTFILE', 'history.ens{}'.format(i+1))])
+            replace = OrderedDict([('FORCING1', force_list[i]),
+                                   ('OUTFILE', 'history.ens{}'.format(ens_list[i]))])
             global_file = generate_VIC_global_file(
                                 global_template_path=vic_global_template_file,
                                 model_steps_per_day=vic_model_steps_per_day,
@@ -1622,15 +1707,15 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
                                 init_state="INIT_STATE {}".format(
                                         os.path.join(
                                             init_state_dir,
-                                            'state.ens{}.nc'.format(i+1))),
+                                            'state.ens{}.nc'.format(ens_list[i]))),
                                 vic_state_basepath=os.path.join(
                                             out_state_dir,
-                                            'state.ens{}'.format(i+1)),
+                                            'state.ens{}'.format(ens_list[i])),
                                 vic_history_file_dir=out_history_dir,
                                 replace=replace,
                                 output_global_basepath=os.path.join(
                                             out_global_dir,
-                                            'global.ens{}'.format(i+1)))
+                                            'global.ens{}'.format(ens_list[i])))
             # Run VIC
             run_vic_for_multiprocess(vic_exe, global_file, out_log_dir,
                                      mpi_proc, mpi_exe)
@@ -1639,28 +1724,26 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
         # --- Set up multiprocessing --- #
         pool = mp.Pool(processes=nproc)
         # --- Loop over each ensemble member --- #
-        for i in range(N):
+        for i in range(n_vic_runs):
             # Generate VIC global param file
-            replace = OrderedDict([('FORCING1', os.path.join(
-                                            ens_forcing_basedir,
-                                            'ens_{}'.format(i+1),
-                                            ens_forcing_prefix)),
-                                   ('OUTFILE', 'history.ens{}'.format(i+1))])
+            replace = OrderedDict([('FORCING1', force_list[i]),
+                                   ('OUTFILE', 'history.ens{}'.format(ens_list[i]))])
             global_file = generate_VIC_global_file(
                                 global_template_path=vic_global_template_file,
                                 model_steps_per_day=vic_model_steps_per_day,
                                 start_time=start_time,
                                 end_time=end_time,
                                 init_state="INIT_STATE {}".format(
-                                                os.path.join(init_state_dir,
-                                                             'state.ens{}.nc'.format(i+1))),
-                                vic_state_basepath=os.path.join(out_state_dir,
-                                                                'state.ens{}'.format(i+1)),
+                                    os.path.join(init_state_dir,
+                                                 'state.ens{}.nc'.format(ens_list[i]))),
+                                vic_state_basepath=os.path.join(
+                                    out_state_dir,
+                                    'state.ens{}'.format(ens_list[i])),
                                 vic_history_file_dir=out_history_dir,
                                 replace=replace,
                                 output_global_basepath=os.path.join(
                                             out_global_dir,
-                                            'global.ens{}'.format(i+1)))
+                                            'global.ens{}'.format(ens_list[i])))
             # Run VIC
             pool.apply_async(run_vic_for_multiprocess,
                              (vic_exe, global_file, out_log_dir, mpi_proc, mpi_exe))
@@ -1673,7 +1756,6 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
 def determine_tile_frac(global_path):
     ''' Determines the fraction of each veg/snowband tile in each grid cell based on VIC
         global and parameter files
-    
     Parameters
     ----------
     global_path: <str>
@@ -3056,96 +3138,139 @@ def calculate_ensemble_mean_states(list_state_nc, out_state_nc):
     list_ds = []
     for state_nc in list_state_nc:
         list_ds.append(xr.open_dataset(state_nc))
+    ds_all_ens = xr.concat(list_ds, dim='N')
+    # Calculate ensemble mean and median
+    ds_ens_mean = ds_all_ens.mean(dim='N')
+    ds_ens_median = ds_all_ens.median(dim='N')
+
+    # Put mean/median into final dataset
     ds_mean = list_ds[0].copy(deep=True)
     # STATE_SOIL_MOISTURE - mean
-    ds_mean['STATE_SOIL_MOISTURE'] = (sum(list_ds) / N)['STATE_SOIL_MOISTURE']
+    ds_mean['STATE_SOIL_MOISTURE'] = ds_ens_mean['STATE_SOIL_MOISTURE']
     # STATE_SOIL_ICE - mean
-    ds_mean['STATE_SOIL_ICE'] = (sum(list_ds) / N)['STATE_SOIL_ICE']
+    ds_mean['STATE_SOIL_ICE'] = ds_ens_mean['STATE_SOIL_ICE']
     # STATE_CANOPY_WATER - mean
-    ds_mean['STATE_CANOPY_WATER'] = (sum(list_ds) / N)['STATE_CANOPY_WATER']
+    ds_mean['STATE_CANOPY_WATER'] = ds_ens_mean['STATE_CANOPY_WATER']
     # STATE_SNOW_AGE - median, integer
-    list_var = []
-    for ds in list_ds:
-        list_var.append(ds['STATE_SNOW_AGE'].values)
-    ar_var = np.asarray(list_var)
-    ds_mean['STATE_SNOW_AGE'][:] = np.nanmedian(ar_var, axis=0).round()
+    ds_mean['STATE_SNOW_AGE'] = ds_ens_median['STATE_SNOW_AGE']
     # STATE_SNOW_MELT_STATE - median, integer
-    list_var = []
-    for ds in list_ds:
-        list_var.append(ds['STATE_SNOW_MELT_STATE'].values)
-    ar_var = np.asarray(list_var)
-    ds_mean['STATE_SNOW_MELT_STATE'][:] = np.nanmedian(ar_var, axis=0).round()
+    ds_mean['STATE_SNOW_MELT_STATE'] = ds_ens_median['STATE_SNOW_MELT_STATE']
     # STATE_SNOW_COVERAGE - median
-    list_var = []
-    for ds in list_ds:
-        list_var.append(ds['STATE_SNOW_COVERAGE'].values)
-    ar_var = np.asarray(list_var)
-    ds_mean['STATE_SNOW_COVERAGE'][:] = np.nanmedian(ar_var, axis=0)
+    ds_mean['STATE_SNOW_COVERAGE'] = ds_ens_median['STATE_SNOW_COVERAGE']
     # STATE_SNOW_WATER_EQUIVALENT - median
-    list_var = []
-    for ds in list_ds:
-        list_var.append(ds['STATE_SNOW_WATER_EQUIVALENT'].values)
-    ar_var = np.asarray(list_var)
-    ds_mean['STATE_SNOW_WATER_EQUIVALENT'][:] = np.nanmedian(ar_var, axis=0)
+    ds_mean['STATE_SNOW_WATER_EQUIVALENT'] = ds_ens_median['STATE_SNOW_WATER_EQUIVALENT']
     # STATE_SNOW_SURF_TEMP - median
-    list_var = []
-    for ds in list_ds:
-        list_var.append(ds['STATE_SNOW_SURF_TEMP'].values)
-    ar_var = np.asarray(list_var)
-    ds_mean['STATE_SNOW_SURF_TEMP'][:] = np.nanmedian(ar_var, axis=0)
+    ds_mean['STATE_SNOW_SURF_TEMP'] = ds_ens_median['STATE_SNOW_SURF_TEMP']
     # STATE_SNOW_SURF_WATER - median
-    list_var = []
-    for ds in list_ds:
-        list_var.append(ds['STATE_SNOW_SURF_WATER'].values)
-    ar_var = np.asarray(list_var)
-    ds_mean['STATE_SNOW_SURF_WATER'][:] = np.nanmedian(ar_var, axis=0)
+    ds_mean['STATE_SNOW_SURF_WATER'] = ds_ens_median['STATE_SNOW_SURF_WATER']
     # STATE_SNOW_PACK_TEMP - median
-    list_var = []
-    for ds in list_ds:
-        list_var.append(ds['STATE_SNOW_PACK_TEMP'].values)
-    ar_var = np.asarray(list_var)
-    ds_mean['STATE_SNOW_PACK_TEMP'][:] = np.nanmedian(ar_var, axis=0)
+    ds_mean['STATE_SNOW_PACK_TEMP'] = ds_ens_median['STATE_SNOW_PACK_TEMP']
     # STATE_SNOW_PACK_WATER - median
-    list_var = []
-    for ds in list_ds:
-        list_var.append(ds['STATE_SNOW_PACK_WATER'].values)
-    ar_var = np.asarray(list_var)
-    ds_mean['STATE_SNOW_PACK_WATER'][:] = np.nanmedian(ar_var, axis=0)
+    ds_mean['STATE_SNOW_PACK_WATER'] = ds_ens_median['STATE_SNOW_PACK_WATER']
     # STATE_SNOW_DENSITY - median
-    list_var = []
-    for ds in list_ds:
-        list_var.append(ds['STATE_SNOW_DENSITY'].values)
-    ar_var = np.asarray(list_var)
-    ds_mean['STATE_SNOW_DENSITY'][:] = np.nanmedian(ar_var, axis=0)
+    ds_mean['STATE_SNOW_DENSITY'] = ds_ens_median['STATE_SNOW_DENSITY']
     # STATE_SNOW_COLD_CONTENT - median
-    list_var = []
-    for ds in list_ds:
-        list_var.append(ds['STATE_SNOW_COLD_CONTENT'].values)
-    ar_var = np.asarray(list_var)
-    ds_mean['STATE_SNOW_COLD_CONTENT'][:] = np.nanmedian(ar_var, axis=0)
+    ds_mean['STATE_SNOW_COLD_CONTENT'] = ds_ens_median['STATE_SNOW_COLD_CONTENT']
     # STATE_SNOW_CANOPY - median
-    list_var = []
-    for ds in list_ds:
-        list_var.append(ds['STATE_SNOW_CANOPY'].values)
-    ar_var = np.asarray(list_var)
-    ds_mean['STATE_SNOW_CANOPY'][:] = np.nanmedian(ar_var, axis=0)
+    ds_mean['STATE_SNOW_CANOPY'] = ds_ens_median['STATE_SNOW_CANOPY']
     # STATE_SOIL_NODE_TEMP - mean
-    ds_mean['STATE_SOIL_NODE_TEMP'] = (sum(list_ds) / N)['STATE_SOIL_NODE_TEMP']
+    ds_mean['STATE_SOIL_NODE_TEMP'] = ds_ens_mean['STATE_SOIL_NODE_TEMP']
     # STATE_FOLIAGE_TEMPERATURE - mean
-    ds_mean['STATE_FOLIAGE_TEMPERATURE'] = (sum(list_ds) / N)['STATE_FOLIAGE_TEMPERATURE']
+    ds_mean['STATE_FOLIAGE_TEMPERATURE'] = ds_ens_mean['STATE_FOLIAGE_TEMPERATURE']
     # STATE_ENERGY_LONGUNDEROUT - mean
-    ds_mean['STATE_ENERGY_LONGUNDEROUT'] = (sum(list_ds) / N)['STATE_ENERGY_LONGUNDEROUT']
+    ds_mean['STATE_ENERGY_LONGUNDEROUT'] = ds_ens_mean['STATE_ENERGY_LONGUNDEROUT']
     # STATE_ENERGY_SNOW_FLUX - median
-    list_var = []
-    for ds in list_ds:
-        list_var.append(ds['STATE_ENERGY_SNOW_FLUX'].values)
-    ar_var = np.asarray(list_var)
-    ds_mean['STATE_ENERGY_SNOW_FLUX'][:] = np.nanmedian(ar_var, axis=0)
+    ds_mean['STATE_ENERGY_SNOW_FLUX'] = ds_ens_median['STATE_ENERGY_SNOW_FLUX']
 
     # Write to output netCDF file
-    ds_mean.to_netcdf(out_state_nc, format='NETCDF4_CLASSIC')
+    to_netcdf_state_file_compress(ds_mean, out_state_nc)
 
     return out_state_nc
+
+
+def bias_correct_propagated_states(N, state_time, prop_before_bc_state_dir,
+                                   output_bc_state_dir, nproc=1):
+    ''' Bias-correct propagated states following Ryu et al. (2009); only
+        bias-correct soil moistures of all layers (but not other state
+        variables)
+
+    Parameters
+    ----------
+    N: <int>
+        Ensemble size
+    state_time: <pd.datetime>
+        State time. This is for identifying state file names.
+    prop_before_bc_state_dir: <str>
+        Directory of propagated state files for each ensemble member before
+        bias correction. State file names are "state.ens<i>.YYYYMMDD_SSSSS.nc",
+        where <i> is 1, 2, ..., N, or avg (for reference state)
+    output_bc_state_dir: <str>
+        Directory of propagated states after bias correction.
+    nproc: <int>
+        Number of processors to use for parallel ensemble
+        Default: 1
+    list_sm_bc_da: <list>
+        A list of bias-corrected soil moisture states, in the order of
+        ensemble members. Each member of the list is an xarray.DataArray for
+        an ensemble member, in the structure of VIC state file
+        "STATE_SOIL_MOISTURE" variable.
+    '''
+
+    # --- Open reference state file --- #
+    ds_ref = xr.open_dataset(os.path.join(
+            prop_before_bc_state_dir,
+            'state.ensavg.{}_{:05d}.nc'.format(
+                        state_time.strftime('%Y%m%d'),
+                        state_time.hour*3600+state_time.second)))
+    # --- Open ensemble state files --- #
+    list_ds = []
+    for i in range(N):
+        ds = xr.open_dataset(os.path.join(
+            prop_before_bc_state_dir,
+            'state.ens{}.{}_{:05d}.nc'.format(
+                        i+1,
+                        state_time.strftime('%Y%m%d'),
+                        state_time.hour*3600+state_time.second)))
+        list_ds.append(ds)
+    # --- Calculate ensemble mean sm and delta --- #
+    list_da = []
+    for ds in list_ds:
+        list_da.append(ds['STATE_SOIL_MOISTURE'])
+    # Calculate ensemble mean sm and delta
+    da_mean = sum(list_da) / N
+    da_delta = da_mean - ds_ref['STATE_SOIL_MOISTURE']
+    
+    # --- Bias-correct each ensemble state --- #
+    list_sm_bc_ds = []
+    for i in range(N):
+        ds = list_ds[i]
+        ds['STATE_SOIL_MOISTURE'] -= da_delta
+        list_sm_bc_ds.append(ds)
+
+    # --- Save to file --- #
+    if nproc == 1:
+        for i in range(N):
+            out_nc = os.path.join(
+                output_bc_state_dir,
+                'state.ensavg.{}_{:05d}.nc'.format(
+                        state_time.strftime('%Y%m%d'),
+                        state_time.hour*3600+state_time.second))
+            to_netcdf_state_file_compress(list_sm_bc_ds[i], out_nc)
+    elif nproc > 1:
+        # Set up multiprocessing
+        pool = mp.Pool(processes=nproc)
+        for i in range(N):
+            out_nc = os.path.join(
+                output_bc_state_dir,
+                'state.ens{}.{}_{:05d}.nc'.format(
+                        i+1,
+                        state_time.strftime('%Y%m%d'),
+                        state_time.hour*3600+state_time.second))
+            pool.apply_async(to_netcdf_state_file_compress,
+                             (list_sm_bc_ds[i], out_nc))
+        # Finish multiprocessing
+        pool.close()
+        pool.join()
 
 
 def run_vic_assigned_states(start_time, end_time, vic_exe, init_state_nc,

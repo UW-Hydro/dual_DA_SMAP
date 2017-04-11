@@ -169,6 +169,9 @@ if not linear_model:
          ens_forcing_basedir=os.path.join(cfg['CONTROL']['root_dir'],
                                            cfg['FORCINGS']['ens_forcing_basedir']),
          ens_forcing_prefix=cfg['FORCINGS']['ens_forcing_prefix'],
+         orig_forcing_basepath=os.path.join(
+                    cfg['CONTROL']['root_dir'],
+                    cfg['FORCINGS']['orig_forcing_nc_basepath']),
          vic_model_steps_per_day=cfg['VIC']['model_steps_per_day'],
          output_vic_global_root_dir=dirs['global'],
          output_vic_state_root_dir=dirs['states'],
@@ -176,7 +179,8 @@ if not linear_model:
          output_vic_log_root_dir=dirs['logs'],
          nproc=nproc,
          debug=debug,
-         output_temp_dir=dirs['temp'])
+         output_temp_dir=dirs['temp'],
+         bias_correct=cfg['EnKF']['bias_correct'])
 else:
     dict_ens_list_history_files = EnKF_VIC(
          N=cfg['EnKF']['N'],
@@ -196,6 +200,9 @@ else:
          ens_forcing_basedir=os.path.join(cfg['CONTROL']['root_dir'],
                                            cfg['FORCINGS']['ens_forcing_basedir']),
          ens_forcing_prefix=cfg['FORCINGS']['ens_forcing_prefix'],
+         orig_forcing_basepath=os.path.join(
+                cfg['CONTROL']['root_dir'],
+                cfg['FORCINGS']['orig_forcing_nc_basepath']),
          vic_model_steps_per_day=cfg['VIC']['model_steps_per_day'],
          output_vic_global_root_dir=dirs['global'],
          output_vic_state_root_dir=dirs['states'],
@@ -206,5 +213,6 @@ else:
          output_temp_dir=dirs['temp'],
          linear_model='True',
          linear_model_prec_varname=prec_varname,
-         dict_linear_model_param=dict_linear_model_param)
+         dict_linear_model_param=dict_linear_model_param,
+         bias_correct=cfg['EnKF']['bias_correct'])
 
