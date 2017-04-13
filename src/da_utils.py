@@ -2571,8 +2571,7 @@ def save_updated_states(state_nc_before_update, da_sm_updated, out_vic_state_nc)
     ds = xr.open_dataset(state_nc_before_update)
     ds['STATE_SOIL_MOISTURE'] = da_sm_updated
     # Save to netCDF file
-    pool.apply_async(to_netcdf_state_file_compress,
-                     (ds, out_vic_state_nc))
+    to_netcdf_state_file_compress(ds, out_vic_state_nc)
 
 
 def save_updated_states_ensemble(N, state_dir_before_update,
