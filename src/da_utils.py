@@ -20,6 +20,209 @@ class VICReturnCodeError(Exception):
     pass
 
 
+class States_sm(object):
+    ''' This class is a VIC soil moisture states object
+
+    Atributes
+    ---------
+    da: <xarray.dataset>
+        A DataArray of VIC soil moisture states
+    
+    Methods
+    ---------
+
+    Require
+    ---------
+    numpy
+    xarray
+    '''
+
+    
+    def __init__(self, da):
+        self.da = da
+        self.da_EnKF = self.convert_VICstates_to_EnKFstates_sm()
+    
+    
+    def convert_VICstates_to_EnKFstates_sm(self):
+        ''' This function extracts all the soil moisture states from the original
+            VIC state file ds, and converts to a da with dimension [lat, lon, n],
+            where n is the total number of states in EnKF.
+        
+        Returns
+        ----------
+        da_sm_states: <xr.DataArray>
+            A re-shaped soil moisture DataArray;
+            Dimension: [lat, lon, n],
+                where len(n) = len(nlayer) * len(veg_class) * len(snow_band)
+        '''
+             
+        # Extract coordinates
+        veg_class = self.da['veg_class']
+        snow_band = self.da['snow_band']
+        nlayer = self.da['nlayer']
+        lat = self.da['lat']
+        lon = self.da['lon']
+        
+        # Initialize new DataArray
+        n = len(veg_class) * len(snow_band) * len(nlayer)
+        data = np.empty([len(lat), len(lon), n])
+        data[:] = np.nan
+        da_EnKF = xr.DataArray(data,
+                               coords=[lat, lon, range(n)],
+                               dims=['lat', 'lon', 'n'])
+        
+        # Extract soil moisture states and convert dimension
+        EnKF_states = np.rollaxis(self.da.values,
+                                  2, 0)  # [nlayer, veg_class, snow_band, lat, lon]
+        EnKF_states = EnKF_states.reshape([n, len(lat), len(lon)])
+        
+        # roll the 'n' dimension to after lat and lon, and fill in da
+        EnKF_states = np.rollaxis(EnKF_states, 0, 3) 
+        da_EnKF[:] = EnKF_states
+        
+        # Save as self.da_EnKF
+        self.da_EnKF = da_EnKF
+        
+        return self.da_EnKF
+
+
+    def convert_new_EnKFstates_sm_to_VICstates(self, da_EnKF):
+        ''' This function converts an EnKF states da (soil moisture states) to the
+            VIC states format.
+            - as a returned da, withouth changing self.da
+        
+        Parameters
+        ----------
+        da_EnKF: <xr.DataArray>
+            An DataArray of EnKF states, in dimension [lat, lon, n]
+            
+        Returns
+        ----------
+        da: <xr.DataArray>
+            A VIC STATE_SOIL_MOISTURE states da with soil moisture states = da_EnKF
+        '''
+        
+        # Extract coordinates
+        veg_class = self.da['veg_class']
+        snow_band = self.da['snow_band']
+        nlayer = self.da['nlayer']
+        lat = self.da['lat']
+        lon = self.da['lon']
+        
+        # Initialize a new ds for new VIC states
+        da = self.da.copy(deep=True)
+        
+        # Convert da_EnKF dimension
+        EnKF_states_reshape = da_EnKF.values.reshape(len(lat), len(lon), len(nlayer),
+                                                     len(veg_class), len(snow_band))
+        EnKF_states_reshape = np.rollaxis(EnKF_states_reshape, 2, 5)  # roll nlayer to the last
+        EnKF_states_reshape = np.rollaxis(EnKF_states_reshape, 0, 5)  # put lat and lon to the last
+        EnKF_states_reshape = np.rollaxis(EnKF_states_reshape, 0, 5)
+        
+        # Fill into VIC states ds
+        da[:] = EnKF_states_reshape
+        
+        return da
+
+        
+    def update_soil_moisture_states(self, da_K, da_y_meas, da_y_est, R,
+                                    da_max_moist_n, adjust_negative=True,
+                                    seed=None):
+        ''' This function updates soil moisture states for the whole field
+            NOTE: this method does not change self
+        
+        Parameters
+        ----------
+        da_K: <xr.DataArray>
+            Gain K for the whole field
+            Dimension: [lat, lon, n, m], where [n, m] is the Kalman gain K
+        da_y_meas: <xr.DataArray> [lat, lon, m]
+            Measurements at current time
+        da_y_est: <xr.DataArray>
+            Estimated measurement from before-updated states (y = Hx);
+            Dimension: [lat, lon, m]
+        R: <float> (for m = 1)
+            Measurement error covariance matrix (measurement error ~ N(0, R))
+        da_max_moist_n: <xarray.DataArray>
+            Maximum soil moisture for the whole domain and each tile
+            [unit: mm]. Soil moistures above maximum after perturbation will
+            be reset to maximum value.
+            Dimension: [lat, lon, n]
+        adjust_negative: <bool>
+            Whether or not to adjust negative soil moistures after updating
+            to zero.
+            Default: True (adjust negative to zero)
+        seed: <int or None>
+            Seed for random number generator; this seed will only be used locally
+            in this function and will not affect the upper-level code.
+            None for not re-assign seed in this function, but using the global seed)
+            Default: None
+
+        Return
+        ----------
+        da_x_updated: <xr.DataArray>
+            Updated soil moisture states
+            Dimension: [lat, lon, n]
+        da_v: <xr.DataArray>
+           Measurement perturbation in the update step
+           Dimension: [lat, lon, m]
+        '''
+
+        # --- Extract dimensions --- #
+        m = len(da_y_est['m'])
+        n = len(self.da_EnKF['n'])
+        lat_coord = self.da_EnKF['lat']
+        lon_coord = self.da_EnKF['lon']
+
+        # --- Initiate updated DataArray for states --- #
+        da_x_updated = self.da_EnKF.copy(deep=True)  # [lat, lon, n]
+
+        # --- Update states --- #
+        # Determine the total number of loops
+        nloop = len(lat_coord) * len(lon_coord)
+        # Generate random measurement perturbation
+        if seed is None:
+            v = np.random.multivariate_normal(
+                    np.zeros(m), R,size=nloop).reshape([nloop, m, 1])  # [nloop, m, 1]
+        else:
+            rng = np.random.RandomState(seed)
+            v = rng.multivariate_normal(
+                    np.zeros(m), R,size=nloop).reshape([nloop, m, 1])  # [nloop, m, 1]
+        # Convert xr.DataArray's to np.array's and straighten lat and lon into nloop
+        K = da_K.values.reshape([nloop, n, m])  # [nloop, n, m]
+        y_meas = da_y_meas.values.reshape([nloop, m, 1])  # [nloop, m, 1]
+        y_est = da_y_est.values.\
+                    reshape([nloop, m, 1])  # [nloop, m, 1]
+        # Calculate delta = K * (y_meas + v - y_est)
+        delta = np.array(list(map(
+                    lambda j: np.dot(K[j, :, :],
+                                     y_meas[j, :, :] + v[j, :, :] - y_est[j, :, :]),
+                    range(nloop))))  # [nloop, n, 1]
+        # Reshape delta
+        delta = delta.reshape([len(lat_coord), len(lon_coord), n])  # [lat, lon, n]
+        # Update states - add delta to orig. states
+        da_x_updated[:] += delta
+
+        # --- Reset negative updated soil moistures to zero --- #
+        x_new = da_x_updated[:].values
+        if adjust_negative:
+            x_new[x_new<0] = 0
+
+        # --- Reset updated soil moistures above maximum to maximum --- #
+        max_moist = da_max_moist_n.values
+        x_new[(x_new>max_moist)] = max_moist[(x_new>max_moist)]
+
+        # --- Put into da --- #
+        da_x_updated[:] = x_new
+
+        # --- Save measurement perturbation v to da --- #
+        v = v.reshape([len(lat_coord), len(lon_coord), m])  # [lat, lon, m]
+        da_v = xr.DataArray(v, coords=[lat_coord, lon_coord, da_y_est['m']],
+                            dims=['lat', 'lon', 'm'])
+
+        return(da_x_updated, da_v)
+
+
 class States(object):
     ''' This class is a VIC states object
 
@@ -891,11 +1094,6 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
     out_state_dir = setup_output_dirs(
                             output_vic_state_root_dir,
                             mkdirs=[propagate_output_dir_name])[propagate_output_dir_name]
-    if bias_correct:
-        output_bc_state_dir = setup_output_dirs(
-                            output_vic_state_root_dir,
-                            mkdirs=[propagate_output_dir_name + '.bc'])\
-                            [propagate_output_dir_name + '.bc']
     out_history_dir = setup_output_dirs(
                             output_vic_history_root_dir,
                             mkdirs=[propagate_output_dir_name])[propagate_output_dir_name]
@@ -944,6 +1142,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                 nproc=nproc)
     # Clean up log dir
     shutil.rmtree(out_log_dir)
+    # Set propagated state dir
+    state_dir_after_prop = out_state_dir
     # Put output history file paths into dictionary
     for i in range(N):
         dict_ens_list_history_files['ens{}'.format(i+1)].append(os.path.join(
@@ -956,13 +1156,13 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
 
     # --- Step 2.2. Bias correction of propagated ensemble states, if specified --- #
     time1 = timeit.default_timer()
+    state_time = vic_run_end_time + pd.DateOffset(hours=24/vic_model_steps_per_day)
     if bias_correct:
-        state_time = vic_run_end_time + pd.DateOffset(hours=24/vic_model_steps_per_day)
-        bias_correct_propagated_states(
-            N, state_time, out_state_dir,
-            output_bc_state_dir, nproc)
-        # Clean up before-correction states
-        shutil.rmtree(out_state_dir)
+        list_da_sm_prop = bias_correct_propagated_states(
+            N, state_time, out_state_dir)
+    else:
+        list_da_sm_prop = load_propagated_states_sm(
+                N, state_time, out_state_dir)
     time2 = timeit.default_timer()
     print('\t\tTime of bias correction: {}'.format(time2-time1))
 
@@ -977,12 +1177,6 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         debug_update_dir = setup_output_dirs(
                         output_temp_dir,
                         mkdirs=['update'])['update']
-    # Initialize
-    if bias_correct:
-        state_dir_after_prop = output_bc_state_dir
-    else:
-        state_dir_after_prop = out_state_dir
-
     # Loop over each measurement time point
     for t, time in enumerate(da_meas[da_meas_time_var]):
 
@@ -999,8 +1193,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         time1 = timeit.default_timer()
         da_x, da_y_est = get_soil_moisture_and_estimated_meas_all_ensemble(
                                 N,
-                                state_dir=state_dir_after_prop,
-                                state_time=current_time,
+                                list_da_sm=list_da_sm_prop,
                                 da_tile_frac=da_tile_frac,
                                 nproc=nproc)
         da_K = calculate_gain_K_whole_field(da_x, da_y_est, R)
@@ -1051,13 +1244,13 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         out_updated_state_dir = setup_output_dirs(
                 output_vic_state_root_dir,
                 mkdirs=[updated_states_dir_name])[updated_states_dir_name]
-        # Update states and save to nc files
-        da_x_updated, da_update_increm, da_v = update_states_ensemble(
+        # Update states
+        list_da_updated, da_x_updated, da_update_increm, da_v = \
+            update_states_ensemble(
                 da_y_est, da_K,
                 da_meas.loc[time, :, :, :],
                 R,
-                state_dir_before_update=state_dir_after_prop,
-                state_time=current_time,
+                list_da_sm_to_update=list_da_sm_prop,
                 out_vic_state_dir=out_updated_state_dir,
                 da_max_moist_n=da_max_moist_n,
                 adjust_negative=adjust_negative,
@@ -1077,6 +1270,15 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                     'meas_perturbation.{}_{:05d}.nc'.format(
                              current_time.strftime('%Y%m%d'),
                              current_time.hour*3600+current_time.second)))
+
+        # (1.4) Save updated states to nc files
+        save_updated_states_ensemble(
+                N=N,
+                state_dir_before_update=state_dir_after_prop,
+                state_time=current_time,
+                out_vic_state_dir=out_updated_state_dir,
+                list_da_updated=list_da_updated,
+                nproc=nproc)
         # Delete propagated states
         shutil.rmtree(state_dir_after_prop)
         time2 = timeit.default_timer()
@@ -1192,22 +1394,19 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         
         # (4) Bias-correct states, if specified
         time1 = timeit.default_timer()
+        state_time = next_time + pd.DateOffset(hours=24/vic_model_steps_per_day)
         if bias_correct:
-            state_time = next_time + pd.DateOffset(hours=24/vic_model_steps_per_day)
-            bias_correct_propagated_states(
-                N, state_time, out_state_dir,
-                out_bc_state_dir, nproc)
-            # Clean up before-correction states
-            shutil.rmtree(out_state_dir)
+            list_da_sm_prop = bias_correct_propagated_states(
+                N, state_time, out_state_dir)
+        else:
+            list_da_sm_prop = load_propagated_states_sm(
+                    N, state_time, out_state_dir)
         time2 = timeit.default_timer()
         print('\t\tTime of bias correction: {}'.format(time2-time1))
 
         # (5) Some postprocessing
         # Point state directory to be updated to the propagated one
-        if bias_correct:
-            state_dir_after_prop = out_bc_state_dir
-        else:
-            state_dir_after_prop = out_state_dir
+        state_dir_after_prop = out_state_dir
 
         # --- Concat and delete individual history files for each year --- #
         # (If the end of EnKF run, or the end of a calendar year)
@@ -1832,7 +2031,7 @@ def determine_tile_frac(global_path):
     return da_tile_frac
 
 
-def get_soil_moisture_and_estimated_meas_all_ensemble(N, state_dir, state_time,
+def get_soil_moisture_and_estimated_meas_all_ensemble(N, list_da_sm,
                                                       da_tile_frac, nproc):
     ''' This function extracts soil moisture states from netCDF state files for all ensemble
         members, for all grid cells, veg and snow band tiles.
@@ -1841,11 +2040,11 @@ def get_soil_moisture_and_estimated_meas_all_ensemble(N, state_dir, state_time,
     ----------
     N: <int>
         Number of ensemble members
-    state_dir: <str>
-        Directory of state files for each ensemble member
-        State file names are "state.ens<i>.xxx.nc", where <i> is 1, 2, ..., N
-    state_time: <pd.datetime>
-        State time. This is for identifying state file names.
+    list_da_sm: <list>
+        A list of soil moisture states, in the order of
+        ensemble members. Each member of the list is an xarray.DataArray for
+        an ensemble member, in the structure of VIC state file
+        "STATE_SOIL_MOISTURE" variable.
     da_tile_frac: <xr.DataArray>
         Fraction of each veg/snowband in each grid cell for the whole domain
         Dimension: [veg_class, snow_band, lat, lon]
@@ -1870,20 +2069,16 @@ def get_soil_moisture_and_estimated_meas_all_ensemble(N, state_dir, state_time,
     '''
     
     # --- Extract dimensions from the first ensemble member --- #
-    state_name = 'state.ens1.{}_{:05d}.nc'.format(
-                        state_time.strftime('%Y%m%d'),
-                        state_time.hour*3600+state_time.second)
-    ds = xr.open_dataset(os.path.join(state_dir, state_name))
     # nlayer
-    nlayer = ds['nlayer']
+    nlayer = list_da_sm[0]['nlayer']
     # veg_class
-    veg_class = ds['veg_class']
+    veg_class = list_da_sm[0]['veg_class']
     # snow_band
-    snow_band = ds['snow_band']
+    snow_band = list_da_sm[0]['snow_band']
     # lat
-    lat = ds['lat']
+    lat = list_da_sm[0]['lat']
     # lon
-    lon = ds['lon']
+    lon = list_da_sm[0]['lon']
     # number of total states n = len(veg_class) * len(snow_band) * len(nlayer)
     n = len(veg_class) * len(snow_band) * len(nlayer)
     
@@ -1906,19 +2101,15 @@ def get_soil_moisture_and_estimated_meas_all_ensemble(N, state_dir, state_time,
     if nproc == 1:
         for i in range(N):
             # Load state file
-            state_name = 'state.ens{}.{}_{:05d}.nc'.format(
-                    i+1,
-                    state_time.strftime('%Y%m%d'),
-                    state_time.hour*3600+state_time.second)
-            ds = xr.open_dataset(os.path.join(state_dir, state_name))
-            class_states = States(ds)
+            da = list_da_sm[i]
+            class_states = States_sm(da)
             
             # Fill x and y_est data in
             # Fill in states x
             da_x.loc[:, :, :, i] = class_states.da_EnKF
             # Fill in measurement estimates y
             da_y_est[:, :, :, i] = calculate_y_est_whole_field(
-                                            class_states.ds['STATE_SOIL_MOISTURE'],
+                                            class_states.da,
                                             da_tile_frac)
     # --- If nproc > 1, use multiprocessing --- #
     elif nproc > 1:
@@ -1928,12 +2119,8 @@ def get_soil_moisture_and_estimated_meas_all_ensemble(N, state_dir, state_time,
         # --- Loop over each ensemble member --- #
         for i in range(N):
             # Load state file
-            state_name = 'state.ens{}.{}_{:05d}.nc'.format(
-                    i+1,
-                    state_time.strftime('%Y%m%d'),
-                    state_time.hour*3600+state_time.second)
-            ds = xr.open_dataset(os.path.join(state_dir, state_name))
-            class_states = States(ds)
+            da = list_da_sm[i]
+            class_states = States_sm(da)
  
             # Fill x and y_est data in
             # Fill in states x
@@ -1941,7 +2128,7 @@ def get_soil_moisture_and_estimated_meas_all_ensemble(N, state_dir, state_time,
             # Fill in measurement estimates y
             results[i] = pool.apply_async(
                             calculate_y_est_whole_field,
-                            (class_states.ds['STATE_SOIL_MOISTURE'],
+                            (class_states.da,
                              da_tile_frac))
         # --- Finish multiprocessing --- #
         pool.close()
@@ -2174,8 +2361,7 @@ def calculate_gain_K_whole_field(da_x, da_y_est, R):
     return da_K
 
 
-def update_states(da_y_est, da_K, da_meas, R, state_nc_before_update,
-                  out_vic_state_nc, da_max_moist_n,
+def update_states(da_y_est, da_K, da_meas, R, da_sm_to_update, da_max_moist_n,
                   adjust_negative=True, seed=None):
     ''' Update the EnKF states for the whole field.
     
@@ -2191,10 +2377,9 @@ def update_states(da_y_est, da_K, da_meas, R, state_nc_before_update,
         Measurements at current time
     R: <float> (for m = 1)
         Measurement error covariance matrix (measurement error ~ N(0, R))
-    state_nc_before_update: <str>
-        VIC state file before update
-    out_vic_state_nc: <str>
-        Path for saving updated state file in VIC format;
+    da_sm_to_update: <xr.DataArray>
+        Soil moisture to be updated, in the structure of VIC state file
+        'STATE_SOIL_MOISTURE' structure.
     da_max_moist_n: <xarray.DataArray>
         Maximum soil moisture for the whole domain and each tile
         [unit: mm]. Soil moistures above maximum after perturbation will
@@ -2227,10 +2412,8 @@ def update_states(da_y_est, da_K, da_meas, R, state_nc_before_update,
     numpy
     '''
 
-    # Load VIC states before update for this ensemble member          
-    ds = xr.open_dataset(state_nc_before_update)
     # Convert EnKF states back to VIC states
-    class_states = States(ds)
+    class_states = States_sm(da_sm_to_update)
     # Update states
     da_x_updated, da_v = class_states.update_soil_moisture_states(
                                         da_K, da_meas,
@@ -2239,15 +2422,13 @@ def update_states(da_y_est, da_K, da_meas, R, state_nc_before_update,
                                         adjust_negative, seed)  # [lat, lon, n]
     da_update_increm = da_x_updated - class_states.da_EnKF
     # Convert updated states to VIC states format
-    ds_updated = class_states.convert_new_EnKFstates_sm_to_VICstates(da_x_updated)
-    # Save VIC states to netCDF file (with compression)
-    to_netcdf_state_file_compress(ds_updated, out_vic_state_nc)
+    da_updated = class_states.convert_new_EnKFstates_sm_to_VICstates(da_x_updated)
 
-    return da_x_updated, da_update_increm, da_v
+    return da_updated, da_x_updated, da_update_increm, da_v
 
 
-def update_states_ensemble(da_y_est, da_K, da_meas, R, state_dir_before_update,
-                           state_time, out_vic_state_dir, da_max_moist_n,
+def update_states_ensemble(da_y_est, da_K, da_meas, R,
+                           list_da_sm_to_update, out_vic_state_dir, da_max_moist_n,
                            adjust_negative=True, nproc=1):
     ''' Update the EnKF states for the whole field for each ensemble member.
     
@@ -2263,13 +2444,11 @@ def update_states_ensemble(da_y_est, da_K, da_meas, R, state_dir_before_update,
         Measurements at current time
     R: <float> (for m = 1)
         Measurement error covariance matrix (measurement error ~ N(0, R))
-    state_dir_before_update: <str>
-        Directory of VIC states before update;
-        State file names are: state.ens<i>.<YYYYMMDD>_<SSSSS>.nc,
-        where <i> is ensemble member index (1, ..., N),
-              <YYYYMMMDD>_<SSSSS> is the current time of the states
-    state_time: <pd.datetime>
-        State time. This is for identifying state file names.
+    list_da_sm_to_update:
+        A list of soil moisture states to update, in the order of
+        ensemble members. Each member of the list is an xarray.DataArray for
+        an ensemble member, in the structure of VIC state file
+        "STATE_SOIL_MOISTURE" variable.
     output_vic_state_dir: <str>
         Directory for saving updated state files in VIC format;
         State file names will be: state.ens<i>.nc, where <i> is ensemble member index (1, ..., N)
@@ -2288,6 +2467,10 @@ def update_states_ensemble(da_y_est, da_K, da_meas, R, state_dir_before_update,
     
     Returns
     ----------
+    list_da_updated: <list>
+        A list of updated soil moistures, in the order of ensemble members.
+        Each member of the list is an xr.DataArray in the structure of
+        VIC STATE_SOIL_MOISTURE format.
     da_x_updated: <xr.DataArray>
         Updated soil moisture states;
         Dimension: [N, lat, lon, n]
@@ -2306,6 +2489,7 @@ def update_states_ensemble(da_y_est, da_K, da_meas, R, state_dir_before_update,
     # Extract N
     N = len(da_y_est['N'])
 
+    list_da_updated = []  # updated states - this is the main results
     list_da_update_increm = []  # update increment
     list_da_v = []  # measurement perturbation in the update step
     list_da_x_updated = []  # measurement perturbation in the update step
@@ -2314,22 +2498,15 @@ def update_states_ensemble(da_y_est, da_K, da_meas, R, state_dir_before_update,
     if nproc == 1:
         for i in range(N):
             # Set up parameters
-            state_nc_before_update = os.path.join(
-                    state_dir_before_update,
-                    'state.ens{}.{}_{:05d}.nc'.format(
-                            i+1,
-                            state_time.strftime('%Y%m%d'),
-                            state_time.hour*3600+state_time.second))
-            out_vic_state_nc = os.path.join(out_vic_state_dir,
-                                            'state.ens{}.nc'.format(i+1))
+            da_sm_to_update = list_da_sm_to_update[i]
             # Update states
             seed = np.random.randint(low=100000)
-            da_x_updated, da_update_increm, da_v = update_states(
+            da_updated, da_x_updated, da_update_increm, da_v = update_states(
                         da_y_est.loc[:, :, :, i], da_K, da_meas, R,
-                        state_nc_before_update,
-                        out_vic_state_nc, da_max_moist_n,
+                        da_sm_to_update, da_max_moist_n,
                         adjust_negative, seed)
             # Put results to list
+            list_da_updated.append(da_updated)
             list_da_v.append(da_v)
             list_da_x_updated.append(da_x_updated)
             list_da_update_increm.append(da_update_increm)
@@ -2341,29 +2518,23 @@ def update_states_ensemble(da_y_est, da_K, da_meas, R, state_dir_before_update,
         # --- Loop over each ensemble member --- #
         for i in range(N):
             # Set up parameters
-            state_nc_before_update = os.path.join(
-                    state_dir_before_update,
-                    'state.ens{}.{}_{:05d}.nc'.format(
-                            i+1,
-                            state_time.strftime('%Y%m%d'),
-                            state_time.hour*3600+state_time.second))
-            out_vic_state_nc = os.path.join(out_vic_state_dir,
-                                            'state.ens{}.nc'.format(i+1))
+            da_sm_to_update = list_da_sm_to_update[i]
             # Update states
             seed = np.random.randint(low=100000)
             results[i] = pool.apply_async(
                             update_states,
                             (da_y_est.loc[:, :, :, i], da_K, da_meas, R,
-                            state_nc_before_update,
-                            out_vic_state_nc, da_max_moist_n,
-                            adjust_negative, seed))
+                             da_sm_to_update,
+                             da_max_moist_n,
+                             adjust_negative, seed))
         # --- Finish multiprocessing --- #
         pool.close()
         pool.join()
         # --- Get return values --- #
         for i, result in results.items():
-            da_x_updated, da_update_increm, da_v = result.get()
+            da_updated, da_x_updated, da_update_increm, da_v = result.get()
             # Put results to list
+            list_da_updated.append(da_updated)
             list_da_v.append(da_v)
             list_da_x_updated.append(da_x_updated)
             list_da_update_increm.append(da_update_increm)
@@ -2377,7 +2548,105 @@ def update_states_ensemble(da_y_est, da_K, da_meas, R, state_dir_before_update,
     da_v = xr.concat(list_da_v, dim='N')
     da_v['N'] = range(1, N+1)
     
-    return da_x_updated, da_update_increm, da_v
+    return list_da_updated, da_x_updated, da_update_increm, da_v
+
+
+def save_updated_states(state_nc_before_update, da_sm_updated, out_vic_state_nc):
+    ''' Replace soil moisture states from the before-update states with
+        updated soil moistures and save to nc files, for a single file
+
+    Parameters
+    ----------
+    state_nc_before_update: <str>
+        Path for state nc file before update - this is to extract state
+        variables other than soil miosture
+    da_sm_updated: <xr.DataArray>
+        Updated soil moisture states to replace, in the structure of VIC state
+        file STATE_SOIL_MOISTURE format.
+    out_vic_state_nc: <str>
+        Output state nc file path
+    '''
+
+    # Replace updated soil moistures
+    ds = xr.open_dataset(state_nc_before_update)
+    ds['STATE_SOIL_MOISTURE'] = da_sm_updated
+    # Save to netCDF file
+    pool.apply_async(to_netcdf_state_file_compress,
+                     (ds, out_vic_state_nc))
+
+
+def save_updated_states_ensemble(N, state_dir_before_update,
+                                 state_time, out_vic_state_dir,
+                                 list_da_updated, nproc=1):
+    ''' Replace soil moisture states from the before-update states with
+        updated soil moistures and save to nc files, for all ensemble members
+    
+    Parameters
+    ----------
+    N: <int>
+        Ensemble size
+    state_dir_before_update: <str>
+        Directory of VIC states before update;
+        State file names are: state.ens<i>.<YYYYMMDD>_<SSSSS>.nc,
+        where <i> is ensemble member index (1, ..., N),
+              <YYYYMMMDD>_<SSSSS> is the current time of the states
+    state_time: <pd.datetime>
+        State time. This is for identifying state file names.
+    output_vic_state_dir: <str>
+        Directory for saving updated state files in VIC format;
+        State file names will be: state.ens<i>.nc, where <i> is ensemble member index (1, ..., N)
+    list_da_updated: <list>
+        A list of updated soil moistures, in the order of ensemble members.
+        Each member of the list is an xr.DataArray in the structure of
+        VIC STATE_SOIL_MOISTURE format.
+    nproc: <int>
+        Number of processors to use for parallel ensemble
+        Default: 1
+    
+    Require
+    ----------
+    numpy
+    '''
+
+    # --- If nproc == 1, do a regular ensemble loop --- #
+    if nproc == 1:
+        for i in range(N):
+            # Set up parameters
+            state_nc_before_update = os.path.join(
+                    state_dir_before_update,
+                    'state.ens{}.{}_{:05d}.nc'.format(
+                            i+1,
+                            state_time.strftime('%Y%m%d'),
+                            state_time.hour*3600+state_time.second))
+            out_vic_state_nc = os.path.join(out_vic_state_dir,
+                                            'state.ens{}.nc'.format(i+1))
+            # Replace updated soil moisture states and save to file
+            save_updated_states(state_nc_before_update,
+                                list_da_updated[i],
+                                out_vic_state_nc)
+    # --- If nproc > 1, use multiprocessing --- #
+    elif nproc > 1:
+        # --- Set up multiprocessing --- #
+        pool = mp.Pool(processes=nproc)
+        # --- Loop over each ensemble member --- #
+        for i in range(N):
+        # --- Finish multiprocessing --- #
+            # Set up parameters
+            state_nc_before_update = os.path.join(
+                    state_dir_before_update,
+                    'state.ens{}.{}_{:05d}.nc'.format(
+                            i+1,
+                            state_time.strftime('%Y%m%d'),
+                            state_time.hour*3600+state_time.second))
+            out_vic_state_nc = os.path.join(out_vic_state_dir,
+                                            'state.ens{}.nc'.format(i+1))
+            # Replace updated soil moisture states and save to file
+            pool.apply_async(save_updated_states,
+                             (state_nc_before_update,
+                              list_da_updated[i],
+                              out_vic_state_nc))
+        pool.close()
+        pool.join()
 
 
 def perturb_forcings_ensemble(N, orig_forcing, dict_varnames, prec_std,
@@ -3188,8 +3457,7 @@ def calculate_ensemble_mean_states(list_state_nc, out_state_nc):
     return out_state_nc
 
 
-def bias_correct_propagated_states(N, state_time, prop_before_bc_state_dir,
-                                   output_bc_state_dir, nproc=1):
+def bias_correct_propagated_states(N, state_time, prop_before_bc_state_dir):
     ''' Bias-correct propagated states following Ryu et al. (2009); only
         bias-correct soil moistures of all layers (but not other state
         variables)
@@ -3204,11 +3472,9 @@ def bias_correct_propagated_states(N, state_time, prop_before_bc_state_dir,
         Directory of propagated state files for each ensemble member before
         bias correction. State file names are "state.ens<i>.YYYYMMDD_SSSSS.nc",
         where <i> is 1, 2, ..., N, or avg (for reference state)
-    output_bc_state_dir: <str>
-        Directory of propagated states after bias correction.
-    nproc: <int>
-        Number of processors to use for parallel ensemble
-        Default: 1
+
+    Returns
+    ----------
     list_sm_bc_da: <list>
         A list of bias-corrected soil moisture states, in the order of
         ensemble members. Each member of the list is an xarray.DataArray for
@@ -3241,36 +3507,50 @@ def bias_correct_propagated_states(N, state_time, prop_before_bc_state_dir,
     da_delta = da_mean - ds_ref['STATE_SOIL_MOISTURE']
     
     # --- Bias-correct each ensemble state --- #
-    list_sm_bc_ds = []
+    list_da_sm_bc = []
     for i in range(N):
-        ds = list_ds[i]
-        ds['STATE_SOIL_MOISTURE'] -= da_delta
-        list_sm_bc_ds.append(ds)
+        da = list_da[i]
+        da -= da_delta
+        list_da_sm_bc.append(da)
 
-    # --- Save to file --- #
-    if nproc == 1:
-        for i in range(N):
-            out_nc = os.path.join(
-                output_bc_state_dir,
-                'state.ensavg.{}_{:05d}.nc'.format(
-                        state_time.strftime('%Y%m%d'),
-                        state_time.hour*3600+state_time.second))
-            to_netcdf_state_file_compress(list_sm_bc_ds[i], out_nc)
-    elif nproc > 1:
-        # Set up multiprocessing
-        pool = mp.Pool(processes=nproc)
-        for i in range(N):
-            out_nc = os.path.join(
-                output_bc_state_dir,
-                'state.ens{}.{}_{:05d}.nc'.format(
+    return list_da_sm_bc
+
+
+def load_propagated_states_sm(N, state_time, prop_state_dir):
+    ''' Load ensemble propagated states and return only soil moisture states.
+
+    Parameters
+    ----------
+    N: <int>
+        Ensemble size
+    state_time: <pd.datetime>
+        State time. This is for identifying state file names.
+    prop_state_dir: <str>
+        Directory of propagated state files for each ensemble member before
+        bias correction. State file names are "state.ens<i>.YYYYMMDD_SSSSS.nc",
+        where <i> is 1, 2, ..., N, or avg (for reference state)
+
+    Returns
+    ----------
+    list_sm_da: <list>
+        A list soil moisture states, in the order of
+        ensemble members. Each member of the list is an xarray.DataArray for
+        an ensemble member, in the structure of VIC state file
+        "STATE_SOIL_MOISTURE" variable.
+    '''
+
+    list_sm_da = []
+    for i in range(N):
+        ds = xr.open_dataset(os.path.join(
+            prop_state_dir,
+            'state.ens{}.{}_{:05d}.nc'.format(
                         i+1,
                         state_time.strftime('%Y%m%d'),
-                        state_time.hour*3600+state_time.second))
-            pool.apply_async(to_netcdf_state_file_compress,
-                             (list_sm_bc_ds[i], out_nc))
-        # Finish multiprocessing
-        pool.close()
-        pool.join()
+                        state_time.hour*3600+state_time.second)))
+        da = ds['STATE_SOIL_MOISTURE']
+        list_sm_da.append(da)
+
+    return list_sm_da
 
 
 def run_vic_assigned_states(start_time, end_time, vic_exe, init_state_nc,
