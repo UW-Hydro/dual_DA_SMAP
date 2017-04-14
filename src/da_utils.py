@@ -1123,7 +1123,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                 mpi_proc=mpi_proc,
                 mpi_exe=mpi_exe,
                 bias_correct=bias_correct,
-                orig_forcing_basepath=orig_forcing_basepath)
+                ref_init_state_nc=init_state_nc,
+                ref_forcing_basepath=orig_forcing_basepath)
     else:
         propagate_ensemble_linear_model(
                 N, 
@@ -1284,6 +1285,20 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         time2 = timeit.default_timer()
         print('\t\tTime of updating states: {}'.format(time2-time1))
 
+        # (1.5) Calculate ensemble average of updated states, if bias
+        # correction is specified
+        time1 = timeit.default_timer()
+        list_updated_states = []
+        for i in range(N):
+            list_updated_states.append(os.path.join(
+                out_updated_state_dir,
+                'state.ens{}.nc'.format(i+1)))
+        updated_states_avg_nc = os.path.join(
+            out_updated_state_dir, 'state.ensavg.nc')
+        calculate_ensemble_mean_states(list_updated_states, updated_states_avg_nc)
+        time2 = timeit.default_timer()
+        print('\t\tTime of calculating ens. avg. states: {}'.format(time2-time1))
+
         # (2) Perturb states
         time1 = timeit.default_timer()
         # Set up perturbed state subdirectories
@@ -1360,7 +1375,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                     mpi_proc=mpi_proc,
                     mpi_exe=mpi_exe,
                     bias_correct=bias_correct,
-                    orig_forcing_basepath=orig_forcing_basepath)
+                    ref_init_state_nc=updated_states_avg_nc,
+                    ref_forcing_basepath=orig_forcing_basepath)
         else:
             propagate_ensemble_linear_model(
                     N, 
@@ -1800,7 +1816,8 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
                        out_history_dir, out_global_dir, out_log_dir,
                        ens_forcing_basedir, ens_forcing_prefix, nproc=1,
                        mpi_proc=None, mpi_exe='mpiexec',
-                       bias_correct=False, orig_forcing_basepath=None):
+                       bias_correct=False, ref_init_state_nc=None,
+                       ref_forcing_basepath=None):
     ''' This function propagates (via VIC) an ensemble of states to a certain time point.
     
     Parameters
@@ -1849,7 +1866,10 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
         True: will run an extra VIC run from ensemble-average initial state
         False: will not run the extra VIC run
         Default: False
-    orig_forcing_basepath: <str>
+    ref_init_state_nc: <str>
+        Path for reference initial state netCDF file.
+        Only required if bias_correct = True
+    ref_forcing_basepath: <str>
         Basepath of original forcing. "YYYY.nc" will be appended.
         Only required if bias_correct = True
         
@@ -1866,6 +1886,12 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
     n_vic_runs = N
     # List of ensemble
     ens_list = list(range(1, N+1))
+    # List of initial state netCDF paths
+    init_state_list = []
+    for i in range(N):
+        init_state_list.append(os.path.join(
+                init_state_dir,
+                'state.ens{}.nc'.format(i+1)))
     # List of forcing basepaths
     force_list = []
     for i in range(N):
@@ -1873,24 +1899,12 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
             ens_forcing_basedir,
             'ens_{}'.format(ens_list[i]),
             ens_forcing_prefix))
-    # If bias correction, prepare
+    # If bias correction, add information for the additional reference run
     if bias_correct:
-        # Append info for the extra run
         n_vic_runs += 1
-        ens_list.append('avg')
-        force_list.append(orig_forcing_basepath)
-        # Calculate ensemble avg. initial state
-        list_init_state_ens = []
-        for i in range(N):
-            list_init_state_ens.append(os.path.join(
-                    init_state_dir,
-                    'state.ens{}.nc'.format(i+1)))
-        out_state_nc = os.path.join(
-                init_state_dir,
-                'state.ensavg.nc')
-        calculate_ensemble_mean_states(list_init_state_ens, out_state_nc)
-    time2 = timeit.default_timer()
-    print('\t\tTime of calculating ens. avg. states: {}'.format(time2-time1))
+        ens_list.append('ref')
+        init_state_list.append(ref_init_state_nc)
+        force_list.append(ref_forcing_basepath)
 
     # --- If nproc == 1, do a regular ensemble loop --- #
     if nproc == 1:
@@ -1903,10 +1917,7 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
                                 model_steps_per_day=vic_model_steps_per_day,
                                 start_time=start_time,
                                 end_time=end_time,
-                                init_state="INIT_STATE {}".format(
-                                        os.path.join(
-                                            init_state_dir,
-                                            'state.ens{}.nc'.format(ens_list[i]))),
+                                init_state="INIT_STATE {}".format(init_state_list[i]),
                                 vic_state_basepath=os.path.join(
                                             out_state_dir,
                                             'state.ens{}'.format(ens_list[i])),
@@ -1932,12 +1943,10 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
                                 model_steps_per_day=vic_model_steps_per_day,
                                 start_time=start_time,
                                 end_time=end_time,
-                                init_state="INIT_STATE {}".format(
-                                    os.path.join(init_state_dir,
-                                                 'state.ens{}.nc'.format(ens_list[i]))),
+                                init_state="INIT_STATE {}".format(init_state_list[i]),
                                 vic_state_basepath=os.path.join(
-                                    out_state_dir,
-                                    'state.ens{}'.format(ens_list[i])),
+                                            out_state_dir,
+                                            'state.ens{}'.format(ens_list[i])),
                                 vic_history_file_dir=out_history_dir,
                                 replace=replace,
                                 output_global_basepath=os.path.join(
@@ -3484,7 +3493,7 @@ def bias_correct_propagated_states(N, state_time, prop_before_bc_state_dir):
     # --- Open reference state file --- #
     ds_ref = xr.open_dataset(os.path.join(
             prop_before_bc_state_dir,
-            'state.ensavg.{}_{:05d}.nc'.format(
+            'state.ensref.{}_{:05d}.nc'.format(
                         state_time.strftime('%Y%m%d'),
                         state_time.hour*3600+state_time.second)))
     # --- Open ensemble state files --- #
