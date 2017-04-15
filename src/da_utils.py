@@ -1312,7 +1312,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                 out_updated_state_dir,
                 'state.ens{}.nc'.format(i+1)))
         updated_states_avg_nc = os.path.join(
-            out_updated_state_dir, 'state.ensavg.nc')
+            out_updated_state_dir, 'state.ensref.nc')
         calculate_ensemble_mean_states(list_updated_states, updated_states_avg_nc)
         time2 = timeit.default_timer()
         print('\t\tTime of calculating ens. avg. states: {}'.format(time2-time1))
