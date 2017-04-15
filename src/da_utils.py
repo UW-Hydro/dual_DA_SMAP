@@ -1078,6 +1078,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
     dict_ens_list_history_files = {}
     for i in range(N):
         dict_ens_list_history_files['ens{}'.format(i+1)] = []
+    if bias_correct:
+        dict_ens_list_history_files['ensref'] = []
 
     # Determine VIC run period
     vic_run_start_time = start_time
@@ -1150,6 +1152,11 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         dict_ens_list_history_files['ens{}'.format(i+1)].append(os.path.join(
                     out_history_dir, 'history.ens{}.{}-{:05d}.nc'.format(
                             i+1,
+                            vic_run_start_time.strftime('%Y-%m-%d'),
+                            vic_run_start_time.hour*3600+vic_run_start_time.second)))
+    if bias_correct:
+        dict_ens_list_history_files['ensref'].append(os.path.join(
+                    out_history_dir, 'history.ensref.{}-{:05d}.nc'.format(
                             vic_run_start_time.strftime('%Y-%m-%d'),
                             vic_run_start_time.hour*3600+vic_run_start_time.second)))
     time2 = timeit.default_timer()
@@ -1403,6 +1410,11 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                             i+1,
                             current_time.strftime('%Y-%m-%d'),
                             current_time.hour*3600+current_time.second)))
+        if bias_correct:
+            dict_ens_list_history_files['ensref'].append(os.path.join(
+                    out_history_dir, 'history.ensref.{}-{:05d}.nc'.format(
+                            current_time.strftime('%Y-%m-%d'),
+                            current_time.hour*3600+current_time.second)))
         # Delete perturbed states
         shutil.rmtree(pert_state_dir)
         time2 = timeit.default_timer()
@@ -1442,35 +1454,45 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
             # --- If nproc == 1, do a regular ensemble loop --- #
             if nproc == 1:
                 # Concat for each ensemble member and delete individual files
-                for i in range(N):
+                n_ens = N
+                ens_list = list(range(1, N+1))
+                if bias_correct:
+                    n_ens = N + 1
+                    ens_list.append(ref)
+                for i in range(n_ens):
                     # Concat and clean up
                     list_history_files=dict_ens_list_history_files\
-                                       ['ens{}'.format(i+1)]
+                                       ['ens{}'.format(ens_list[i])]
                     output_file=os.path.join(
                                     out_hist_concat_dir,
                                     'history.ens{}.concat.{}.nc'.format(
-                                        i+1, year))
+                                        ens_list[i], year))
                     concat_clean_up_history_file(list_history_files,
                                                  output_file)
                     # Reset history file list
-                    dict_ens_list_history_files['ens{}'.format(i+1)] = []
+                    dict_ens_list_history_files['ens{}'.format(ens_list[i])] = []
             # --- If nproc > 1, use multiprocessing --- #
             elif nproc > 1:
                 # Set up multiprocessing
                 pool = mp.Pool(processes=nproc)
-                # Loop over each ensemble member
-                for i in range(N):
+                # Concat for each ensemble member and delete individual files
+                n_ens = N
+                ens_list = list(range(1, N+1))
+                if bias_correct:
+                    n_ens = N + 1
+                    ens_list.append('ref')
+                for i in range(n_ens):
                     # Concat and clean up
                     list_history_files=dict_ens_list_history_files\
-                                       ['ens{}'.format(i+1)]
+                                       ['ens{}'.format(ens_list[i])]
                     output_file=os.path.join(
                                     out_hist_concat_dir,
                                     'history.ens{}.concat.{}.nc'.format(
-                                        i+1, year))
-                    pool.apply_async(concat_clean_up_history_file,
-                                     (list_history_files, output_file))
+                                        ens_list[i], year))
+                    concat_clean_up_history_file(list_history_files,
+                                                 output_file)
                     # Reset history file list
-                    dict_ens_list_history_files['ens{}'.format(i+1)] = []
+                    dict_ens_list_history_files['ens{}'.format(ens_list[i])] = []
                 # --- Finish multiprocessing --- #
                 pool.close()
                 pool.join()
