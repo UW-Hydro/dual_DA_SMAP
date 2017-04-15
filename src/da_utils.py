@@ -1058,14 +1058,14 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                 (class_states, L, scale_n_nloop,
                  os.path.join(init_state_dir, 'state.ens{}.nc'.format(i+1)),
                  da_max_moist_n, adjust_negative, seed))
-            # Save soil moisture perturbation
-            if debug:
-                ds_perturbation = xr.Dataset({'STATE_SOIL_MOISTURE':
-                                             (ds - class_states.ds)\
-                                  ['STATE_SOIL_MOISTURE']})
-                ds_perturbation.to_netcdf(os.path.join(
-                        debug_dir,
-                        'perturbation.ens{}.nc').format(i+1))
+#            # Save soil moisture perturbation
+#            if debug:
+#                ds_perturbation = xr.Dataset({'STATE_SOIL_MOISTURE':
+#                                             (ds - class_states.ds)\
+#                                  ['STATE_SOIL_MOISTURE']})
+#                ds_perturbation.to_netcdf(os.path.join(
+#                        debug_dir,
+#                        'perturbation.ens{}.nc').format(i+1))
         # --- Finish multiprocessing --- #
         pool.close()
         pool.join()
@@ -1166,8 +1166,19 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
     time1 = timeit.default_timer()
     state_time = vic_run_end_time + pd.DateOffset(hours=24/vic_model_steps_per_day)
     if bias_correct:
-        list_da_sm_prop = bias_correct_propagated_states(
+        list_da_sm_prop, da_delta = bias_correct_propagated_states(
             N, state_time, out_state_dir)
+        if debug:
+            debug_bc_dir = setup_output_dirs(
+                        output_temp_dir,
+                        mkdirs=['bias_correct'])['bias_correct']
+            # da_delta to file
+            ds_delta = xr.Dataset({'delta_soil_moisture': da_delta})
+            ds_delta.to_netcdf(os.path.join(
+                    debug_bc_dir,
+                    'delta.{}_{:05d}.nc'.format(
+                            state_time.strftime('%Y%m%d'),
+                            state_time.hour*3600+state_time.second)))
     else:
         list_da_sm_prop = load_propagated_states_sm(
                 N, state_time, out_state_dir)
@@ -1424,8 +1435,16 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         time1 = timeit.default_timer()
         state_time = next_time + pd.DateOffset(hours=24/vic_model_steps_per_day)
         if bias_correct:
-            list_da_sm_prop = bias_correct_propagated_states(
+            list_da_sm_prop, da_delta = bias_correct_propagated_states(
                 N, state_time, out_state_dir)
+            if debug:
+                # Save da_delta to file
+                ds_delta = xr.Dataset({'delta_soil_moisture': da_delta})
+                ds_delta.to_netcdf(os.path.join(
+                        debug_bc_dir,
+                        'delta.{}_{:05d}.nc'.format(
+                                state_time.strftime('%Y%m%d'),
+                                state_time.hour*3600+state_time.second)))
         else:
             list_da_sm_prop = load_propagated_states_sm(
                     N, state_time, out_state_dir)
@@ -1507,7 +1526,6 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
             print('\t\tTime of deleting history directories: {}'.format(time2-time1))
 
     # --- Concat and clean up normalized innovation results --- #
-    debug_innov_dir
     time1 = timeit.default_timer()
     print('\tInnovation...')
     list_da = []
@@ -1541,6 +1559,43 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         os.remove(f)
     time2 = timeit.default_timer()
     print('Time of concatenating innovation: {}'.format(time2-time1))
+
+    # --- Concat and clean up ormalized debugging results --- #
+    if debug:
+        # Bias correction
+        time1 = timeit.default_timer()
+        print('\tConcatenating debugging results...')
+        list_da = []
+        list_file_to_delete = []
+        times = da_meas[da_meas_time_var].values
+        for time in times:
+            t = pd.to_datetime(time)
+            # Load data
+            fname = '{}/delta.{}_{:05d}.nc'.format(
+                        debug_bc_dir, t.strftime('%Y%m%d'),
+                        t.hour*3600+t.second)
+            da = xr.open_dataset(fname)['delta_soil_moisture']
+            # Put data in array
+            list_da.append(da)
+            # Add individual file to list to delete
+            list_file_to_delete.append(fname)
+        # Concat all times
+        da_concat = xr.concat(list_da, dim='time')
+        da_concat['time'] = da_meas[da_meas_time_var].values
+        # Write to file
+        ds_concat = xr.Dataset({'delta_soil_moisture': da_concat})
+        ds_concat.to_netcdf(
+            os.path.join(
+                debug_bc_dir,
+                'delta.concat.{}_{}.nc'.format(
+                        pd.to_datetime(times[0]).year,
+                        pd.to_datetime(times[-1]).year)),
+            format='NETCDF4_CLASSIC')
+        # Delete individule files
+        for f in list_file_to_delete:
+            os.remove(f)
+        time2 = timeit.default_timer()
+        print('Time of concatenating bias correction delta: {}'.format(time2-time1))
 
 
 def to_netcdf_history_file_compress(ds_hist, out_nc):
@@ -3543,7 +3598,7 @@ def bias_correct_propagated_states(N, state_time, prop_before_bc_state_dir):
         da -= da_delta
         list_da_sm_bc.append(da)
 
-    return list_da_sm_bc
+    return list_da_sm_bc, da_delta
 
 
 def load_propagated_states_sm(N, state_time, prop_state_dir):
