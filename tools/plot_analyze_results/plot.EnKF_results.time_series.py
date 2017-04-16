@@ -238,6 +238,9 @@ debug = (sys.argv[3].lower() == 'true')
 lat = float(sys.argv[4])
 lon = float(sys.argv[5])
 
+# --- Whether to load and plot bias correction variables --- #
+bias_correct = (sys.argv[6].lower() == 'true')
+
 # ========================================================== #
 # Parameter setting
 # ========================================================== #
@@ -364,6 +367,52 @@ elif nproc > 1:
 print('\t\tConcatenating all ensemble members...')
 ds_EnKF = xr.concat(list_ds_EnKF, dim='N')
 ds_EnKF['N'] = range(1, N+1)
+
+# --- Bias correction, if specified --- #
+if bias_correct:
+    print('\tBias correction terms...')
+    # --- Load bias correction reference history file --- #
+    nc_file = os.path.join(
+        EnKF_result_basedir,
+        'history',
+        'EnKF_ensemble_concat',
+        'history.ensref.concat.{}.nc'.format('{}'))
+    ds_hist_ref = load_nc_file_cell(nc_file, start_year, end_year, lat, lon)
+    # --- Load bias correction delta --- #
+    # Get tile fraction
+    if not linear_model:
+        da_tile_frac = determine_tile_frac(vic_global_txt).sel(lat=lat, lon=lon)  # [veg, snow]
+    else:
+        da_tile_frac = xr.DataArray([[1]], coords=[[1], [0]], dims=['veg', 'snow'])
+    # Load delta
+    nc_file = os.path.join(
+        EnKF_result_basedir,
+        'temp',
+        'bias_correct',
+        'delta.concat.{}_{}.nc'.format(start_year, end_year))
+    ds_bc_delta = xr.open_dataset(nc_file)
+    da_bc_delta = ds_bc_delta['delta_soil_moisture'].sel(
+        lat=lat, lon=lon)  # [time, veg_class, snow_band, nlayer]
+    # ### Calculate cell average values ### #
+    # Determine the total number of loops
+    nloop = len(da_bc_delta['time']) * len(da_bc_delta['nlayer'])
+    # Convert into nloop
+    delta = np.rollaxis(da_bc_delta.values, 3, 1)  # [time, nlayer, veg, snow]
+    delta = delta.reshape(
+            [nloop, len(da_bc_delta['veg_class']), len(da_bc_delta['snow_band'])])  # [nloop, nveg, nsnow]
+    tile_frac = da_tile_frac.values  # [nveg, nsnow]
+    # Calculate cell-average value
+    delta_cellAvg = np.array(list(map(
+                lambda i: np.nansum(delta[i, :, :] * tile_frac),
+                range(nloop))))  # [nloop]
+    # Reshape
+    delta_cellAvg = delta_cellAvg.reshape(
+            [len(da_bc_delta['time']), len(da_bc_delta['nlayer'])])  # [time, nlayer]
+    # Put in da
+    da_delta_cellAvg = xr.DataArray(
+            delta_cellAvg,
+            coords=[da_bc_delta['time'], da_bc_delta['nlayer']],
+            dims=['time', 'nlayer'])
 
 # --- Forcings --- #
 print('\tForcings...')
@@ -795,9 +844,17 @@ ts_meas.plot(style='ro', label='Measurement, RMSE={:.3f} mm/mm'.format(rmse_meas
 # plot truth
 ts_truth.plot(color='k', style='-', label='Truth', legend=True)
 # plot open-loop
-ts_openloop.plot(color='m', style='--',
+ts_openloop.plot(color='m', style='-',
                  label='Open-loop, RMSE={:.3f} mm/mm'.format(rmse_openloop),
                  legend=True)
+# Plot bias correction reference
+if bias_correct:
+    ts_bc_ref = ds_hist_ref['OUT_SOIL_MOIST'].sel(
+        nlayer=0,
+        time=slice(plot_start_time, plot_end_time)).to_series() / depth_sm1
+    ts_bc_ref.plot(color='orange', style='-',
+        label='Bias correction reference',
+        legend=True)
 # Make plot looks better
 plt.xlabel('Time')
 plt.ylabel('Soil moiture (mm/mm)')
@@ -833,6 +890,13 @@ p.line(ts.index, ts.values, color="black", line_dash="solid", legend="Truth", li
 ts = ts_openloop
 p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
        legend="Open-loop, RMSE={:.3f} mm/mm".format(rmse_openloop), line_width=2)
+# Plot bias correction reference
+if bias_correct:
+    ts = ds_hist_ref['OUT_SOIL_MOIST'].sel(
+        nlayer=0,
+        time=slice(plot_start_time, plot_end_time)).to_series() / depth_sm1
+    p.line(ts.index, ts.values, color="orange", line_dash="solid",
+        legend="Bias correction reference", line_width=2)
 # Save
 save(p)
 
@@ -882,6 +946,14 @@ ts_truth.plot(color='k', style='-', label='Truth', legend=True)
 ts_openloop.plot(color='m', style='--',
                  label='Open-loop, RMSE={:.5f} mm/mm'.format(rmse_openloop),
                  legend=True)
+# Plot bias correction reference
+if bias_correct:
+    ts_bc_ref = ds_hist_ref['OUT_SOIL_MOIST'].sel(
+        nlayer=1,
+        time=slice(plot_start_time, plot_end_time)).to_series() / depth_sm2
+    ts_bc_ref.plot(color='orange', style='-',
+        label='Bias correction reference',
+        legend=True)
 # Make plot looks better
 plt.xlabel('Time')
 plt.ylabel('Soil moiture (mm/mm)')
@@ -913,6 +985,13 @@ p.line(ts.index, ts.values, color="black", line_dash="solid", legend="Truth", li
 ts = ts_openloop
 p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
        legend="Open-loop, RMSE={:.5f} mm/mm".format(rmse_openloop), line_width=2)
+# Plot bias correction reference
+if bias_correct:
+    ts = ds_hist_ref['OUT_SOIL_MOIST'].sel(
+        nlayer=1,
+        time=slice(plot_start_time, plot_end_time)).to_series() / depth_sm2
+    p.line(ts.index, ts.values, color="orange", line_dash="solid",
+        legend="Bias correction reference", line_width=2)
 # Save
 save(p)
 
@@ -962,6 +1041,14 @@ ts_truth.plot(color='k', style='-', label='Truth', legend=True)
 ts_openloop.plot(color='m', style='--',
                  label='Open-loop, RMSE={:.5f} mm/mm'.format(rmse_openloop),
                  legend=True)
+# Plot bias correction reference
+if bias_correct:
+    ts_bc_ref = ds_hist_ref['OUT_SOIL_MOIST'].sel(
+        nlayer=2,
+        time=slice(plot_start_time, plot_end_time)).to_series() / depth_sm3
+    ts_bc_ref.plot(color='orange', style='-',
+        label='Bias correction reference',
+        legend=True)
 # Make plot looks better
 plt.xlabel('Time')
 plt.ylabel('Soil moiture (mm/mm)')
@@ -969,6 +1056,47 @@ plt.title('Bottom-layer soil moisture, {}, {}, N={}'.format(lat, lon, N))
 # Save figure
 fig.savefig(os.path.join(output_dir, '{}_{}.sm3.png'.format(lat, lon)),
             format='png')
+
+# ========================================================== #
+# Plot - bias correction
+# ========================================================== #
+if bias_correct:
+    print('\tPlot - bias correction...')
+    # --- Regular plot --- #
+    fig = plt.figure(figsize=(12, 6))
+    da_delta_cellAvg.sel(nlayer=0).to_series().plot(
+            color='b', style='-',
+            label='Layer 1', legend=True)
+    da_delta_cellAvg.sel(nlayer=1).to_series().plot(
+            color='orange', style='-',
+            label='Layer 2', legend=True)
+    da_delta_cellAvg.sel(nlayer=2).to_series().plot(
+            color='green', style='-',
+            label='Layer 3', legend=True)
+    plt.xlabel('Time')
+    plt.ylabel('Soil moiture (mm)')
+    plt.title('Bias correction delta of soil moistures, {}, {}, N={}'.format(lat, lon, N))
+    fig.savefig(os.path.join(output_dir, '{}_{}.bc_delta.sm.png'.format(lat, lon)),
+            format='png')
+    # --- Interactive plot --- #
+    output_file(os.path.join(output_dir, '{}_{}.bc_delta.sm.html'.format(lat, lon)))
+    p = figure(title='Bias correction delta of soil moistures, {}, {}, N={}'.format(lat, lon, N),
+           x_axis_label="Time", y_axis_label="Soil moiture (mm)",
+           x_axis_type='datetime', width=1000, height=500)
+    # sm1
+    ts = da_delta_cellAvg.sel(nlayer=0).to_series()
+    p.line(ts.index, ts.values, color="blue", line_dash="solid",
+           legend="Layer 1", line_width=2)
+    # sm2
+    ts = da_delta_cellAvg.sel(nlayer=1).to_series()
+    p.line(ts.index, ts.values, color="orange", line_dash="solid",
+           legend="Layer 2", line_width=2)
+    # sm3
+    ts = da_delta_cellAvg.sel(nlayer=2).to_series()
+    p.line(ts.index, ts.values, color="green", line_dash="solid",
+           legend="Layer 3", line_width=2)
+    # save
+    save(p)
 
 # ========================================================== #
 # Plot - runoff
