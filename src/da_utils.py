@@ -1208,55 +1208,55 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                         pd.DateOffset(hours=24/vic_model_steps_per_day)
         print('\tCalculating for ', current_time, 'to', next_time)
 
-        # (1.1) Calculate gain K
-        time1 = timeit.default_timer()
-        if bias_correct:
-            n_ens = N + 1
-        else:
-            n_ens = N
-        da_x, da_y_est = get_soil_moisture_and_estimated_meas_all_ensemble(
-                                n_ens,
-                                list_da_sm=list_da_sm_prop,
-                                da_tile_frac=da_tile_frac,
-                                nproc=nproc)
-        da_K = calculate_gain_K_whole_field(da_x, da_y_est, R)
-        if debug:
-            ds_K = xr.Dataset({'K': da_K})
-            ds_K.to_netcdf(os.path.join(debug_update_dir,
-                                        'K.{}_{:05d}.nc'.format(
-                                            current_time.strftime('%Y%m%d'),
-                                            current_time.hour*3600+current_time.second)))
-        time2 = timeit.default_timer()
-        print('\t\tTime of calculating gain K: {}'.format(time2-time1))
-
-        # (1.2) Calculate and save normalized innovation
-        time1 = timeit.default_timer()
-        # Calculate ensemble mean of y_est
-        da_y_est_ensMean = da_y_est.mean(dim='N')  # [lat, lon, m]
-        # Calculate non-normalized innovation
-        innov = da_meas.loc[time, :, :, :].values - \
-                da_y_est_ensMean.values  # [lat, lon, m]
-        da_innov = xr.DataArray(innov, coords=[da_y_est_ensMean['lat'],
-                                               da_y_est_ensMean['lon'],
-                                               da_y_est_ensMean['m']],
-                                dims=['lat', 'lon', 'm'])
-        # Normalize innovation
-        da_Pyy = da_y_est.var(dim='N', ddof=1)  # [lat, lon, m]
-        innov_norm = innov / np.sqrt(da_Pyy.values + R)  # [lat, lon, m]
-        da_innov_norm = xr.DataArray(innov_norm,
-                                     coords=[da_y_est_ensMean['lat'],
-                                             da_y_est_ensMean['lon'],
-                                             da_y_est_ensMean['m']],
-                                     dims=['lat', 'lon', 'm'])
-        # Save normalized innovation to netCDf file
-        ds_innov_norm = xr.Dataset({'innov_norm': da_innov_norm})
-        ds_innov_norm.to_netcdf(os.path.join(
-                debug_innov_dir,
-                'innov_norm.{}_{:05d}.nc'.format(
-                        current_time.strftime('%Y%m%d'),
-                        current_time.hour*3600+current_time.second)))
-        time2 = timeit.default_timer()
-        print('\t\tTime of calculating innovation: {}'.format(time2-time1))
+#        # (1.1) Calculate gain K
+#        time1 = timeit.default_timer()
+#        if bias_correct:
+#            n_ens = N + 1
+#        else:
+#            n_ens = N
+#        da_x, da_y_est = get_soil_moisture_and_estimated_meas_all_ensemble(
+#                                n_ens,
+#                                list_da_sm=list_da_sm_prop,
+#                                da_tile_frac=da_tile_frac,
+#                                nproc=nproc)
+#        da_K = calculate_gain_K_whole_field(da_x, da_y_est, R)
+#        if debug:
+#            ds_K = xr.Dataset({'K': da_K})
+#            ds_K.to_netcdf(os.path.join(debug_update_dir,
+#                                        'K.{}_{:05d}.nc'.format(
+#                                            current_time.strftime('%Y%m%d'),
+#                                            current_time.hour*3600+current_time.second)))
+#        time2 = timeit.default_timer()
+#        print('\t\tTime of calculating gain K: {}'.format(time2-time1))
+#
+#        # (1.2) Calculate and save normalized innovation
+#        time1 = timeit.default_timer()
+#        # Calculate ensemble mean of y_est
+#        da_y_est_ensMean = da_y_est.mean(dim='N')  # [lat, lon, m]
+#        # Calculate non-normalized innovation
+#        innov = da_meas.loc[time, :, :, :].values - \
+#                da_y_est_ensMean.values  # [lat, lon, m]
+#        da_innov = xr.DataArray(innov, coords=[da_y_est_ensMean['lat'],
+#                                               da_y_est_ensMean['lon'],
+#                                               da_y_est_ensMean['m']],
+#                                dims=['lat', 'lon', 'm'])
+#        # Normalize innovation
+#        da_Pyy = da_y_est.var(dim='N', ddof=1)  # [lat, lon, m]
+#        innov_norm = innov / np.sqrt(da_Pyy.values + R)  # [lat, lon, m]
+#        da_innov_norm = xr.DataArray(innov_norm,
+#                                     coords=[da_y_est_ensMean['lat'],
+#                                             da_y_est_ensMean['lon'],
+#                                             da_y_est_ensMean['m']],
+#                                     dims=['lat', 'lon', 'm'])
+#        # Save normalized innovation to netCDf file
+#        ds_innov_norm = xr.Dataset({'innov_norm': da_innov_norm})
+#        ds_innov_norm.to_netcdf(os.path.join(
+#                debug_innov_dir,
+#                'innov_norm.{}_{:05d}.nc'.format(
+#                        current_time.strftime('%Y%m%d'),
+#                        current_time.hour*3600+current_time.second)))
+#        time2 = timeit.default_timer()
+#        print('\t\tTime of calculating innovation: {}'.format(time2-time1))
 
         # (1.3) Update states for each ensemble member
         # Set up dir for updated states
@@ -1267,35 +1267,35 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         out_updated_state_dir = setup_output_dirs(
                 output_vic_state_root_dir,
                 mkdirs=[updated_states_dir_name])[updated_states_dir_name]
-        time11 = timeit.default_timer()
-        # Update states
-        list_da_updated, da_x_updated, da_update_increm, da_v = \
-            update_states_ensemble(
-                da_y_est, da_K,
-                da_meas.loc[time, :, :, :],
-                R,
-                list_da_sm_to_update=list_da_sm_prop,
-                out_vic_state_dir=out_updated_state_dir,
-                da_max_moist_n=da_max_moist_n,
-                adjust_negative=adjust_negative,
-                nproc=nproc)
-        if debug:
-            # Save update increment to netCDF file
-            ds_update_increm = xr.Dataset({'update_increment': da_update_increm})
-            ds_update_increm.to_netcdf(os.path.join(
-                    debug_update_dir,
-                    'update_increm.{}_{:05d}.nc'.format(
-                             current_time.strftime('%Y%m%d'),
-                             current_time.hour*3600+current_time.second)))
-            # Save measurement perturbation in the update step to netCDF file
-            ds_v = xr.Dataset({'meas_perturbation': da_v})
-            ds_v.to_netcdf(os.path.join(
-                    debug_update_dir,
-                    'meas_perturbation.{}_{:05d}.nc'.format(
-                             current_time.strftime('%Y%m%d'),
-                             current_time.hour*3600+current_time.second)))
-        time22 = timeit.default_timer()
-        print('\t\t\tTime of updating states: {}'.format(time22-time11))
+#        time11 = timeit.default_timer()
+#        # Update states
+#        list_da_updated, da_x_updated, da_update_increm, da_v = \
+#            update_states_ensemble(
+#                da_y_est, da_K,
+#                da_meas.loc[time, :, :, :],
+#                R,
+#                list_da_sm_to_update=list_da_sm_prop,
+#                out_vic_state_dir=out_updated_state_dir,
+#                da_max_moist_n=da_max_moist_n,
+#                adjust_negative=adjust_negative,
+#                nproc=nproc)
+#        if debug:
+#            # Save update increment to netCDF file
+#            ds_update_increm = xr.Dataset({'update_increment': da_update_increm})
+#            ds_update_increm.to_netcdf(os.path.join(
+#                    debug_update_dir,
+#                    'update_increm.{}_{:05d}.nc'.format(
+#                             current_time.strftime('%Y%m%d'),
+#                             current_time.hour*3600+current_time.second)))
+#            # Save measurement perturbation in the update step to netCDF file
+#            ds_v = xr.Dataset({'meas_perturbation': da_v})
+#            ds_v.to_netcdf(os.path.join(
+#                    debug_update_dir,
+#                    'meas_perturbation.{}_{:05d}.nc'.format(
+#                             current_time.strftime('%Y%m%d'),
+#                             current_time.hour*3600+current_time.second)))
+#        time22 = timeit.default_timer()
+#        print('\t\t\tTime of updating states: {}'.format(time22-time11))
 
         # (1.4) Save updated states to nc files
         time11 = timeit.default_timer()
@@ -1304,7 +1304,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                 state_dir_before_update=state_dir_after_prop,
                 state_time=current_time,
                 out_vic_state_dir=out_updated_state_dir,
-                list_da_updated=list_da_updated,
+                list_da_updated=list_da_sm_prop, # list_da_updated,
                 bias_correct=bias_correct,
                 nproc=nproc)
         if bias_correct:
