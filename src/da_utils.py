@@ -1524,44 +1524,9 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
             time2 = timeit.default_timer()
             print('\t\tTime of deleting history directories: {}'.format(time2-time1))
 
-    # --- Concat and clean up normalized innovation results --- #
-    time1 = timeit.default_timer()
-    print('\tInnovation...')
-    list_da = []
-    list_file_to_delete = []
-    times = da_meas[da_meas_time_var].values
-    for time in times:
-        t = pd.to_datetime(time)
-        # Load data
-        fname = '{}/innov_norm.{}_{:05d}.nc'.format(
-                    debug_innov_dir, t.strftime('%Y%m%d'),
-                    t.hour*3600+t.second)
-        da = xr.open_dataset(fname)['innov_norm'].sel(m=1)  # [lat, lon]
-        # Put data in array
-        list_da.append(da)
-        # Add individual file to list to delete
-        list_file_to_delete.append(fname)
-    # Concat innovation of all times
-    da_innov_norm = xr.concat(list_da, dim='time')
-    da_innov_norm['time'] = da_meas[da_meas_time_var].values
-    # Write to file
-    ds_innov_norm = xr.Dataset({'innov_norm': da_innov_norm})
-    ds_innov_norm.to_netcdf(
-        os.path.join(
-            debug_innov_dir,
-            'innov_norm.concat.{}_{}.nc'.format(
-                    pd.to_datetime(times[0]).year,
-                    pd.to_datetime(times[-1]).year)),
-        format='NETCDF4_CLASSIC')
-    # Delete individule files
-    for f in list_file_to_delete:
-        os.remove(f)
-    time2 = timeit.default_timer()
-    print('Time of concatenating innovation: {}'.format(time2-time1))
-
     # --- Concat and clean up ormalized debugging results --- #
     if debug:
-        # Bias correction
+        # --- Bias correction --- #
         time1 = timeit.default_timer()
         print('\tConcatenating debugging results...')
         list_da = []
@@ -1595,6 +1560,41 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
             os.remove(f)
         time2 = timeit.default_timer()
         print('Time of concatenating bias correction delta: {}'.format(time2-time1))
+
+        # --- Perturbation --- #
+        time1 = timeit.default_timer()
+        print('\tConcatenating debugging results - perturbation...')
+        list_da = []
+        list_file_to_delete = []
+        times = da_meas[da_meas_time_var].values
+        for time in times:
+            t = pd.to_datetime(time)
+            # Load data
+            fname = '{}/perturbation.{}_{:05d}.nc'.format(
+                        debug_perturbation_dir, t.strftime('%Y%m%d'),
+                        t.hour*3600+t.second)
+            da = xr.open_dataset(fname)['soil_moisture_perturbation']
+            # Put data in array
+            list_da.append(da)
+            # Add individual file to list to delete
+            list_file_to_delete.append(fname)
+        # Concat all times
+        da_concat = xr.concat(list_da, dim='time')
+        da_concat['time'] = da_meas[da_meas_time_var].values
+        # Write to file
+        ds_concat = xr.Dataset({'soil_moisture_perturbation': da_concat})
+        ds_concat.to_netcdf(
+            os.path.join(
+                debug_perturbation_dir,
+                'perturbation.concat.{}_{}.nc'.format(
+                        pd.to_datetime(times[0]).year,
+                        pd.to_datetime(times[-1]).year)),
+            format='NETCDF4_CLASSIC')
+        # Delete individule files
+        for f in list_file_to_delete:
+            os.remove(f)
+        time2 = timeit.default_timer()
+        print('Time of concatenating perturbation: {}'.format(time2-time1))
 
 
 def to_netcdf_history_file_compress(ds_hist, out_nc):
