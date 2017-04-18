@@ -473,45 +473,21 @@ ds_force_ens['N'] = range(1, N+1)  # [N, time]
 # --- Diagnostics - perturbation --- #
 if debug:
     print('\tDiagnostics - perturbation...')
-    
+
     # Get tile fraction
     if not linear_model:
         da_tile_frac = determine_tile_frac(vic_global_txt).sel(lat=lat, lon=lon)  # [veg, snow]
     else:
         da_tile_frac = xr.DataArray([[1]], coords=[[1], [0]], dims=['veg', 'snow'])
-    
-    # Initial state perturbation
-    init_dir = os.path.join(
-                    EnKF_result_basedir, 'temp',
-                    'init.{}_{:05d}'.format(init_time.strftime('%Y%m%d'),
-                                            init_time.hour*3600+init_time.second))
-    list_da = []
-    for i in range(N):
-        fname = os.path.join(init_dir, 'perturbation.ens{}.nc'.format(i+1))
-        da = xr.open_dataset(fname)['STATE_SOIL_MOISTURE'].sel(
-                    lat=lat, lon=lon)  # [veg_class, snow_band, nlayer]
-        list_da.append(da)
-    # Concat all ensemble members together
-    da_init_perturbation = xr.concat(list_da, dim='N')
-    da_init_perturbation['N'] = range(1, N+1)  # [N, veg_class, snow_band, nlayer]
-    
-    # State perturbation
-    list_da = []
-    for i, t in enumerate(times):
-        # Load data
-        fname = os.path.join(
-                    EnKF_result_basedir, 'temp', 'perturbation',
-                    'perturbation.{}_{:05d}.nc'.format(
-                    t.strftime('%Y%m%d'),
-                    t.hour*3600+t.second))
-        da = xr.open_dataset(fname).sel(lat=lat, lon=lon)['soil_moisture_perturbation']
-            # [N, veg_class, snow_band, nlayer]
-        # Put data in array
-        list_da.append(da)
-    # Concat all time points (together with initial state)
-    da_perturbation = xr.concat([da_init_perturbation] + list_da, dim='time')
-    da_perturbation['time'] = pd.to_datetime([init_time] + list(times))
-        # [time, N, veg_class, snow_band, nlayer]
+
+    # --- State perturbation --- #
+    # Load data
+    fname = os.path.join(
+                EnKF_result_basedir, 'temp', 'perturbation',
+                'perturbation.concat.{}_{}.nc'.format(start_year, end_year))
+    da_perturbation = xr.open_dataset(fname).sel(lat=lat, lon=lon)\
+        ['soil_moisture_perturbation'] # [time, N, veg_class, snow_band, nlayer]
+
     # Extract coords
     veg_coord = da_perturbation['veg_class']
     snow_coord = da_perturbation['snow_band']
@@ -526,7 +502,7 @@ if debug:
             perturbation,
             coords=[time_coord, N_coord, nlayer_coord, veg_coord, snow_coord],
             dims=['time', 'N', 'nlayer', 'veg_class', 'snow_band'])
-    
+
     # ### Calculate cell average values ### #
     # Determine the total number of loops
     nloop = len(time_coord) * N * len(nlayer_coord)
@@ -546,25 +522,22 @@ if debug:
             perturbation_cellAvg,
             coords=[time_coord, N_coord, nlayer_coord],
             dims=['time', 'N', 'nlayer'])
-    
+
     # --- Diagnostics - update increment --- #
     print('\tDiagnostics - update increments...')
-    
-    list_da = []
-    for i, t in enumerate(times):
-        # Load data
-        fname = os.path.join(
-                    EnKF_result_basedir, 'temp', 'update',
-                    'update_increm.{}_{:05d}.nc'.format(
-                    t.strftime('%Y%m%d'),
-                    t.hour*3600+t.second))
-        da = xr.open_dataset(fname).sel(lat=lat, lon=lon)['update_increment']
-            # [N, n]
-        # Put data in array
-        list_da.append(da)
-    # Concat all time points (together with initial state)
-    da_update_increm = xr.concat(list_da, dim='time')  # [time, N, n]
-    da_update_increm['time'] = times
+
+    if bias_correct:
+        n_ens = N + 1
+    else:
+        n_ens = N
+
+    # Load data
+    fname = os.path.join(
+                EnKF_result_basedir, 'temp', 'update',
+                'update_increment.concat.{}_{}.nc'.format(start_year, end_year))
+    da_update_increm = xr.open_dataset(fname).sel(
+        lat=lat, lon=lon)['update_increment'] # [time, n_ens, n]
+
     # Extract coords
     N_coord = da_update_increm['N']
     # Reshape da and reorder dimensions
@@ -576,10 +549,10 @@ if debug:
                                     coords=[times, N_coord, nlayer_coord,
                                             veg_coord, snow_coord],
                                     dims=['time', 'N', 'nlayer', 'veg_class', 'snow_band'])
-    
+
     # ### Calculate cell average values ### #
     # Determine the total number of loops
-    nloop = len(times) * N * len(nlayer_coord)
+    nloop = len(times) * n_ens * len(nlayer_coord)
     # Convert da_x and da_tile_frac to np.array and straighten lat and lon into nloop
     update_increm = update_increm.reshape(
             [nloop, len(veg_coord), len(snow_coord)])  # [nloop, nveg, nsnow]
@@ -590,86 +563,12 @@ if debug:
                 range(nloop))))  # [nloop]
     # Reshape
     update_increm_cellAvg = update_increm_cellAvg.reshape(
-            [len(times), N, len(nlayer_coord)])  # [time, N, nlayer]
+            [len(times), n_ens, len(nlayer_coord)])  # [time, N, nlayer]
     # Put in da
     da_update_increm_cellAvg = xr.DataArray(
             update_increm_cellAvg,
             coords=[times, N_coord, nlayer_coord],
             dims=['time', 'N', 'nlayer'])
-    
-    # --- Diagnostics - gain K --- #
-    print('\tDiagnostics - gain K...')
-    list_da = []
-    for i, t in enumerate(times):
-        # Load data
-        fname = os.path.join(
-                    EnKF_result_basedir, 'temp', 'update',
-                    'K.{}_{:05d}.nc'.format(
-                    t.strftime('%Y%m%d'),
-                    t.hour*3600+t.second))
-        da = xr.open_dataset(fname).sel(lat=lat, lon=lon)['K']
-            # [n, m=1]
-        # Put data in array
-        list_da.append(da)
-    # Concat all time points (together with initial state)
-    da_K = xr.concat(list_da, dim='time')  # [time, n, m=1]
-    da_K['time'] = times
-    # Reshape da and reorder dimensions
-    K = da_K.values.reshape(
-                        [len(times), len(nlayer_coord),
-                         len(veg_coord), len(snow_coord)])
-    # Put data back to a da [time, veg_class, snow_band, nlayer]
-    da_K = xr.DataArray(K,
-                        coords=[times, nlayer_coord,
-                                veg_coord, snow_coord],
-                        dims=['time', 'nlayer', 'veg_class', 'snow_band'])
-    
-    # ### Calculate cell average values ### #
-    # Determine the total number of loops
-    nloop = len(times) * len(nlayer_coord)
-    # Convert da_x and da_tile_frac to np.array and straighten lat and lon into nloop
-    K = K.reshape(
-            [nloop, len(veg_coord), len(snow_coord)])  # [nloop, nveg, nsnow]
-    tile_frac = da_tile_frac.values  # [nveg, nsnow]
-    # Calculate cell-average value
-    K_cellAvg = np.array(list(map(
-                lambda i: np.nansum(K[i, :, :] * tile_frac),
-                range(nloop))))  # [nloop]
-    # Reshape
-    K_cellAvg = K_cellAvg.reshape(
-            [len(times), len(nlayer_coord)])  # [time, nlayer]
-    # Put in da
-    da_K_cellAvg = xr.DataArray(
-            K_cellAvg,
-            coords=[times, nlayer_coord],
-            dims=['time', 'nlayer'])
-    
-    # --- Diagnostics - measurement perturbation v --- #
-    print('\tDiagnostics - measurement perturbation...')
-    
-    list_da = []
-    for i, t in enumerate(times):
-        # Load data
-        fname = os.path.join(
-                    EnKF_result_basedir, 'temp', 'update',
-                    'meas_perturbation.{}_{:05d}.nc'.format(
-                    t.strftime('%Y%m%d'),
-                    t.hour*3600+t.second))
-        da = xr.open_dataset(fname).sel(lat=lat, lon=lon)['meas_perturbation']
-            # [N, n]
-        # Put data in array
-        list_da.append(da)
-    # Concat all time points (together with initial state)
-    da_v = xr.concat(list_da, dim='time')  # [time, N, m=1]
-    da_v['time'] = times
-    # Extract coords
-    N_coord = da_v['N']
-    # Reshape da - [time, N]
-    v = da_v.values.reshape([len(times), len(N_coord)])
-    # Put data back to a da [time, N]
-    da_v = xr.DataArray(v,
-                        coords=[times, N_coord],
-                        dims=['time', 'N'])
 
 
 # ========================================================== #
@@ -1098,6 +997,141 @@ if bias_correct:
     # save
     save(p)
 
+    # --- Regular plot - cumulative delta --- #
+    fig = plt.figure(figsize=(12, 6))
+    da_delta_cellAvg.sel(nlayer=0).to_series().cumsum().plot(
+            color='b', style='-',
+            label='Layer 1', legend=True)
+    da_delta_cellAvg.sel(nlayer=1).to_series().cumsum().plot(
+            color='orange', style='-',
+            label='Layer 2', legend=True)
+    da_delta_cellAvg.sel(nlayer=2).to_series().cumsum().plot(
+            color='green', style='-',
+            label='Layer 3', legend=True)
+    plt.xlabel('Time')
+    plt.ylabel('Soil moisture cumulative delta (mm)')
+    plt.title('Cumulative sum of bias correction delta of soil moistures, ' \
+              '{}, {}, N={}'.format(lat, lon, N))
+    fig.savefig(os.path.join(output_dir, '{}_{}.bc_delta_cumsum.sm.png'.format(lat, lon)),
+            format='png')
+
+
+# ========================================================== #
+# Plot - Update increment - cumulative
+# ========================================================== #
+if debug:
+    fig = plt.figure(figsize=(12, 6))
+    da_update_increm_cellAvg.mean(dim='N').sel(nlayer=0).to_series().cumsum().plot(
+            color='b', style='-',
+            label='Layer 1', legend=True)
+    da_update_increm_cellAvg.mean(dim='N').sel(nlayer=1).to_series().cumsum().plot(
+            color='orange', style='-',
+            label='Layer 2', legend=True)
+    da_update_increm_cellAvg.mean(dim='N').sel(nlayer=2).to_series().cumsum().plot(
+            color='green', style='-',
+            label='Layer 3', legend=True)
+    plt.xlabel('Time')
+    plt.ylabel('Soil moiture update increment (mm)')
+    plt.title('Cumulative sum of Kalman update of soil moistures, ' \
+              '{}, {}, N={}'.format(lat, lon, N))
+    fig.savefig(os.path.join(output_dir,
+                             '{}_{}.update_increm_cumsum.sm.png'.format(lat, lon)),
+                format='png')
+
+
+# ========================================================== #
+# Plot - update increm vs. bias correct delta
+# ========================================================== #
+if debug and bias_correct:
+    # sm1
+    ts_update_increm = da_update_increm_cellAvg.mean(dim='N').sel(nlayer=0).to_series()
+    ts_bc_delta = da_delta_cellAvg.sel(nlayer=0).to_series()
+    fig = plt.figure(figsize=(6, 6))
+    plt.scatter(ts_bc_delta, ts_update_increm, linewidths=0, alpha=0.2)
+    plt.xlabel('Bias correction delta (mm)', fontsize=16)
+    plt.ylabel('Kalman update increment (mm)', fontsize=16)
+    plt.title('sm1, Kalman update increments v.s.\nbias correction delta at all time steps',
+              fontsize=16)
+    fig.savefig(os.path.join(output_dir,
+                             '{}_{}.update_increm_bc_delta.sm1.png'.format(lat, lon)),
+                format='png')
+    # sm2
+    ts_update_increm = da_update_increm_cellAvg.mean(dim='N').sel(nlayer=1).to_series()
+    ts_bc_delta = da_delta_cellAvg.sel(nlayer=1).to_series()
+    fig = plt.figure(figsize=(6, 6))
+    plt.scatter(ts_bc_delta, ts_update_increm, linewidths=0, alpha=0.2)
+    plt.xlabel('Bias correction delta (mm)', fontsize=16)
+    plt.ylabel('Kalman update increment (mm)', fontsize=16)
+    plt.title('sm2, Kalman update increments v.s.\nbias correction delta at all time steps',
+              fontsize=16)
+    fig.savefig(os.path.join(output_dir,
+                             '{}_{}.update_increm_bc_delta.sm2.png'.format(lat, lon)),
+                format='png')
+    # sm3
+    ts_update_increm = da_update_increm_cellAvg.mean(dim='N').sel(nlayer=2).to_series()
+    ts_bc_delta = da_delta_cellAvg.sel(nlayer=2).to_series()
+    fig = plt.figure(figsize=(6, 6))
+    plt.scatter(ts_bc_delta, ts_update_increm, linewidths=0, alpha=0.2)
+    plt.xlabel('Bias correction delta (mm)', fontsize=16)
+    plt.ylabel('Kalman update increment (mm)', fontsize=16)
+    plt.title('sm3, Kalman update increments v.s.\nbias correction delta at all time steps',
+              fontsize=16)
+    fig.savefig(os.path.join(output_dir,
+                             '{}_{}.update_increm_bc_delta.sm3.png'.format(lat, lon)),
+                format='png')
+
+
+# ========================================================== #
+# Plot - bias correct delta v.s. sm value
+# ========================================================== #
+if bias_correct:
+    # sm1
+    ts_bc_delta = da_delta_cellAvg.sel(nlayer=0).to_series()
+    ts_sm_ensMean = ds_EnKF['OUT_SOIL_MOIST'].sel(
+        nlayer=0, time=slice(plot_start_time, plot_end_time)).mean(dim='N').to_series()
+    df = pd.concat([ts_bc_delta, ts_sm_ensMean], axis=1,
+               keys=['bc_delta', 'sm_ensMean']).dropna()
+    fig = plt.figure(figsize=(6, 6))
+    plt.scatter(df['sm_ensMean'], df['bc_delta'], linewidths=0, alpha=0.2)
+    plt.xlabel('Soil moisture (mm)', fontsize=16)
+    plt.ylabel('Bias correction delta (mm)', fontsize=16)
+    plt.title('sm1, bias correction delta vs.\nsoil moisture value at all time steps',
+              fontsize=16)
+    fig.savefig(os.path.join(output_dir,
+                             '{}_{}.bc_delta_sm.sm1.png'.format(lat, lon)),
+                format='png')
+    # sm2
+    ts_bc_delta = da_delta_cellAvg.sel(nlayer=1).to_series()
+    ts_sm_ensMean = ds_EnKF['OUT_SOIL_MOIST'].sel(
+        nlayer=1, time=slice(plot_start_time, plot_end_time)).mean(dim='N').to_series()
+    df = pd.concat([ts_bc_delta, ts_sm_ensMean], axis=1,
+               keys=['bc_delta', 'sm_ensMean']).dropna()
+    fig = plt.figure(figsize=(6, 6))
+    plt.scatter(df['sm_ensMean'], df['bc_delta'], linewidths=0, alpha=0.2)
+    plt.xlabel('Soil moisture (mm)', fontsize=16)
+    plt.ylabel('Bias correction delta (mm)', fontsize=16)
+    plt.title('sm2, bias correction delta vs.\nsoil moisture value at all time steps',
+              fontsize=16)
+    fig.savefig(os.path.join(output_dir,
+                             '{}_{}.bc_delta_sm.sm2.png'.format(lat, lon)),
+                format='png')
+    # sm3
+    ts_bc_delta = da_delta_cellAvg.sel(nlayer=2).to_series()
+    ts_sm_ensMean = ds_EnKF['OUT_SOIL_MOIST'].sel(
+        nlayer=2, time=slice(plot_start_time, plot_end_time)).mean(dim='N').to_series()
+    df = pd.concat([ts_bc_delta, ts_sm_ensMean], axis=1,
+               keys=['bc_delta', 'sm_ensMean']).dropna()
+    fig = plt.figure(figsize=(6, 6))
+    plt.scatter(df['sm_ensMean'], df['bc_delta'], linewidths=0, alpha=0.2)
+    plt.xlabel('Soil moisture (mm)', fontsize=16)
+    plt.ylabel('Bias correction delta (mm)', fontsize=16)
+    plt.title('sm3, bias correction delta vs.\nsoil moisture value at all time steps',
+              fontsize=16)
+    fig.savefig(os.path.join(output_dir,
+                             '{}_{}.bc_delta_sm.sm3.png'.format(lat, lon)),
+                format='png')
+
+
 # ========================================================== #
 # Plot - runoff
 # ========================================================== #
@@ -1146,6 +1180,7 @@ if not linear_model:
            legend="Open-loop, RMSE={:.3f} mm".format(rmse_openloop), line_width=2)
     # Save
     save(p)
+
 
 # ========================================================== #
 # Plot - runoff, aggregated to daily
@@ -1396,226 +1431,4 @@ if not linear_model:
            legend="Open-loop, RMSE={:.3f} mm".format(rmse_openloop), line_width=2)
     # Save
     save(p)
-
-# ========================================================== #
-# Plot - diagnostics
-# ========================================================== #
-if debug:
-    print('\tPlot - diagnostics...')
-    # --- Perturbation --- #
-    fig = plt.figure(figsize=(12, 5))
-    s1 = da_perturbation_cellAvg.sel(N=ens, nlayer=0).to_series()
-    s1.plot(color='b',
-            label='Layer 1, mean={:.2f}, var={:.2f}'.format(s1.mean(), s1.var()),
-            legend=True)
-    s2 = da_perturbation_cellAvg.sel(N=ens, nlayer=1).to_series()
-    s2.plot(color='g',
-            label='Layer 2, mean={:.2f}, var={:.2f}'.format(s2.mean(), s2.var()),
-            legend=True)
-    s3 = da_perturbation_cellAvg.sel(N=ens, nlayer=2).to_series()
-    s3.plot(color='r',
-            label='Layer 3, mean={:.2f}, var={:.2f}'.format(s3.mean(), s3.var()),
-            legend=True)
-    # Make plot looks better
-    plt.legend(loc='upper right')
-    plt.xlabel('Time')
-    plt.ylabel('Soil moiture (mm)')
-    plt.title('Soil moisture perturbation amount, {}, {}, ens. {}'.format(lat, lon, ens))
-    # Save figure
-    fig.savefig(os.path.join(output_dir,
-                             '{}_{}.debug.perturbation.ens{}.png'.format(lat, lon, ens)),
-                format='png')
-    
-    # --- Gain K --- #
-    fig = plt.figure(figsize=(12, 5))
-    s_K_cellAvg_1 = da_K_cellAvg.sel(nlayer=0).to_series()
-    s_K_cellAvg_2 = da_K_cellAvg.sel(nlayer=1).to_series()
-    s_K_cellAvg_3 = da_K_cellAvg.sel(nlayer=2).to_series()
-    
-    s_K_cellAvg_1.plot(color='b', label='Layer 1', legend=True)
-    s_K_cellAvg_2.plot(color='g', label='Layer 2', legend=True)
-    s_K_cellAvg_3.plot(color='r', label='Layer 3', legend=True)
-    # Make plot looks better
-    plt.legend(loc='upper right')
-    plt.xlabel('Time')
-    plt.ylabel('Gain K')
-    plt.title('Gain K, {}, {}'.format(lat, lon))
-    # Save figure
-    fig.savefig(os.path.join(output_dir,
-                             '{}_{}.debug.K.png'.format(lat, lon)),
-                format='png')
-    # ----- Interactive version ----- #
-    # Create figure
-    output_file(os.path.join(output_dir, '{}_{}.debug.K.html'.format(lat, lon)))
-
-    p = figure(title='Gain K, {}, {}'.format(lat, lon),
-               x_axis_label="Time", y_axis_label="Gain K",
-               x_axis_type='datetime', width=1000, height=500)
-    # plot
-    p.line(s_K_cellAvg_1.index, s_K_cellAvg_1.values, color="blue",
-           line_dash="solid", legend="Layer 1", line_width=2)
-    p.line(s_K_cellAvg_2.index, s_K_cellAvg_2.values, color="green",
-           line_dash="solid", legend="Layer 2", line_width=2)
-    p.line(s_K_cellAvg_3.index, s_K_cellAvg_3.values, color="red",
-           line_dash="solid", legend="Layer 3", line_width=2)
-    # Save
-    save(p)
-    
-    # --- Scatter plot --- #
-    fig = plt.figure(figsize=(18, 5))
-    plt.subplot(131)
-    plt.scatter(s_K_cellAvg_1, s_K_cellAvg_2)
-    plt.xlabel('Gain K, layer 1')
-    plt.ylabel('Gain K, layer 2')
-    plt.subplot(132)
-    plt.scatter(s_K_cellAvg_1, s_K_cellAvg_3)
-    plt.xlabel('Gain K, layer 1')
-    plt.ylabel('Gain K, layer 3')
-    plt.title('Gain K vertical relation, {}, {}'.format(lat, lon),
-              fontsize=20)
-    plt.subplot(133)
-    plt.scatter(s_K_cellAvg_2, s_K_cellAvg_3)
-    plt.xlabel('Gain K, layer 2')
-    plt.ylabel('Gain K, layer 3')
-    # Save figure
-    fig.savefig(os.path.join(output_dir,
-                             '{}_{}.debug.K_vertical_relation.png'.format(lat, lon)),
-                format='png')
-    
-    # --- Sum of update increments of layer 1 and layer 2 --- #
-    s_update1 = da_update_increm_cellAvg.sel(N=ens, nlayer=0).to_series()
-    s_update2 = da_update_increm_cellAvg.sel(N=ens, nlayer=1).to_series()
-    
-    fig = plt.figure(figsize=(12, 5))
-    (s_update1 + s_update2).plot(color='k')
-    # Make plot looks better
-    plt.xlabel('Time')
-    plt.ylabel('Soil moiture (mm)')
-    plt.title('(Layer 1 + layer 2) update amount, {}, {}, ens. {}'.format(lat, lon, ens))
-    # Save figure
-    fig.savefig(os.path.join(output_dir,
-                             '{}_{}.debug.update_increm_sm12.ens{}.png'.format(lat, lon, ens)),
-                format='png')
-    
-    # ========================================================== #
-    # Plot - diagnostics
-    # ========================================================== #
-    # --- Perturbation --- #
-    ens = 1
-    
-    fig = plt.figure(figsize=(12, 5))
-    s1 = da_update_increm_cellAvg.sel(N=ens, nlayer=0).to_series()
-    s1.plot(color='b',
-            label='Layer 1, mean={:.2f}, var={:.2f}'.format(s1.mean(), s1.var()),
-            legend=True)
-    s2 = da_update_increm_cellAvg.sel(N=ens, nlayer=1).to_series()
-    s2.plot(color='g',
-            label='Layer 2, mean={:.2f}, var={:.2f}'.format(s2.mean(), s2.var()),
-            legend=True)
-    s3 = da_update_increm_cellAvg.sel(N=ens, nlayer=2).to_series()
-    s3.plot(color='r',
-            label='Layer 3, mean={:.2f}, var={:.2f}'.format(s3.mean(), s3.var()),
-            legend=True)
-    # Make plot looks better
-    plt.legend(loc='upper right')
-    plt.xlabel('Time')
-    plt.ylabel('Soil moiture (mm)')
-    plt.title('Soil moisture Kalman update amount, {}, {}, ens. {}'.format(lat, lon, ens))
-    # Save figure
-    fig.savefig(os.path.join(output_dir,
-                             '{}_{}.debug.update_increm.ens{}.png'.format(lat, lon, ens)),
-                format='png')
-    
-    # --- Compare perturb & update, sm1 --- #
-    s_perturbation = da_perturbation_cellAvg.sel(N=ens, nlayer=0).to_series()
-    s_update = da_update_increm_cellAvg.sel(N=ens, nlayer=0).to_series()
-    
-    fig = plt.figure(figsize=(12, 5))
-    ax = plt.axes()
-    s_perturbation.plot(color='b',
-                        label='Perturbation, sum={:.2f} mm'.format(s_perturbation.sum()))
-    s_update.plot(color='g',
-                  label='Update increm., sum={:.2f} mm'.format(s_update.sum()))
-    # Calculate mean diff of openloop and truth
-    ts_openloop = ds_openloop['OUT_SOIL_MOIST'].sel(
-                    lat=lat, lon=lon, nlayer=0,
-                    time=slice(plot_start_time, plot_end_time)).to_series()
-    ts_truth = ds_truth['OUT_SOIL_MOIST'].sel(
-                    lat=lat, lon=lon, nlayer=0,
-                    time=slice(plot_start_time, plot_end_time)).to_series()
-    diff_openloop_truth = (ts_openloop - ts_truth).mean()
-    # Make plot better
-    # Make plot looks better
-    plt.legend(loc='upper right')
-    plt.xlabel('Time')
-    plt.ylabel('Soil moiture (mm)')
-    plt.title('sm1, ens. {}\n{}, {}, avg.(openloop - truth) = {:.1f} mm'.format(
-                    ens, lat, lon, diff_openloop_truth))
-    # Save figure
-    fig.savefig(os.path.join(output_dir,
-                             '{}_{}.debug.cmp_pert_update.sm1.ens{}.png'.format(lat, lon, ens)),
-                format='png')
-    
-    # --- Compare perturb & update, sm2 --- #
-    s_perturbation = da_perturbation_cellAvg.sel(N=ens, nlayer=1).to_series()
-    s_update = da_update_increm_cellAvg.sel(N=ens, nlayer=1).to_series()
-    
-    fig = plt.figure(figsize=(12, 5))
-    ax = plt.axes()
-    s_perturbation.plot(color='b',
-                        label='Perturbation, sum={:.2f} mm'.format(s_perturbation.sum()))
-    s_update.plot(color='g',
-                  label='Update increm., sum={:.2f} mm'.format(s_update.sum()))
-    # Calculate mean diff of openloop and truth
-    ts_openloop = ds_openloop['OUT_SOIL_MOIST'].sel(
-                    lat=lat, lon=lon, nlayer=1,
-                    time=slice(plot_start_time, plot_end_time)).to_series()
-    ts_truth = ds_truth['OUT_SOIL_MOIST'].sel(
-                    lat=lat, lon=lon, nlayer=1,
-                    time=slice(plot_start_time, plot_end_time)).to_series()
-    diff_openloop_truth = (ts_openloop - ts_truth).mean()
-    # Make plot better
-    # Make plot looks better
-    plt.legend(loc='upper right')
-    plt.xlabel('Time')
-    plt.ylabel('Soil moiture (mm)')
-    plt.title('sm2, ens. {}\n{}, {}, avg.(openloop - truth) = {:.1f} mm'.format(
-                    ens, lat, lon, diff_openloop_truth))
-    # Save figure
-    fig.savefig(os.path.join(output_dir,
-                             '{}_{}.debug.cmp_pert_update.sm2.ens{}.png'.format(lat, lon, ens)),
-                format='png')
-    
-    # --- Compare perturb & update, sm3 --- #
-    s_perturbation = da_perturbation_cellAvg.sel(N=ens, nlayer=2).to_series()
-    s_update = da_update_increm_cellAvg.sel(N=ens, nlayer=2).to_series()
-    
-    fig = plt.figure(figsize=(12, 5))
-    ax = plt.axes()
-    s_perturbation.plot(color='b',
-                        label='Perturbation, sum={:.2f} mm'.format(s_perturbation.sum()))
-    s_update.plot(color='g',
-                  label='Update increm., sum={:.2f} mm'.format(s_update.sum()))
-    # Calculate mean diff of openloop and truth
-    ts_openloop = ds_openloop['OUT_SOIL_MOIST'].sel(
-                    lat=lat, lon=lon, nlayer=2,
-                    time=slice(plot_start_time, plot_end_time)).to_series()
-    ts_truth = ds_truth['OUT_SOIL_MOIST'].sel(
-                    lat=lat, lon=lon, nlayer=2,
-                    time=slice(plot_start_time, plot_end_time)).to_series()
-    diff_openloop_truth = (ts_openloop - ts_truth).mean()
-    # Make plot better
-    # Make plot looks better
-    plt.legend(loc='upper right')
-    plt.xlabel('Time')
-    plt.ylabel('Soil moiture (mm)')
-    plt.title('sm3, ens. {}\n{}, {}, avg.(openloop - truth) = {:.1f} mm'.format(
-                    ens, lat, lon, diff_openloop_truth))
-    # Save figure
-    fig.savefig(os.path.join(output_dir,
-                             '{}_{}.debug.cmp_pert_update.sm3.ens{}.png'.format(lat, lon, ens)),
-                format='png')
-
-
-
 
