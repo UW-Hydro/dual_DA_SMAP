@@ -855,14 +855,14 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                 (class_states, L, scale_n_nloop,
                  os.path.join(init_state_dir, 'state.ens{}.nc'.format(i+1)),
                  da_max_moist_n, adjust_negative, seed))
-            # Save soil moisture perturbation
-            if debug:
-                ds_perturbation = xr.Dataset({'STATE_SOIL_MOISTURE':
-                                             (ds - class_states.ds)\
-                                  ['STATE_SOIL_MOISTURE']})
-                ds_perturbation.to_netcdf(os.path.join(
-                        debug_dir,
-                        'perturbation.ens{}.nc').format(i+1))
+#            # Save soil moisture perturbation
+#            if debug:
+#                ds_perturbation = xr.Dataset({'STATE_SOIL_MOISTURE':
+#                                             (ds - class_states.ds)\
+#                                  ['STATE_SOIL_MOISTURE']})
+#                ds_perturbation.to_netcdf(os.path.join(
+#                        debug_dir,
+#                        'perturbation.ens{}.nc').format(i+1))
         # --- Finish multiprocessing --- #
         pool.close()
         pool.join()
@@ -1304,6 +1304,148 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         os.remove(f)
     time2 = timeit.default_timer()
     print('Time of concatenating innovation: {}'.format(time2-time1))
+
+    # --- Concat and clean up debugging results --- #
+    if debug:
+        # --- Perturbation --- #
+        time1 = timeit.default_timer()
+        print('\tConcatenating debugging results - perturbation...')
+        list_da = []
+        list_file_to_delete = []
+        times = da_meas[da_meas_time_var].values
+        for time in times:
+            t = pd.to_datetime(time)
+            # Load data
+            fname = '{}/perturbation.{}_{:05d}.nc'.format(
+                        debug_perturbation_dir, t.strftime('%Y%m%d'),
+                        t.hour*3600+t.second)
+            da = xr.open_dataset(fname)['soil_moisture_perturbation']
+            # Put data in array
+            list_da.append(da)
+            # Add individual file to list to delete
+            list_file_to_delete.append(fname)
+        # Concat all times
+        da_concat = xr.concat(list_da, dim='time')
+        da_concat['time'] = da_meas[da_meas_time_var].values
+        # Write to file
+        ds_concat = xr.Dataset({'soil_moisture_perturbation': da_concat})
+        ds_concat.to_netcdf(
+            os.path.join(
+                debug_perturbation_dir,
+                'perturbation.concat.{}_{}.nc'.format(
+                        pd.to_datetime(times[0]).year,
+                        pd.to_datetime(times[-1]).year)),
+            format='NETCDF4_CLASSIC')
+        # Delete individule files
+        for f in list_file_to_delete:
+            os.remove(f)
+        time2 = timeit.default_timer()
+        print('Time of concatenating perturbation: {}'.format(time2-time1))
+
+        # --- Update increment --- #
+        time1 = timeit.default_timer()
+        print('\tConcatenating debugging results - update increment...')
+        list_da = []
+        list_file_to_delete = []
+        times = da_meas[da_meas_time_var].values
+        for time in times:
+            t = pd.to_datetime(time)
+            # Load data
+            fname = '{}/update_increm.{}_{:05d}.nc'.format(
+                        debug_update_dir, t.strftime('%Y%m%d'),
+                        t.hour*3600+t.second)
+            da = xr.open_dataset(fname)['update_increment']
+            # Put data in array
+            list_da.append(da)
+            # Add individual file to list to delete
+            list_file_to_delete.append(fname)
+        # Concat all times
+        da_concat = xr.concat(list_da, dim='time')
+        da_concat['time'] = da_meas[da_meas_time_var].values
+        # Write to file
+        ds_concat = xr.Dataset({'update_increment': da_concat})
+        ds_concat.to_netcdf(
+            os.path.join(
+                debug_update_dir,
+                'update_increment.concat.{}_{}.nc'.format(
+                        pd.to_datetime(times[0]).year,
+                        pd.to_datetime(times[-1]).year)),
+            format='NETCDF4_CLASSIC')
+        # Delete individule files
+        for f in list_file_to_delete:
+            os.remove(f)
+        time2 = timeit.default_timer()
+        print('Time of concatenating update increment: {}'.format(time2-time1))
+
+        # --- Gain K --- #
+        time1 = timeit.default_timer()
+        print('\tConcatenating debugging results - gain K...')
+        list_da = []
+        list_file_to_delete = []
+        times = da_meas[da_meas_time_var].values
+        for time in times:
+            t = pd.to_datetime(time)
+            # Load data
+            fname = '{}/K.{}_{:05d}.nc'.format(
+                        debug_update_dir, t.strftime('%Y%m%d'),
+                        t.hour*3600+t.second)
+            da = xr.open_dataset(fname)['K']
+            # Put data in array
+            list_da.append(da)
+            # Add individual file to list to delete
+            list_file_to_delete.append(fname)
+        # Concat all times
+        da_concat = xr.concat(list_da, dim='time')
+        da_concat['time'] = da_meas[da_meas_time_var].values
+        # Write to file
+        ds_concat = xr.Dataset({'K': da_concat})
+        ds_concat.to_netcdf(
+            os.path.join(
+                debug_update_dir,
+                'K.concat.{}_{}.nc'.format(
+                        pd.to_datetime(times[0]).year,
+                        pd.to_datetime(times[-1]).year)),
+            format='NETCDF4_CLASSIC')
+        # Delete individule files
+        for f in list_file_to_delete:
+            os.remove(f)
+        time2 = timeit.default_timer()
+        print('Time of concatenating gain K: {}'.format(time2-time1))
+
+        # --- Measurement perturbation --- #
+        time1 = timeit.default_timer()
+        print('\tConcatenating debugging results - meas. perturbation...')
+        list_da = []
+        list_file_to_delete = []
+        times = da_meas[da_meas_time_var].values
+        for time in times:
+            t = pd.to_datetime(time)
+            # Load data
+            fname = '{}/meas_perturbation.{}_{:05d}.nc'.format(
+                        debug_update_dir, t.strftime('%Y%m%d'),
+                        t.hour*3600+t.second)
+            da = xr.open_dataset(fname)['meas_perturbation']
+            # Put data in array
+            list_da.append(da)
+            # Add individual file to list to delete
+            list_file_to_delete.append(fname)
+        # Concat all times
+        da_concat = xr.concat(list_da, dim='time')
+        da_concat['time'] = da_meas[da_meas_time_var].values
+        # Write to file
+        ds_concat = xr.Dataset({'meas_perturbation': da_concat})
+        ds_concat.to_netcdf(
+            os.path.join(
+                debug_update_dir,
+                'meas_perturbation.concat.{}_{}.nc'.format(
+                        pd.to_datetime(times[0]).year,
+                        pd.to_datetime(times[-1]).year)),
+            format='NETCDF4_CLASSIC')
+        # Delete individule files
+        for f in list_file_to_delete:
+            os.remove(f)
+        time2 = timeit.default_timer()
+        print('Time of concatenating gain meas perturbation: {}'.format(time2-time1))
 
 
 def to_netcdf_history_file_compress(ds_hist, out_nc):
