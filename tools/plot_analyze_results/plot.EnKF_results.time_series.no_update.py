@@ -222,39 +222,6 @@ def load_nc_file_cell(nc_file, start_year, end_year,
     return ds_all_years
 
 
-def setup_output_dirs(out_basedir, mkdirs=['results', 'state',
-                                            'logs', 'plots']):
-    ''' This function creates output directories.
-
-    Parameters
-    ----------
-    out_basedir: <str>
-        Output base directory for all output files
-    mkdirs: <list>
-        A list of subdirectories to make
-
-    Require
-    ----------
-    os
-    OrderedDict
-
-    Returns
-    ----------
-    dirs: <OrderedDict>
-        A dictionary of subdirectories
-
-    '''
-
-    dirs = OrderedDict()
-    for d in mkdirs:
-        dirs[d] = os.path.join(out_basedir, d)
-
-    for dirname in dirs.values():
-        os.makedirs(dirname, exist_ok=True)
-
-    return dirs
-
-
 # ========================================================== #
 # Command line arguments
 # ========================================================== #
@@ -270,6 +237,9 @@ debug = (sys.argv[3].lower() == 'true')
 # --- lat and lon --- #
 lat = float(sys.argv[4])
 lon = float(sys.argv[5])
+
+# --- Whether to load and plot bias correction variables --- #
+bias_correct = (sys.argv[6].lower() == 'true')
 
 # ========================================================== #
 # Parameter setting
@@ -324,22 +294,21 @@ N = cfg['EnKF']['N']  # number of ensemble members
 ens = cfg['EnKF']['ens']  # index of ensemble member to plot for debugging plots
 
 # --- Output --- #
-output_rootdir = cfg['OUTPUT']['output_dir']
-
-
-# ========================================================== #
-# Setup output data dir
-# ========================================================== #
-dirname = 'time_series.{}_{}'.format(lat, lon)
-output_dir = setup_output_dirs(
-                    output_rootdir,
-                    mkdirs=[dirname])[dirname]
+output_dir = cfg['OUTPUT']['output_dir']
 
 
 # ========================================================== #
 # Load data
 # ========================================================== #
 print('Loading data...')
+print('\tInnovation...')
+
+# --- Normalized innovation --- #
+innov_nc = os.path.join(EnKF_result_basedir, 'temp', 'innov',
+                        'innov_norm.concat.{}_{}.nc'.format(
+                                start_year, end_year))
+da_innov_norm = xr.open_dataset(innov_nc)['innov_norm']
+s_innov_norm = da_innov_norm.sel(lat=lat, lon=lon).to_series()
 
 # --- Openloop --- #
 print('\tOpenloop...')
@@ -349,6 +318,11 @@ ds_openloop = xr.open_dataset(openloop_nc)
 print('\tTruth...')
 ds_truth = xr.open_dataset(os.path.join(gen_synth_basedir, 'truth', 
                                         'history', truth_nc_filename))
+
+# --- Measurements --- #
+print('\tMeasurements...')
+ds_meas = xr.open_dataset(os.path.join(gen_synth_basedir, 'synthetic_meas',
+                                       synth_meas_nc_filename))
 
 # --- EnKF results --- #
 print('\tEnKF results...')
@@ -393,6 +367,52 @@ elif nproc > 1:
 print('\t\tConcatenating all ensemble members...')
 ds_EnKF = xr.concat(list_ds_EnKF, dim='N')
 ds_EnKF['N'] = range(1, N+1)
+
+# --- Bias correction, if specified --- #
+if bias_correct:
+    print('\tBias correction terms...')
+    # --- Load bias correction reference history file --- #
+    nc_file = os.path.join(
+        EnKF_result_basedir,
+        'history',
+        'EnKF_ensemble_concat',
+        'history.ensref.concat.{}.nc'.format('{}'))
+    ds_hist_ref = load_nc_file_cell(nc_file, start_year, end_year, lat, lon)
+    # --- Load bias correction delta --- #
+    # Get tile fraction
+    if not linear_model:
+        da_tile_frac = determine_tile_frac(vic_global_txt).sel(lat=lat, lon=lon)  # [veg, snow]
+    else:
+        da_tile_frac = xr.DataArray([[1]], coords=[[1], [0]], dims=['veg', 'snow'])
+    # Load delta
+    nc_file = os.path.join(
+        EnKF_result_basedir,
+        'temp',
+        'bias_correct',
+        'delta.concat.{}_{}.nc'.format(start_year, end_year))
+    ds_bc_delta = xr.open_dataset(nc_file)
+    da_bc_delta = ds_bc_delta['delta_soil_moisture'].sel(
+        lat=lat, lon=lon)  # [time, veg_class, snow_band, nlayer]
+    # ### Calculate cell average values ### #
+    # Determine the total number of loops
+    nloop = len(da_bc_delta['time']) * len(da_bc_delta['nlayer'])
+    # Convert into nloop
+    delta = np.rollaxis(da_bc_delta.values, 3, 1)  # [time, nlayer, veg, snow]
+    delta = delta.reshape(
+            [nloop, len(da_bc_delta['veg_class']), len(da_bc_delta['snow_band'])])  # [nloop, nveg, nsnow]
+    tile_frac = da_tile_frac.values  # [nveg, nsnow]
+    # Calculate cell-average value
+    delta_cellAvg = np.array(list(map(
+                lambda i: np.nansum(delta[i, :, :] * tile_frac),
+                range(nloop))))  # [nloop]
+    # Reshape
+    delta_cellAvg = delta_cellAvg.reshape(
+            [len(da_bc_delta['time']), len(da_bc_delta['nlayer'])])  # [time, nlayer]
+    # Put in da
+    da_delta_cellAvg = xr.DataArray(
+            delta_cellAvg,
+            coords=[da_bc_delta['time'], da_bc_delta['nlayer']],
+            dims=['time', 'nlayer'])
 
 # --- Forcings --- #
 print('\tForcings...')
@@ -450,6 +470,132 @@ elif nproc > 1:
 ds_force_ens = xr.concat(list_ds_force_ens, dim='N')
 ds_force_ens['N'] = range(1, N+1)  # [N, time]
 
+# --- Diagnostics - perturbation --- #
+if debug:
+    print('\tDiagnostics - perturbation...')
+
+    # Get tile fraction
+    if not linear_model:
+        da_tile_frac = determine_tile_frac(vic_global_txt).sel(lat=lat, lon=lon)  # [veg, snow]
+    else:
+        da_tile_frac = xr.DataArray([[1]], coords=[[1], [0]], dims=['veg', 'snow'])
+
+    # --- State perturbation --- #
+    # Load data
+    fname = os.path.join(
+                EnKF_result_basedir, 'temp', 'perturbation',
+                'perturbation.concat.{}_{}.nc'.format(start_year, end_year))
+    da_perturbation = xr.open_dataset(fname).sel(lat=lat, lon=lon)\
+        ['soil_moisture_perturbation'] # [time, N, veg_class, snow_band, nlayer]
+
+    # Extract coords
+    veg_coord = da_perturbation['veg_class']
+    snow_coord = da_perturbation['snow_band']
+    nlayer_coord = da_perturbation['nlayer']
+    time_coord = da_perturbation['time']
+    N_coord = da_perturbation['N']
+    # roll nlayer in front of veg and snow
+    perturbation = da_perturbation.values
+    perturbation = np.rollaxis(perturbation, 4, 2)
+    # Put back into a da
+    da_perturbation = xr.DataArray(
+            perturbation,
+            coords=[time_coord, N_coord, nlayer_coord, veg_coord, snow_coord],
+            dims=['time', 'N', 'nlayer', 'veg_class', 'snow_band'])
+
+    # ### Calculate cell average values ### #
+    # Determine the total number of loops
+    nloop = len(time_coord) * N * len(nlayer_coord)
+    # Convert da_x and da_tile_frac to np.array and straighten lat and lon into nloop
+    perturbation = perturbation.reshape(
+            [nloop, len(veg_coord), len(snow_coord)])  # [nloop, nveg, nsnow]
+    tile_frac = da_tile_frac.values  # [nveg, nsnow]
+    # Calculate cell-average value
+    perturbation_cellAvg = np.array(list(map(
+                lambda i: np.nansum(perturbation[i, :, :] * tile_frac),
+                range(nloop))))  # [nloop]
+    # Reshape
+    perturbation_cellAvg = perturbation_cellAvg.reshape(
+            [len(time_coord), N, len(nlayer_coord)])  # [time, N, nlayer]
+    # Put in da
+    da_perturbation_cellAvg = xr.DataArray(
+            perturbation_cellAvg,
+            coords=[time_coord, N_coord, nlayer_coord],
+            dims=['time', 'N', 'nlayer'])
+
+#    # --- Diagnostics - update increment --- #
+#    print('\tDiagnostics - update increments...')
+#
+#    if bias_correct:
+#        n_ens = N + 1
+#    else:
+#        n_ens = N
+#
+#    # Load data
+#    fname = os.path.join(
+#                EnKF_result_basedir, 'temp', 'update',
+#                'update_increment.concat.{}_{}.nc'.format(start_year, end_year))
+#    da_update_increm = xr.open_dataset(fname).sel(
+#        lat=lat, lon=lon)['update_increment'] # [time, n_ens, n]
+#
+#    # Extract coords
+#    N_coord = da_update_increm['N']
+#    # Reshape da and reorder dimensions
+#    update_increm = da_update_increm.values.reshape(
+#                            [len(times), len(N_coord), len(nlayer_coord),
+#                             len(veg_coord), len(snow_coord)])
+#    # Put data back to a da [time, N, nlayer, veg_class, snow_band]
+#    da_update_increm = xr.DataArray(update_increm,
+#                                    coords=[times, N_coord, nlayer_coord,
+#                                            veg_coord, snow_coord],
+#                                    dims=['time', 'N', 'nlayer', 'veg_class', 'snow_band'])
+#
+#    # ### Calculate cell average values ### #
+#    # Determine the total number of loops
+#    nloop = len(times) * n_ens * len(nlayer_coord)
+#    # Convert da_x and da_tile_frac to np.array and straighten lat and lon into nloop
+#    update_increm = update_increm.reshape(
+#            [nloop, len(veg_coord), len(snow_coord)])  # [nloop, nveg, nsnow]
+#    tile_frac = da_tile_frac.values  # [nveg, nsnow]
+#    # Calculate cell-average value
+#    update_increm_cellAvg = np.array(list(map(
+#                lambda i: np.nansum(update_increm[i, :, :] * tile_frac),
+#                range(nloop))))  # [nloop]
+#    # Reshape
+#    update_increm_cellAvg = update_increm_cellAvg.reshape(
+#            [len(times), n_ens, len(nlayer_coord)])  # [time, N, nlayer]
+#    # Put in da
+#    da_update_increm_cellAvg = xr.DataArray(
+#            update_increm_cellAvg,
+#            coords=[times, N_coord, nlayer_coord],
+#            dims=['time', 'N', 'nlayer'])
+
+
+## ========================================================== #
+## Plot - innovation
+## ========================================================== #
+#print('Plotting...')
+#print('\tPlot - innovation...')
+#fig = plt.figure(figsize=(12, 6))
+#s_innov_norm.plot(color='g', style='-',
+#                  label='Innovation (meas - y_est_before_update)\n'
+#                  'mean={:.2f}, var_norm={:.2f}'.format(
+#                        s_innov_norm.mean(), s_innov_norm.var()),
+#                        legend=True)
+#plt.xlabel('Time')
+#plt.ylabel('Innovation (-)')
+#plt.title('Normalized innovation, {}, {}, N={}'.format(lat, lon, N))
+#fig.savefig(os.path.join(output_dir, '{}_{}.innov.png'.format(lat, lon)),
+#            format='png')
+#
+## Plot innovation autocorrolation (ACF)
+#fig = plt.figure(figsize=(12, 6))
+#pd.tools.plotting.autocorrelation_plot(s_innov_norm)
+#plt.xlabel('Lag (day)')
+#plt.xlim([0, 300])
+#plt.title('Innovation ACF, {}, {}, N={}'.format(lat, lon, N))
+#fig.savefig(os.path.join(output_dir, '{}_{}.innov_acf.png'.format(lat, lon)),
+#            format='png')
 
 # ========================================================== #
 # Plot - precipitation
@@ -458,15 +604,20 @@ print('\tPlot - precipitation...')
 
 da_prec_ens = ds_force_ens['PREC']
 ts_prec_orig = ds_force_orig['PREC'].to_series()
+ts_prec_truth = ds_force_truth['PREC'].to_series()
 
-# Calculate bias of EnKF_mean wrt. openloop
-df_EnKF_openloop = pd.concat([ts_prec_orig, da_prec_ens.mean(dim='N').to_series()],
-                          axis=1, keys=['openloop', 'EnKF_mean']).dropna()
-bias_EnKF_mean = (df_EnKF_openloop['EnKF_mean'] - df_EnKF_openloop['openloop']).mean()
+# Calculate EnKF_mean vs. truth
+df_truth_EnKF = pd.concat([ts_prec_truth, da_prec_ens.mean(dim='N').to_series()],
+                          axis=1, keys=['truth', 'EnKF_mean']).dropna()
+rmse_EnKF_mean = rmse(df_truth_EnKF['truth'], df_truth_EnKF['EnKF_mean'])
+# Calculate open-loop vs. truth
+df_truth_openloop = pd.concat([ts_prec_truth, ts_prec_orig], axis=1,
+                              keys=['truth', 'openloop']).dropna()
+rmse_openloop = rmse(df_truth_openloop['truth'], df_truth_openloop['openloop'])
 
 # ----- Interactive version ----- #
 # Create figure
-output_file(os.path.join(output_dir, '{}_{}.bias.prec.html'.format(lat, lon)))
+output_file(os.path.join(output_dir, '{}_{}.prec.html'.format(lat, lon)))
 
 p = figure(title='Precipitation, {}, {}, N={}'.format(lat, lon, N),
            x_axis_label="Time", y_axis_label="Precipitation (mm/step)",
@@ -476,19 +627,71 @@ for i in range(N):
     ens_name = 'ens{}'.format(i+1)
     if i == 0:
         legend="Ensemble members (perturbed from Newman ens. 100)\n" \
-               "Bias wrt. openloop = {:.3f} mm/step".format(bias_EnKF_mean)
+               "mean RMSE = {:.3f} mm".format(rmse_EnKF_mean)
     else:
         legend=False
     ts = da_prec_ens.sel(N=i+1).to_series()
     p.line(ts.index, ts.values, color="blue", line_dash="solid", alpha=0.3, legend=legend)
+# plot truth
+ts = ts_prec_truth
+p.line(ts.index, ts.values, color="black", line_dash="solid",
+       legend="Truth (perturbed from Newman ens. 100)", line_width=2)
 # plot orig.
 ts = ts_prec_orig
 p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
-       legend="Orig. (Newman ens. 100)",
+       legend="Orig. (Newman ens. 100)\n" \
+              "mean RMSE = {:.3f} mm".format(rmse_openloop),
        line_width=2)
 # Save
 save(p)
 
+# ========================================================== #
+# Plot - precipitation, aggregated to daily
+# ========================================================== #
+print('\tPlot - precipitation, aggregated to daily...')
+
+da_prec_ens = ds_force_ens['PREC'].resample(freq="D", how='sum', dim='time')
+ts_prec_orig = ds_force_orig['PREC'].to_series().resample("D", how='sum')
+ts_prec_truth = ds_force_truth['PREC'].to_series().resample("D", how='sum')
+
+# Calculate EnKF_mean vs. truth
+df_truth_EnKF = pd.concat([ts_prec_truth, da_prec_ens.mean(dim='N').to_series()],
+                          axis=1, keys=['truth', 'EnKF_mean']).dropna()
+rmse_EnKF_mean = rmse(df_truth_EnKF['truth'], df_truth_EnKF['EnKF_mean'])
+# Calculate open-loop vs. truth
+df_truth_openloop = pd.concat([ts_prec_truth, ts_prec_orig], axis=1,
+                              keys=['truth', 'openloop']).dropna()
+rmse_openloop = rmse(df_truth_openloop['truth'], df_truth_openloop['openloop'])
+
+# ----- Interactive version ----- #
+# Create figure
+output_file(os.path.join(output_dir, '{}_{}.prec_daily.html'.format(lat, lon)))
+
+p = figure(title='Precipitation, daily, {}, {}, N={}'.format(lat, lon, N),
+           x_axis_label="Time", y_axis_label="Precipitation (mm/step)",
+           x_axis_type='datetime', width=1000, height=500)
+# plot each ensemble member
+for i in range(N):
+    ens_name = 'ens{}'.format(i+1)
+    if i == 0:
+        legend="Ensemble members (perturbed from Newman ens. 100)\n" \
+               "mean RMSE = {:.3f} mm".format(rmse_EnKF_mean)
+    else:
+        legend=False
+    ts = da_prec_ens.sel(N=i+1).to_series()
+    p.line(ts.index, ts.values, color="blue", line_dash="solid", alpha=0.3, legend=legend)
+# plot truth
+ts = ts_prec_truth
+p.line(ts.index, ts.values, color="black", line_dash="solid",
+       legend="Truth (perturbed from Newman ens. 100)", line_width=2)
+# plot orig.
+ts = ts_prec_orig
+p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
+       legend="Orig. (Newman ens. 100)\n" \
+              "mean RMSE = {:.3f} mm".format(rmse_openloop),
+       line_width=2)
+# Save
+save(p)
 
 # ========================================================== #
 # Plot - sm1
@@ -499,6 +702,11 @@ depth_sm1 = float(da_soil_depth[0].values)
 
 # --- RMSE --- #
 # extract time series
+ts_meas = ds_meas['simulated_surface_sm'].sel(
+                lat=lat, lon=lon, time=slice(plot_start_time, plot_end_time)).to_series() / depth_sm1
+ts_truth = ds_truth['OUT_SOIL_MOIST'].sel(
+                lat=lat, lon=lon, nlayer=0,
+                time=slice(plot_start_time, plot_end_time)).to_series() / depth_sm1
 da_EnKF = ds_EnKF['OUT_SOIL_MOIST'].sel(nlayer=0,
                                         time=slice(plot_start_time, plot_end_time)) / depth_sm1
 ts_EnKF_mean = da_EnKF.mean(dim='N').\
@@ -506,8 +714,15 @@ ts_EnKF_mean = da_EnKF.mean(dim='N').\
 ts_openloop = ds_openloop['OUT_SOIL_MOIST'].sel(
                 lat=lat, lon=lon, nlayer=0,
                 time=slice(plot_start_time, plot_end_time)).to_series() / depth_sm1
-# Calculate bias of EnKF_mean wrt. openloop
-bias_EnKF_mean = (ts_EnKF_mean - ts_openloop).mean()
+# Calculate meas vs. truth
+df_truth_meas = pd.concat([ts_truth, ts_meas], axis=1, keys=['truth', 'meas']).dropna()
+rmse_meas = rmse(df_truth_meas['truth'].values, df_truth_meas['meas'])
+# Calculate EnKF_mean vs. truth
+df_truth_EnKF = pd.concat([ts_truth, ts_EnKF_mean], axis=1, keys=['truth', 'EnKF_mean']).dropna()
+rmse_EnKF_mean = rmse(df_truth_EnKF['truth'], df_truth_EnKF['EnKF_mean'])
+# Calculate open-loop vs. truth
+df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
+rmse_openloop = rmse(df_truth_openloop['truth'], df_truth_openloop['openloop'])
 
 # ----- Regular plots ----- #
 # Create figure
@@ -520,24 +735,36 @@ for i in range(N):
         legend=False
     da_EnKF.sel(N=i+1).to_series().plot(
                 color='blue', style='-', alpha=0.3,
-                label='Ensemble members, mean bias wrt. openloop ={:.3f} mm/mm'.format(bias_EnKF_mean),
+                label='Ensemble members, mean RMSE={:.3f} mm/mm'.format(rmse_EnKF_mean),
                 legend=legend)
+# plot measurement
+ts_meas.plot(style='ro', label='Measurement, RMSE={:.3f} mm/mm'.format(rmse_meas),
+             legend=True)
+# plot truth
+ts_truth.plot(color='k', style='-', label='Truth', legend=True)
+# Plot bias correction reference
+if bias_correct:
+    ts_bc_ref = ds_hist_ref['OUT_SOIL_MOIST'].sel(
+        nlayer=0,
+        time=slice(plot_start_time, plot_end_time)).to_series() / depth_sm1
+    ts_bc_ref.plot(color='orange', style='-',
+        label='Bias correction reference',
+        legend=True)
 # plot open-loop
 ts_openloop.plot(color='m', style='-',
-                 label='Openloop',
-                 legend=True,
-                 lw=2)
+                 label='Open-loop, RMSE={:.3f} mm/mm'.format(rmse_openloop),
+                 legend=True)
 # Make plot looks better
 plt.xlabel('Time')
 plt.ylabel('Soil moiture (mm/mm)')
 plt.title('Top-layer soil moisture, {}, {}, N={}'.format(lat, lon, N))
 # Save figure
-fig.savefig(os.path.join(output_dir, '{}_{}.bias.sm1.png'.format(lat, lon)),
+fig.savefig(os.path.join(output_dir, '{}_{}.sm1.png'.format(lat, lon)),
             format='png')
 
 # ----- Interactive version ----- #
 # Create figure
-output_file(os.path.join(output_dir, '{}_{}.bias.sm1.html'.format(lat, lon)))
+output_file(os.path.join(output_dir, '{}_{}.sm1.html'.format(lat, lon)))
 
 p = figure(title='Top-layer soil moisture, {}, {}, N={}'.format(lat, lon, N),
            x_axis_label="Time", y_axis_label="Soil moiture (mm/mm)",
@@ -546,15 +773,29 @@ p = figure(title='Top-layer soil moisture, {}, {}, N={}'.format(lat, lon, N),
 for i in range(N):
     ens_name = 'ens{}'.format(i+1)
     if i == 0:
-        legend="Ensemble members, mean bias wrt. openloop={:.2f} mm/mm".format(bias_EnKF_mean)
+        legend="Ensemble members, mean RMSE={:.2f} mm/mm".format(rmse_EnKF_mean)
     else:
         legend=False
     ts = da_EnKF.sel(N=i+1).to_series()
     p.line(ts.index, ts.values, color="blue", line_dash="solid", alpha=0.3, legend=legend)
+# plot measurement
+ts = ts_meas
+p.circle(ts.index, ts.values, color="red", fill_color="red",
+         legend="Measurement, RMSE={:.3f} mm/mm".format(rmse_meas), line_width=2)
+# plot truth
+ts = ts_truth
+p.line(ts.index, ts.values, color="black", line_dash="solid", legend="Truth", line_width=2)
+# Plot bias correction reference
+if bias_correct:
+    ts = ds_hist_ref['OUT_SOIL_MOIST'].sel(
+        nlayer=0,
+        time=slice(plot_start_time, plot_end_time)).to_series() / depth_sm1
+    p.line(ts.index, ts.values, color="orange", line_dash="solid",
+        legend="Bias correction reference", line_width=2)
 # plot open-loop
 ts = ts_openloop
-p.line(ts.index, ts.values, color="magenta", line_dash="solid",
-       legend="Openloop", line_width=2)
+p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
+       legend="Open-loop, RMSE={:.3f} mm/mm".format(rmse_openloop), line_width=2)
 # Save
 save(p)
 
@@ -562,11 +803,13 @@ save(p)
 # Plot - sm2
 # ========================================================== #
 print('\tPlot - sm2...')
-da_soil_depth = get_soil_depth(vic_param_nc).sel(lat=lat, lon=lon)  # [nlayers]
 depth_sm2 = float(da_soil_depth[1].values)
 
 # --- RMSE --- #
 # extract time series
+ts_truth = ds_truth['OUT_SOIL_MOIST'].sel(
+                lat=lat, lon=lon, nlayer=1,
+                time=slice(plot_start_time, plot_end_time)).to_series() / depth_sm2
 da_EnKF = ds_EnKF['OUT_SOIL_MOIST'].sel(nlayer=1,
                                         time=slice(plot_start_time, plot_end_time)) / depth_sm2
 ts_EnKF_mean = da_EnKF.mean(dim='N').\
@@ -574,8 +817,14 @@ ts_EnKF_mean = da_EnKF.mean(dim='N').\
 ts_openloop = ds_openloop['OUT_SOIL_MOIST'].sel(
                 lat=lat, lon=lon, nlayer=1,
                 time=slice(plot_start_time, plot_end_time)).to_series() / depth_sm2
-# Calculate bias of EnKF_mean wrt. openloop
-bias_EnKF_mean = (ts_EnKF_mean - ts_openloop).mean()
+# Calculate meas vs. truth
+df_truth_meas = pd.concat([ts_truth, ts_meas], axis=1, keys=['truth', 'meas']).dropna()
+# Calculate EnKF_mean vs. truth
+df_truth_EnKF = pd.concat([ts_truth, ts_EnKF_mean], axis=1, keys=['truth', 'EnKF_mean']).dropna()
+rmse_EnKF_mean = rmse(df_truth_EnKF['truth'], df_truth_EnKF['EnKF_mean'])
+# Calculate open-loop vs. truth
+df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
+rmse_openloop = rmse(df_truth_openloop['truth'], df_truth_openloop['openloop'])
 
 # ----- Regular plots ----- #
 # Create figure
@@ -588,24 +837,33 @@ for i in range(N):
         legend=False
     da_EnKF.sel(N=i+1).to_series().plot(
                 color='blue', style='-', alpha=0.3,
-                label='Ensemble members, mean bias wrt. openloop ={:.3f} mm/mm'.format(bias_EnKF_mean),
+                label='Ensemble members, mean RMSE={:.5f} mm/mm'.format(rmse_EnKF_mean),
                 legend=legend)
+# plot truth
+ts_truth.plot(color='k', style='-', label='Truth', legend=True)
+# Plot bias correction reference
+if bias_correct:
+    ts_bc_ref = ds_hist_ref['OUT_SOIL_MOIST'].sel(
+        nlayer=1,
+        time=slice(plot_start_time, plot_end_time)).to_series() / depth_sm2
+    ts_bc_ref.plot(color='orange', style='-',
+        label='Bias correction reference',
+        legend=True)
 # plot open-loop
-ts_openloop.plot(color='m', style='-',
-                 label='Openloop',
-                 legend=True,
-                 lw=2)
+ts_openloop.plot(color='m', style='--',
+                 label='Open-loop, RMSE={:.5f} mm/mm'.format(rmse_openloop),
+                 legend=True)
 # Make plot looks better
 plt.xlabel('Time')
 plt.ylabel('Soil moiture (mm/mm)')
 plt.title('Middle-layer soil moisture, {}, {}, N={}'.format(lat, lon, N))
 # Save figure
-fig.savefig(os.path.join(output_dir, '{}_{}.bias.sm2.png'.format(lat, lon)),
+fig.savefig(os.path.join(output_dir, '{}_{}.sm2.png'.format(lat, lon)),
             format='png')
 
 # ----- Interactive version ----- #
 # Create figure
-output_file(os.path.join(output_dir, '{}_{}.bias.sm2.html'.format(lat, lon)))
+output_file(os.path.join(output_dir, '{}_{}.sm2.html'.format(lat, lon)))
 
 p = figure(title='Middle-layer soil moisture, {}, {}, N={}'.format(lat, lon, N),
            x_axis_label="Time", y_axis_label="Soil moiture (mm/mm)",
@@ -614,15 +872,25 @@ p = figure(title='Middle-layer soil moisture, {}, {}, N={}'.format(lat, lon, N),
 for i in range(N):
     ens_name = 'ens{}'.format(i+1)
     if i == 0:
-        legend="Ensemble members, mean bias wrt. openloop={:.2f} mm/mm".format(bias_EnKF_mean)
+        legend="Ensemble members, mean RMSE={:.5f} mm/mm".format(rmse_EnKF_mean)
     else:
         legend=False
     ts = da_EnKF.sel(N=i+1).to_series()
     p.line(ts.index, ts.values, color="blue", line_dash="solid", alpha=0.3, legend=legend)
+# plot truth
+ts = ts_truth
+p.line(ts.index, ts.values, color="black", line_dash="solid", legend="Truth", line_width=2)
+# Plot bias correction reference
+if bias_correct:
+    ts = ds_hist_ref['OUT_SOIL_MOIST'].sel(
+        nlayer=1,
+        time=slice(plot_start_time, plot_end_time)).to_series() / depth_sm2
+    p.line(ts.index, ts.values, color="orange", line_dash="solid",
+        legend="Bias correction reference", line_width=2)
 # plot open-loop
 ts = ts_openloop
-p.line(ts.index, ts.values, color="magenta", line_dash="solid",
-       legend="Openloop", line_width=2)
+p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
+       legend="Open-loop, RMSE={:.5f} mm/mm".format(rmse_openloop), line_width=2)
 # Save
 save(p)
 
@@ -630,11 +898,13 @@ save(p)
 # Plot - sm3
 # ========================================================== #
 print('\tPlot - sm3...')
-da_soil_depth = get_soil_depth(vic_param_nc).sel(lat=lat, lon=lon)  # [nlayers]
 depth_sm3 = float(da_soil_depth[2].values)
 
 # --- RMSE --- #
 # extract time series
+ts_truth = ds_truth['OUT_SOIL_MOIST'].sel(
+                lat=lat, lon=lon, nlayer=2,
+                time=slice(plot_start_time, plot_end_time)).to_series() / depth_sm3
 da_EnKF = ds_EnKF['OUT_SOIL_MOIST'].sel(nlayer=2,
                                         time=slice(plot_start_time, plot_end_time)) / depth_sm3
 ts_EnKF_mean = da_EnKF.mean(dim='N').\
@@ -642,8 +912,14 @@ ts_EnKF_mean = da_EnKF.mean(dim='N').\
 ts_openloop = ds_openloop['OUT_SOIL_MOIST'].sel(
                 lat=lat, lon=lon, nlayer=2,
                 time=slice(plot_start_time, plot_end_time)).to_series() / depth_sm3
-# Calculate bias of EnKF_mean wrt. openloop
-bias_EnKF_mean = (ts_EnKF_mean - ts_openloop).mean()
+# Calculate meas vs. truth
+df_truth_meas = pd.concat([ts_truth, ts_meas], axis=1, keys=['truth', 'meas']).dropna()
+# Calculate EnKF_mean vs. truth
+df_truth_EnKF = pd.concat([ts_truth, ts_EnKF_mean], axis=1, keys=['truth', 'EnKF_mean']).dropna()
+rmse_EnKF_mean = rmse(df_truth_EnKF['truth'], df_truth_EnKF['EnKF_mean'])
+# Calculate open-loop vs. truth
+df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
+rmse_openloop = rmse(df_truth_openloop['truth'], df_truth_openloop['openloop'])
 
 # ----- Regular plots ----- #
 # Create figure
@@ -656,18 +932,503 @@ for i in range(N):
         legend=False
     da_EnKF.sel(N=i+1).to_series().plot(
                 color='blue', style='-', alpha=0.3,
-                label='Ensemble members, mean bias wrt. openloop ={:.3f} mm/mm'.format(bias_EnKF_mean),
+                label='Ensemble members, mean RMSE={:.5f} mm/mm'.format(rmse_EnKF_mean),
                 legend=legend)
+# plot truth
+ts_truth.plot(color='k', style='-', label='Truth', legend=True)
+# Plot bias correction reference
+if bias_correct:
+    ts_bc_ref = ds_hist_ref['OUT_SOIL_MOIST'].sel(
+        nlayer=2,
+        time=slice(plot_start_time, plot_end_time)).to_series() / depth_sm3
+    ts_bc_ref.plot(color='orange', style='-',
+        label='Bias correction reference',
+        legend=True)
 # plot open-loop
-ts_openloop.plot(color='m', style='-',
-                 label='Openloop',
-                 legend=True,
-                 lw=2)
+ts_openloop.plot(color='m', style='--',
+                 label='Open-loop, RMSE={:.5f} mm/mm'.format(rmse_openloop),
+                 legend=True)
 # Make plot looks better
 plt.xlabel('Time')
 plt.ylabel('Soil moiture (mm/mm)')
 plt.title('Bottom-layer soil moisture, {}, {}, N={}'.format(lat, lon, N))
 # Save figure
-fig.savefig(os.path.join(output_dir, '{}_{}.bias.sm3.png'.format(lat, lon)),
+fig.savefig(os.path.join(output_dir, '{}_{}.sm3.png'.format(lat, lon)),
             format='png')
+
+# ========================================================== #
+# Plot - bias correction
+# ========================================================== #
+if bias_correct:
+    print('\tPlot - bias correction...')
+    # --- Regular plot --- #
+    fig = plt.figure(figsize=(12, 6))
+    da_delta_cellAvg.sel(nlayer=0).to_series().plot(
+            color='b', style='-',
+            label='Layer 1', legend=True)
+    da_delta_cellAvg.sel(nlayer=1).to_series().plot(
+            color='orange', style='-',
+            label='Layer 2', legend=True)
+    da_delta_cellAvg.sel(nlayer=2).to_series().plot(
+            color='green', style='-',
+            label='Layer 3', legend=True)
+    plt.xlabel('Time')
+    plt.ylabel('Soil moiture (mm)')
+    plt.title('Bias correction delta of soil moistures, {}, {}, N={}'.format(lat, lon, N))
+    fig.savefig(os.path.join(output_dir, '{}_{}.bc_delta.sm.png'.format(lat, lon)),
+            format='png')
+    # --- Interactive plot --- #
+    output_file(os.path.join(output_dir, '{}_{}.bc_delta.sm.html'.format(lat, lon)))
+    p = figure(title='Bias correction delta of soil moistures, {}, {}, N={}'.format(lat, lon, N),
+           x_axis_label="Time", y_axis_label="Soil moiture (mm)",
+           x_axis_type='datetime', width=1000, height=500)
+    # sm1
+    ts = da_delta_cellAvg.sel(nlayer=0).to_series()
+    p.line(ts.index, ts.values, color="blue", line_dash="solid",
+           legend="Layer 1", line_width=2)
+    # sm2
+    ts = da_delta_cellAvg.sel(nlayer=1).to_series()
+    p.line(ts.index, ts.values, color="orange", line_dash="solid",
+           legend="Layer 2", line_width=2)
+    # sm3
+    ts = da_delta_cellAvg.sel(nlayer=2).to_series()
+    p.line(ts.index, ts.values, color="green", line_dash="solid",
+           legend="Layer 3", line_width=2)
+    # save
+    save(p)
+
+    # --- Regular plot - cumulative delta --- #
+    fig = plt.figure(figsize=(12, 6))
+    da_delta_cellAvg.sel(nlayer=0).to_series().cumsum().plot(
+            color='b', style='-',
+            label='Layer 1', legend=True)
+    da_delta_cellAvg.sel(nlayer=1).to_series().cumsum().plot(
+            color='orange', style='-',
+            label='Layer 2', legend=True)
+    da_delta_cellAvg.sel(nlayer=2).to_series().cumsum().plot(
+            color='green', style='-',
+            label='Layer 3', legend=True)
+    plt.xlabel('Time')
+    plt.ylabel('Soil moisture cumulative delta (mm)')
+    plt.title('Cumulative sum of bias correction delta of soil moistures, ' \
+              '{}, {}, N={}'.format(lat, lon, N))
+    fig.savefig(os.path.join(output_dir, '{}_{}.bc_delta_cumsum.sm.png'.format(lat, lon)),
+            format='png')
+
+
+## ========================================================== #
+## Plot - Update increment - cumulative
+## ========================================================== #
+#if debug:
+#    fig = plt.figure(figsize=(12, 6))
+#    da_update_increm_cellAvg.mean(dim='N').sel(nlayer=0).to_series().cumsum().plot(
+#            color='b', style='-',
+#            label='Layer 1', legend=True)
+#    da_update_increm_cellAvg.mean(dim='N').sel(nlayer=1).to_series().cumsum().plot(
+#            color='orange', style='-',
+#            label='Layer 2', legend=True)
+#    da_update_increm_cellAvg.mean(dim='N').sel(nlayer=2).to_series().cumsum().plot(
+#            color='green', style='-',
+#            label='Layer 3', legend=True)
+#    plt.xlabel('Time')
+#    plt.ylabel('Soil moiture update increment (mm)')
+#    plt.title('Cumulative sum of Kalman update of soil moistures, ' \
+#              '{}, {}, N={}'.format(lat, lon, N))
+#    fig.savefig(os.path.join(output_dir,
+#                             '{}_{}.update_increm_cumsum.sm.png'.format(lat, lon)),
+#                format='png')
+
+
+## ========================================================== #
+## Plot - update increm vs. bias correct delta
+## ========================================================== #
+#if debug and bias_correct:
+#    # sm1
+#    ts_update_increm = da_update_increm_cellAvg.mean(dim='N').sel(nlayer=0).to_series()
+#    ts_bc_delta = da_delta_cellAvg.sel(nlayer=0).to_series()
+#    fig = plt.figure(figsize=(6, 6))
+#    plt.scatter(ts_bc_delta, ts_update_increm, linewidths=0, alpha=0.2)
+#    plt.xlabel('Bias correction delta (mm)', fontsize=16)
+#    plt.ylabel('Kalman update increment (mm)', fontsize=16)
+#    plt.title('sm1, Kalman update increments v.s.\nbias correction delta at all time steps',
+#              fontsize=16)
+#    fig.savefig(os.path.join(output_dir,
+#                             '{}_{}.update_increm_bc_delta.sm1.png'.format(lat, lon)),
+#                format='png')
+#    # sm2
+#    ts_update_increm = da_update_increm_cellAvg.mean(dim='N').sel(nlayer=1).to_series()
+#    ts_bc_delta = da_delta_cellAvg.sel(nlayer=1).to_series()
+#    fig = plt.figure(figsize=(6, 6))
+#    plt.scatter(ts_bc_delta, ts_update_increm, linewidths=0, alpha=0.2)
+#    plt.xlabel('Bias correction delta (mm)', fontsize=16)
+#    plt.ylabel('Kalman update increment (mm)', fontsize=16)
+#    plt.title('sm2, Kalman update increments v.s.\nbias correction delta at all time steps',
+#              fontsize=16)
+#    fig.savefig(os.path.join(output_dir,
+#                             '{}_{}.update_increm_bc_delta.sm2.png'.format(lat, lon)),
+#                format='png')
+#    # sm3
+#    ts_update_increm = da_update_increm_cellAvg.mean(dim='N').sel(nlayer=2).to_series()
+#    ts_bc_delta = da_delta_cellAvg.sel(nlayer=2).to_series()
+#    fig = plt.figure(figsize=(6, 6))
+#    plt.scatter(ts_bc_delta, ts_update_increm, linewidths=0, alpha=0.2)
+#    plt.xlabel('Bias correction delta (mm)', fontsize=16)
+#    plt.ylabel('Kalman update increment (mm)', fontsize=16)
+#    plt.title('sm3, Kalman update increments v.s.\nbias correction delta at all time steps',
+#              fontsize=16)
+#    fig.savefig(os.path.join(output_dir,
+#                             '{}_{}.update_increm_bc_delta.sm3.png'.format(lat, lon)),
+#                format='png')
+
+
+# ========================================================== #
+# Plot - bias correct delta v.s. sm value
+# ========================================================== #
+if bias_correct:
+    # sm1
+    ts_bc_delta = da_delta_cellAvg.sel(nlayer=0).to_series()
+    ts_sm_ensMean = ds_EnKF['OUT_SOIL_MOIST'].sel(
+        nlayer=0, time=slice(plot_start_time, plot_end_time)).mean(dim='N').to_series()
+    df = pd.concat([ts_bc_delta, ts_sm_ensMean], axis=1,
+               keys=['bc_delta', 'sm_ensMean']).dropna()
+    fig = plt.figure(figsize=(6, 6))
+    plt.scatter(df['sm_ensMean'], df['bc_delta'], linewidths=0, alpha=0.2)
+    plt.xlabel('Soil moisture (mm)', fontsize=16)
+    plt.ylabel('Bias correction delta (mm)', fontsize=16)
+    plt.title('sm1, bias correction delta vs.\nsoil moisture value at all time steps',
+              fontsize=16)
+    fig.savefig(os.path.join(output_dir,
+                             '{}_{}.bc_delta_sm.sm1.png'.format(lat, lon)),
+                format='png')
+    # sm2
+    ts_bc_delta = da_delta_cellAvg.sel(nlayer=1).to_series()
+    ts_sm_ensMean = ds_EnKF['OUT_SOIL_MOIST'].sel(
+        nlayer=1, time=slice(plot_start_time, plot_end_time)).mean(dim='N').to_series()
+    df = pd.concat([ts_bc_delta, ts_sm_ensMean], axis=1,
+               keys=['bc_delta', 'sm_ensMean']).dropna()
+    fig = plt.figure(figsize=(6, 6))
+    plt.scatter(df['sm_ensMean'], df['bc_delta'], linewidths=0, alpha=0.2)
+    plt.xlabel('Soil moisture (mm)', fontsize=16)
+    plt.ylabel('Bias correction delta (mm)', fontsize=16)
+    plt.title('sm2, bias correction delta vs.\nsoil moisture value at all time steps',
+              fontsize=16)
+    fig.savefig(os.path.join(output_dir,
+                             '{}_{}.bc_delta_sm.sm2.png'.format(lat, lon)),
+                format='png')
+    # sm3
+    ts_bc_delta = da_delta_cellAvg.sel(nlayer=2).to_series()
+    ts_sm_ensMean = ds_EnKF['OUT_SOIL_MOIST'].sel(
+        nlayer=2, time=slice(plot_start_time, plot_end_time)).mean(dim='N').to_series()
+    df = pd.concat([ts_bc_delta, ts_sm_ensMean], axis=1,
+               keys=['bc_delta', 'sm_ensMean']).dropna()
+    fig = plt.figure(figsize=(6, 6))
+    plt.scatter(df['sm_ensMean'], df['bc_delta'], linewidths=0, alpha=0.2)
+    plt.xlabel('Soil moisture (mm)', fontsize=16)
+    plt.ylabel('Bias correction delta (mm)', fontsize=16)
+    plt.title('sm3, bias correction delta vs.\nsoil moisture value at all time steps',
+              fontsize=16)
+    fig.savefig(os.path.join(output_dir,
+                             '{}_{}.bc_delta_sm.sm3.png'.format(lat, lon)),
+                format='png')
+
+
+# ========================================================== #
+# Plot - runoff
+# ========================================================== #
+if not linear_model:
+    print('\tPlot - surface runoff...')
+    # --- RMSE --- #
+    # extract time series
+    ts_truth = ds_truth['OUT_RUNOFF'].sel(
+                    lat=lat, lon=lon,
+                    time=slice(plot_start_time, plot_end_time)).to_series()
+    da_EnKF = ds_EnKF['OUT_RUNOFF'].sel(time=slice(plot_start_time, plot_end_time))
+    ts_EnKF_mean = da_EnKF.mean(dim='N').\
+                   to_series()
+    ts_openloop = ds_openloop['OUT_RUNOFF'].sel(
+                    lat=lat, lon=lon,
+                    time=slice(plot_start_time, plot_end_time)).to_series()
+    # Calculate EnKF_mean vs. truth
+    df_truth_EnKF = pd.concat([ts_truth, ts_EnKF_mean], axis=1, keys=['truth', 'EnKF_mean']).dropna()
+    rmse_EnKF_mean = rmse(df_truth_EnKF['truth'], df_truth_EnKF['EnKF_mean'])
+    # Calculate open-loop vs. truth
+    df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
+    rmse_openloop = rmse(df_truth_openloop['truth'], df_truth_openloop['openloop'])
+    
+    # ----- Interactive version ----- #
+    # Create figure
+    output_file(os.path.join(output_dir, '{}_{}.runoff.html'.format(lat, lon)))
+    
+    p = figure(title='Surface runoff, {}, {}, N={}'.format(lat, lon, N),
+               x_axis_label="Time", y_axis_label="Runoff (mm)",
+               x_axis_type='datetime', width=1000, height=500)
+    # plot each ensemble member
+    for i in range(N):
+        ens_name = 'ens{}'.format(i+1)
+        if i == 0:
+            legend="Ensemble members, mean RMSE={:.3f} mm".format(rmse_EnKF_mean)
+        else:
+            legend=False
+        ts = da_EnKF.sel(N=i+1).to_series()
+        p.line(ts.index, ts.values, color="blue", line_dash="solid", alpha=0.3, legend=legend)
+    # plot truth
+    ts = ts_truth
+    p.line(ts.index, ts.values, color="black", line_dash="solid", legend="Truth", line_width=2)
+    # plot open-loop
+    ts = ts_openloop
+    p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
+           legend="Open-loop, RMSE={:.3f} mm".format(rmse_openloop), line_width=2)
+    # Save
+    save(p)
+
+
+# ========================================================== #
+# Plot - runoff, aggregated to daily
+# ========================================================== #
+if not linear_model:
+    print('\tPlot - surface runoff, aggregated to daily...')
+    # --- RMSE --- #
+    # extract time series
+    ts_truth = ds_truth['OUT_RUNOFF'].sel(
+                    lat=lat, lon=lon,
+                    time=slice(plot_start_time, plot_end_time)).to_series().\
+               resample("D", how='sum')
+    da_EnKF = ds_EnKF['OUT_RUNOFF'].sel(time=slice(plot_start_time, plot_end_time)).\
+              resample(freq="D", how='sum', dim='time')
+    ts_EnKF_mean = da_EnKF.mean(dim='N').\
+                   to_series()
+    ts_openloop = ds_openloop['OUT_RUNOFF'].sel(
+                    lat=lat, lon=lon,
+                    time=slice(plot_start_time, plot_end_time)).to_series().\
+                  resample("D", how='sum')
+    # Calculate EnKF_mean vs. truth
+    df_truth_EnKF = pd.concat([ts_truth, ts_EnKF_mean], axis=1, keys=['truth', 'EnKF_mean']).dropna()
+    rmse_EnKF_mean = rmse(df_truth_EnKF['truth'], df_truth_EnKF['EnKF_mean'])
+    # Calculate open-loop vs. truth
+    df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
+    rmse_openloop = rmse(df_truth_openloop['truth'], df_truth_openloop['openloop'])
+    
+    # ----- Interactive version ----- #
+    # Create figure
+    output_file(os.path.join(output_dir, '{}_{}.runoff_daily.html'.format(lat, lon)))
+    
+    p = figure(title='Surface runoff, daily, {}, {}, N={}'.format(lat, lon, N),
+               x_axis_label="Time", y_axis_label="Runoff (mm)",
+               x_axis_type='datetime', width=1000, height=500)
+    # plot each ensemble member
+    for i in range(N):
+        ens_name = 'ens{}'.format(i+1)
+        if i == 0:
+            legend="Ensemble members, mean RMSE={:.3f} mm".format(rmse_EnKF_mean)
+        else:
+            legend=False
+        ts = da_EnKF.sel(N=i+1).to_series()
+        p.line(ts.index, ts.values, color="blue", line_dash="solid", alpha=0.3, legend=legend)
+    # plot truth
+    ts = ts_truth
+    p.line(ts.index, ts.values, color="black", line_dash="solid", legend="Truth", line_width=2)
+    # plot open-loop
+    ts = ts_openloop
+    p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
+           legend="Open-loop, RMSE={:.3f} mm".format(rmse_openloop), line_width=2)
+    # Save
+    save(p)
+
+# ========================================================== #
+# Plot - baseflow
+# ========================================================== #
+if not linear_model:
+    print('\tPlot - baseflow...')
+    # --- RMSE --- #
+    # extract time series
+    ts_truth = ds_truth['OUT_BASEFLOW'].sel(
+                    lat=lat, lon=lon,
+                    time=slice(plot_start_time, plot_end_time)).to_series()
+    da_EnKF = ds_EnKF['OUT_BASEFLOW'].sel(time=slice(plot_start_time, plot_end_time))
+    ts_EnKF_mean = da_EnKF.mean(dim='N').\
+                   to_series()
+    ts_openloop = ds_openloop['OUT_BASEFLOW'].sel(
+                    lat=lat, lon=lon,
+                    time=slice(plot_start_time, plot_end_time)).to_series()
+    # Calculate EnKF_mean vs. truth
+    df_truth_EnKF = pd.concat([ts_truth, ts_EnKF_mean], axis=1, keys=['truth', 'EnKF_mean']).dropna()
+    rmse_EnKF_mean = rmse(df_truth_EnKF['truth'], df_truth_EnKF['EnKF_mean'])
+    # Calculate open-loop vs. truth
+    df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
+    rmse_openloop = rmse(df_truth_openloop['truth'], df_truth_openloop['openloop'])
+    
+    # ----- Regular plots ----- #
+    # Create figure
+    fig = plt.figure(figsize=(12, 6))
+    # plot each ensemble member
+    for i in range(N):
+        if i == 0:
+            legend=True
+        else:
+            legend=False
+        da_EnKF.sel(N=i+1).to_series().plot(
+                    color='blue', style='-', alpha=0.3,
+                    label='Ensemble members, mean RMSE={:.3f} mm'.format(rmse_EnKF_mean),
+                    legend=legend)
+    # plot truth
+    ts_truth.plot(color='k', style='-', label='Truth', legend=True)
+    # plot open-loop
+    ts_openloop.plot(color='m', style='--',
+                     label='Open-loop, RMSE={:.3f} mm'.format(rmse_openloop),
+                     legend=True)
+    # Make plot looks better
+    plt.xlabel('Time')
+    plt.ylabel('Baseflow (mm)')
+    plt.title('Baseflow, {}, {}, N={}'.format(lat, lon, N))
+    # Save figure
+    fig.savefig(os.path.join(output_dir, '{}_{}.baseflow.png'.format(lat, lon)),
+                format='png')
+
+# ========================================================== #
+# Plot - total runoff
+# ========================================================== #
+if not linear_model:
+    print('\tPlot - total runoff...')
+    # --- RMSE --- #
+    # extract time series
+    ts_truth = (ds_truth['OUT_RUNOFF'] + ds_truth['OUT_BASEFLOW']).sel(
+                    lat=lat, lon=lon,
+                    time=slice(plot_start_time, plot_end_time)).to_series()
+    da_EnKF = (ds_EnKF['OUT_RUNOFF'] + ds_EnKF['OUT_BASEFLOW']).sel(
+                    time=slice(plot_start_time, plot_end_time))
+    ts_EnKF_mean = da_EnKF.mean(dim='N').\
+                   to_series()
+    ts_openloop = (ds_openloop['OUT_RUNOFF'] + ds_openloop['OUT_BASEFLOW']).sel(
+                    lat=lat, lon=lon,
+                    time=slice(plot_start_time, plot_end_time)).to_series()
+    # Calculate EnKF_mean vs. truth
+    df_truth_EnKF = pd.concat([ts_truth, ts_EnKF_mean], axis=1, keys=['truth', 'EnKF_mean']).dropna()
+    rmse_EnKF_mean = rmse(df_truth_EnKF['truth'], df_truth_EnKF['EnKF_mean'])
+    # Calculate open-loop vs. truth
+    df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
+    rmse_openloop = rmse(df_truth_openloop['truth'], df_truth_openloop['openloop'])
+    
+    # ----- Interactive version ----- #
+    # Create figure
+    output_file(os.path.join(output_dir, '{}_{}.total_runoff.html'.format(lat, lon)))
+    
+    p = figure(title='Total runoff, {}, {}, N={}'.format(lat, lon, N),
+               x_axis_label="Time", y_axis_label="Total runoff (mm)",
+               x_axis_type='datetime', width=1000, height=500)
+    # plot each ensemble member
+    for i in range(N):
+        ens_name = 'ens{}'.format(i+1)
+        if i == 0:
+            legend="Ensemble members, mean RMSE={:.3f} mm".format(rmse_EnKF_mean)
+        else:
+            legend=False
+        ts = da_EnKF.sel(N=i+1).to_series()
+        p.line(ts.index, ts.values, color="blue", line_dash="solid", alpha=0.3, legend=legend)
+    # plot truth
+    ts = ts_truth
+    p.line(ts.index, ts.values, color="black", line_dash="solid", legend="Truth", line_width=2)
+    # plot open-loop
+    ts = ts_openloop
+    p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
+           legend="Open-loop, RMSE={:.3f} mm".format(rmse_openloop), line_width=2)
+    # Save
+    save(p)
+
+# ========================================================== #
+# Plot - SWE
+# ========================================================== #
+if not linear_model:
+    print('\tPlot - SWE...')
+    # --- RMSE --- #
+    # extract time series
+    ts_truth = ds_truth['OUT_SWE'].sel(
+                    lat=lat, lon=lon,
+                    time=slice(plot_start_time, plot_end_time)).to_series()
+    da_EnKF = ds_EnKF['OUT_SWE'].sel(time=slice(plot_start_time, plot_end_time))
+    ts_EnKF_mean = da_EnKF.mean(dim='N').\
+                   to_series()
+    ts_openloop = ds_openloop['OUT_SWE'].sel(
+                    lat=lat, lon=lon,
+                    time=slice(plot_start_time, plot_end_time)).to_series()
+    # Calculate EnKF_mean vs. truth
+    df_truth_EnKF = pd.concat([ts_truth, ts_EnKF_mean], axis=1, keys=['truth', 'EnKF_mean']).dropna()
+    rmse_EnKF_mean = rmse(df_truth_EnKF['truth'], df_truth_EnKF['EnKF_mean'])
+    # Calculate open-loop vs. truth
+    df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
+    rmse_openloop = rmse(df_truth_openloop['truth'], df_truth_openloop['openloop'])
+    
+    # ----- Interactive version ----- #
+    # Create figure
+    output_file(os.path.join(output_dir, '{}_{}.swe.html'.format(lat, lon)))
+    
+    p = figure(title='Surface SWE, {}, {}, N={}'.format(lat, lon, N),
+               x_axis_label="Time", y_axis_label="SWE (mm)",
+               x_axis_type='datetime', width=1000, height=500)
+    # plot each ensemble member
+    for i in range(N):
+        ens_name = 'ens{}'.format(i+1)
+        if i == 0:
+            legend="Ensemble members, mean RMSE={:.3f} mm".format(rmse_EnKF_mean)
+        else:
+            legend=False
+        ts = da_EnKF.sel(N=i+1).to_series()
+        p.line(ts.index, ts.values, color="blue", line_dash="solid", alpha=0.3, legend=legend)
+    # plot truth
+    ts = ts_truth
+    p.line(ts.index, ts.values, color="black", line_dash="solid", legend="Truth", line_width=2)
+    # plot open-loop
+    ts = ts_openloop
+    p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
+           legend="Open-loop, RMSE={:.3f} mm".format(rmse_openloop), line_width=2)
+    # Save
+    save(p)
+
+# ========================================================== #
+# Plot - evap
+# ========================================================== #
+if not linear_model:
+    print('\tPlot - EVAP...')
+    # --- RMSE --- #
+    # extract time series
+    ts_truth = ds_truth['OUT_EVAP'].sel(
+                    lat=lat, lon=lon,
+                    time=slice(plot_start_time, plot_end_time)).to_series()
+    da_EnKF = ds_EnKF['OUT_EVAP'].sel(time=slice(plot_start_time, plot_end_time))
+    ts_EnKF_mean = da_EnKF.mean(dim='N').\
+                   to_series()
+    ts_openloop = ds_openloop['OUT_EVAP'].sel(
+                    lat=lat, lon=lon,
+                    time=slice(plot_start_time, plot_end_time)).to_series()
+    # Calculate EnKF_mean vs. truth
+    df_truth_EnKF = pd.concat([ts_truth, ts_EnKF_mean], axis=1, keys=['truth', 'EnKF_mean']).dropna()
+    rmse_EnKF_mean = rmse(df_truth_EnKF['truth'], df_truth_EnKF['EnKF_mean'])
+    # Calculate open-loop vs. truth
+    df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
+    rmse_openloop = rmse(df_truth_openloop['truth'], df_truth_openloop['openloop'])
+    
+    # ----- Interactive version ----- #
+    # Create figure
+    output_file(os.path.join(output_dir, '{}_{}.evap.html'.format(lat, lon)))
+    
+    p = figure(title='ET, {}, {}, N={}'.format(lat, lon, N),
+               x_axis_label="Time", y_axis_label="ET (mm)",
+               x_axis_type='datetime', width=1000, height=500)
+    # plot each ensemble member
+    for i in range(N):
+        ens_name = 'ens{}'.format(i+1)
+        if i == 0:
+            legend="Ensemble members, mean RMSE={:.3f} mm".format(rmse_EnKF_mean)
+        else:
+            legend=False
+        ts = da_EnKF.sel(N=i+1).to_series()
+        p.line(ts.index, ts.values, color="blue", line_dash="solid", alpha=0.3, legend=legend)
+    # plot truth
+    ts = ts_truth
+    p.line(ts.index, ts.values, color="black", line_dash="solid", legend="Truth", line_width=2)
+    # plot open-loop
+    ts = ts_openloop
+    p.line(ts.index, ts.values, color="magenta", line_dash="dashed",
+           legend="Open-loop, RMSE={:.3f} mm".format(rmse_openloop), line_width=2)
+    # Save
+    save(p)
 
