@@ -1376,6 +1376,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                                 output_vic_log_root_dir,
                                 mkdirs=[propagate_output_dir_name])[propagate_output_dir_name]
         if not linear_model:
+            ref_init_state_nc = (updated_states_avg_nc if bias_correct else None)
+            ref_forcing_basepath = (orig_forcing_basepath if bias_correct else None)
             propagate_ensemble(
                     N, start_time=current_time, end_time=next_time,
                     vic_exe=vic_exe,
@@ -1392,8 +1394,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                     mpi_proc=mpi_proc,
                     mpi_exe=mpi_exe,
                     bias_correct=bias_correct,
-                    ref_init_state_nc=updated_states_avg_nc,
-                    ref_forcing_basepath=orig_forcing_basepath)
+                    ref_init_state_nc=ref_init_state_nc,
+                    ref_forcing_basepath=ref_forcing_basepath)
         else:
             propagate_ensemble_linear_model(
                     N, 
