@@ -28,7 +28,8 @@ from da_utils import (Forcings, setup_output_dirs, propagate,
                       calculate_scale_n_whole_field,
                       calculate_cholesky_L,
                       save_updated_states,
-                      run_vic_assigned_states)
+                      run_vic_assigned_states,
+                      determine_tile_frac)
 
 # =========================================================== #
 # Load command line arguments
@@ -134,6 +135,11 @@ da_openloop_sm['time'] = times
 # Select out measurement time points
 da_openloop_sm = da_openloop_sm.sel(time=da_meas['time'])  # [time, nlayer, lat, lon]
 
+# --- Determine tile fraction --- #
+da_tile_frac = determine_tile_frac(os.path.join(
+                    cfg['CONTROL']['root_dir'],
+                    cfg['VIC']['vic_global_template']))  # [veg, snow, lat, lon]
+
 # --- Rescale "truth" soil moisture states --- #
 print('\tRescaling for each grid-cell mean value...')
 # Calculate openloop mean and variance for each layer, lat and lon
@@ -153,8 +159,18 @@ openloop_sm_mean = da_openloop_sm_mean.values.reshape([nloop])  # [nloop]
 openloop_sm_std = da_openloop_sm_std.values.reshape([nloop])  # [nloop]
 truth_sm = da_truth_sm_concat.values.reshape(
     [len(time_coord), len(veg_coord),
-     len(snow_coord), nloop])  # [time, veg, snow, nloop]
-truth_sm_cell = np.nanmean(np.nanmean(truth_sm, axis=1), axis=1)  # [time, nloop]
+     len(snow_coord), len(lat_coord), len(lon_coord),
+     len(nlayer_coord)])  # [time, veg, snow, lat, lon, nlayer]
+da_truth_sm = xr.DataArray(
+    truth_sm,
+    coords=[time_coord, veg_coord, snow_coord,
+            lat_coord, lon_coord, nlayer_coord],
+    dims=['time', 'veg_class', 'snow_band', 'lat', 'lon', 'nlayer'])
+da_truth_sm_cell = (da_truth_sm * da_tile_frac)\
+    .sum(dim='veg_class').sum(dim='snow_band')  # [time, lat, lon, nlayer]
+
+truth_sm_cell = da_truth_sm_cell.values.reshape([
+    len(time_coord), nloop])  # [time, nloop]
 # Calculate cell-mean truth statistics
 truth_sm_cell_mean = np.nanmean(truth_sm_cell, axis=0)  # [nloop]
 truth_sm_cell_std = np.nanstd(truth_sm_cell, axis=0)  # [nloop]
@@ -164,31 +180,28 @@ print('Rescaling for each grid cell...')
 sm_rescaled_cell = np.array(list(map(
     lambda i: (truth_sm_cell[:, i] - truth_sm_cell_mean[i]) * \
               (openloop_sm_std[i] / truth_sm_cell_std[i]) + openloop_sm_mean[i],
-    range(nloop))))  # [nloop, time]
+    range(nloop)))).reshape(
+        [len(lat_coord), len(lon_coord), len(nlayer_coord),
+         len(time_coord)])  # [lat, lon, nlayer, time]
+da_sm_rescaled_cell = xr.DataArray(
+    sm_rescaled_cell,
+    coords=[lat_coord, lon_coord, nlayer_coord, time_coord],
+    dims=['lat', 'lon', 'nlayer', 'time'])
+
 # --- Rescale for each tile within each layer and grid cell --- #
 # sm_rescaled_tile = (sm_tile - sm_tile_mean) + sm_rescale_cell
 print('Rescaling for each tile...')
-nloop2 = nloop * len(time_coord)
-sm_rescaled_cell = sm_rescaled_cell.reshape([nloop2])  # [nloop2]
-truth_sm = np.rollaxis(truth_sm, 3, 0)  # [nloop, time, veg, snow]
-truth_sm = truth_sm.reshape([nloop2, len(veg_coord), len(snow_coord)])  # [nloop2, veg, snow]
-truth_sm_mean = np.nanmean(np.nanmean(truth_sm, axis=1), axis=1)  # [nloop2]
-sm_rescaled = np.array(list(map(
-    lambda i: (truth_sm[i, :, :] - truth_sm_mean[i]) + sm_rescaled_cell[i],
-    range(nloop2))))  # [nloop2, veg, snow]
+da_sm_rescaled = da_truth_sm - da_truth_sm_cell\
+    + da_sm_rescaled_cell  # [time, veg, snow, lat, lon, nlayer]
+
 # --- Convert back to original state shape --- #
-sm_rescaled = sm_rescaled.reshape(
-    [len(nlayer_coord), len(lat_coord), len(lon_coord), len(time_coord),
-    len(veg_coord), len(snow_coord)])  # [nlayer, lat, lon, time, veg, snow]
-sm_rescaled = np.rollaxis(sm_rescaled, 3, 0)  # [time, nlayer, lat, lon, veg, snow]
-sm_rescaled = np.rollaxis(sm_rescaled, 2, 6)  # [time, nlayer, lon, veg, snow, lat]
-sm_rescaled = np.rollaxis(sm_rescaled, 2, 6)  # [time, nlayer, veg, snow, lat, lon]
-sm_rescaled = np.rollaxis(sm_rescaled, 1, 4)  # [time, veg, snow, nlayer, lat, lon]
+sm_rescaled = da_sm_rescaled.values  # [time, veg, snow, lat, lon, nlayer]
+sm_rescaled = np.rollaxis(sm_rescaled, 5, 3) # [time, veg, snow, nlayer, lat, lon]
 # Put into da
 da_sm_rescaled = xr.DataArray(
     sm_rescaled,
     coords=[time_coord, veg_coord, snow_coord, nlayer_coord, lat_coord, lon_coord],
-    dims=['time', 'veg_class', 'snow_class', 'nlayer', 'lat', 'lon'])
+    dims=['time', 'veg_class', 'snow_band', 'nlayer', 'lat', 'lon'])
 
 # --- Reset negative and above-maximum soil moistures --- #
 global_template = os.path.join(
@@ -251,6 +264,7 @@ run_vic_assigned_states(
     output_vic_log_root_dir=truth_subdirs['logs'],
     mpi_proc=mpi_proc,
     mpi_exe=cfg['VIC']['mpi_exe'])
+
 # --- Concatenate all history files --- #
 hist_concat_nc = os.path.join(truth_subdirs['history'],
                               'history.concat.rescaled.{}_{:05d}-{}_{:05d}.nc'.format(
