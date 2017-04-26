@@ -1563,40 +1563,41 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
 
     # --- Concat and clean up ormalized debugging results --- #
     if debug:
-        # --- Bias correction --- #
-        time1 = timeit.default_timer()
-        print('\tConcatenating debugging results...')
-        list_da = []
-        list_file_to_delete = []
-        times = da_meas[da_meas_time_var].values
-        for time in times:
-            t = pd.to_datetime(time)
-            # Load data
-            fname = '{}/delta.{}_{:05d}.nc'.format(
-                        debug_bc_dir, t.strftime('%Y%m%d'),
-                        t.hour*3600+t.second)
-            da = xr.open_dataset(fname)['delta_soil_moisture']
-            # Put data in array
-            list_da.append(da)
-            # Add individual file to list to delete
-            list_file_to_delete.append(fname)
-        # Concat all times
-        da_concat = xr.concat(list_da, dim='time')
-        da_concat['time'] = da_meas[da_meas_time_var].values
-        # Write to file
-        ds_concat = xr.Dataset({'delta_soil_moisture': da_concat})
-        ds_concat.to_netcdf(
-            os.path.join(
-                debug_bc_dir,
-                'delta.concat.{}_{}.nc'.format(
-                        pd.to_datetime(times[0]).year,
-                        pd.to_datetime(times[-1]).year)),
-            format='NETCDF4_CLASSIC')
-        # Delete individule files
-        for f in list_file_to_delete:
-            os.remove(f)
-        time2 = timeit.default_timer()
-        print('Time of concatenating bias correction delta: {}'.format(time2-time1))
+        if bias_correct:
+            # --- Bias correction --- #
+            time1 = timeit.default_timer()
+            print('\tConcatenating debugging results...')
+            list_da = []
+            list_file_to_delete = []
+            times = da_meas[da_meas_time_var].values
+            for time in times:
+                t = pd.to_datetime(time)
+                # Load data
+                fname = '{}/delta.{}_{:05d}.nc'.format(
+                            debug_bc_dir, t.strftime('%Y%m%d'),
+                            t.hour*3600+t.second)
+                da = xr.open_dataset(fname)['delta_soil_moisture']
+                # Put data in array
+                list_da.append(da)
+                # Add individual file to list to delete
+                list_file_to_delete.append(fname)
+            # Concat all times
+            da_concat = xr.concat(list_da, dim='time')
+            da_concat['time'] = da_meas[da_meas_time_var].values
+            # Write to file
+            ds_concat = xr.Dataset({'delta_soil_moisture': da_concat})
+            ds_concat.to_netcdf(
+                os.path.join(
+                    debug_bc_dir,
+                    'delta.concat.{}_{}.nc'.format(
+                            pd.to_datetime(times[0]).year,
+                            pd.to_datetime(times[-1]).year)),
+                format='NETCDF4_CLASSIC')
+            # Delete individule files
+            for f in list_file_to_delete:
+                os.remove(f)
+            time2 = timeit.default_timer()
+            print('Time of concatenating bias correction delta: {}'.format(time2-time1))
 
         # --- Perturbation --- #
         time1 = timeit.default_timer()

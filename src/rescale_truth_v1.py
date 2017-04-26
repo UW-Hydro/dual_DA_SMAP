@@ -267,7 +267,7 @@ run_vic_assigned_states(
 
 # --- Concatenate all history files --- #
 hist_concat_nc = os.path.join(truth_subdirs['history'],
-                              'history.concat.rescaled.{}_{:05d}-{}_{:05d}.nc'.format(
+                              'history.concat.rescaled_v1.{}_{:05d}-{}_{:05d}.nc'.format(
                                         start_time.strftime('%Y%m%d'),
                                         start_time.hour*3600+start_time.second,
                                         end_time.strftime('%Y%m%d'),
