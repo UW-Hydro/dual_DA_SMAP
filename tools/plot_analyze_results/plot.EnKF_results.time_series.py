@@ -1017,9 +1017,30 @@ if bias_correct:
 
 
 # ========================================================== #
-# Plot - Update increment - cumulative
+# Plot - Update increment
 # ========================================================== #
 if debug:
+    # --- Time series values --- #
+    output_file(os.path.join(output_dir, '{}_{}.update_increm.sm.html'.format(lat, lon)))
+    p = figure(title='Kalman update increment of soil moistures, {}, {}, N={}'.format(lat, lon, N),
+           x_axis_label="Time", y_axis_label="Soil moiture (mm)",
+           x_axis_type='datetime', width=1000, height=500)
+    # sm1
+    ts = da_update_increm_cellAvg.mean(dim='N').sel(nlayer=0).to_series()
+    p.line(ts.index, ts.values, color="blue", line_dash="solid",
+           legend="Layer 1", line_width=2)
+    # sm2
+    ts = da_update_increm_cellAvg.mean(dim='N').sel(nlayer=1).to_series()
+    p.line(ts.index, ts.values, color="orange", line_dash="solid",
+           legend="Layer 2", line_width=2)
+    # sm3
+    ts = da_update_increm_cellAvg.mean(dim='N').sel(nlayer=2).to_series()
+    p.line(ts.index, ts.values, color="green", line_dash="solid",
+           legend="Layer 3", line_width=2)
+    # save
+    save(p)
+
+    # --- Cumulative --- #
     fig = plt.figure(figsize=(12, 6))
     da_update_increm_cellAvg.mean(dim='N').sel(nlayer=0).to_series().cumsum().plot(
             color='b', style='-',
