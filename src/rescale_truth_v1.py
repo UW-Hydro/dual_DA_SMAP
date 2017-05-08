@@ -153,22 +153,14 @@ time_coord = da_openloop_sm['time']
 veg_coord = da_truth_sm_concat['veg_class']
 snow_coord = da_truth_sm_concat['snow_band']
 # Determine the total number of loops
-nloop = len(lat_coord) * len(lon_coord) * len(nlayer_coord)
+nloop = len(nlayer_coord) * len(lat_coord) * len(lon_coord)
 # Convert variables to np.array and straighten into nloop
 openloop_sm_mean = da_openloop_sm_mean.values.reshape([nloop])  # [nloop]
 openloop_sm_std = da_openloop_sm_std.values.reshape([nloop])  # [nloop]
-truth_sm = da_truth_sm_concat.values.reshape(
-    [len(time_coord), len(veg_coord),
-     len(snow_coord), len(lat_coord), len(lon_coord),
-     len(nlayer_coord)])  # [time, veg, snow, lat, lon, nlayer]
-da_truth_sm = xr.DataArray(
-    truth_sm,
-    coords=[time_coord, veg_coord, snow_coord,
-            lat_coord, lon_coord, nlayer_coord],
-    dims=['time', 'veg_class', 'snow_band', 'lat', 'lon', 'nlayer'])
-da_truth_sm_cell = (da_truth_sm * da_tile_frac)\
-    .sum(dim='veg_class').sum(dim='snow_band')  # [time, lat, lon, nlayer]
+truth_sm = da_truth_sm_concat.values  # [time, veg, snow, nlayer, lat, lon]
 
+da_truth_sm_cell = (da_truth_sm_concat * da_tile_frac)\
+    .sum(dim='veg_class').sum(dim='snow_band')  # [time, nlayer, lat, lon]
 truth_sm_cell = da_truth_sm_cell.values.reshape([
     len(time_coord), nloop])  # [time, nloop]
 # Calculate cell-mean truth statistics
@@ -181,22 +173,22 @@ sm_rescaled_cell = np.array(list(map(
     lambda i: (truth_sm_cell[:, i] - truth_sm_cell_mean[i]) * \
               (openloop_sm_std[i] / truth_sm_cell_std[i]) + openloop_sm_mean[i],
     range(nloop)))).reshape(
-        [len(lat_coord), len(lon_coord), len(nlayer_coord),
-         len(time_coord)])  # [lat, lon, nlayer, time]
+        [len(nlayer_coord), len(lat_coord), len(lon_coord),
+         len(time_coord)])  # [nlayer, lat, lon, time]
+sm_rescaled_cell = np.rollaxis(sm_rescaled_cell, 3, 0)  # [time, nlayer, lat, lon]
 da_sm_rescaled_cell = xr.DataArray(
     sm_rescaled_cell,
-    coords=[lat_coord, lon_coord, nlayer_coord, time_coord],
-    dims=['lat', 'lon', 'nlayer', 'time'])
+    coords=[time_coord, nlayer_coord, lat_coord, lon_coord],
+    dims=['time', 'nlayer', 'lat', 'lon'])
 
 # --- Rescale for each tile within each layer and grid cell --- #
 # sm_rescaled_tile = (sm_tile - sm_tile_mean) + sm_rescale_cell
 print('Rescaling for each tile...')
-da_sm_rescaled = da_truth_sm - da_truth_sm_cell\
-    + da_sm_rescaled_cell  # [time, veg, snow, lat, lon, nlayer]
+da_sm_rescaled = da_truth_sm_concat - da_truth_sm_cell\
+    + da_sm_rescaled_cell  # [time, veg, snow, nlayer, lat, lon]
 
 # --- Convert back to original state shape --- #
-sm_rescaled = da_sm_rescaled.values  # [time, veg, snow, lat, lon, nlayer]
-sm_rescaled = np.rollaxis(sm_rescaled, 5, 3) # [time, veg, snow, nlayer, lat, lon]
+sm_rescaled = da_sm_rescaled.values  # [time, veg, snow, nlayer, lat, lon]
 # Put into da
 da_sm_rescaled = xr.DataArray(
     sm_rescaled,
