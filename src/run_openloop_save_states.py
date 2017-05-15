@@ -19,7 +19,8 @@ import matplotlib.pyplot as plt
 from tonic.models.vic.vic import VIC
 from tonic.io import read_config, read_configobj
 from da_utils import (setup_output_dirs, propagate, find_global_param_value,
-                      propagate_linear_model)
+                      propagate_linear_model, to_netcdf_state_file_compress,
+                      determine_tile_frac)
 
 
 # ============================================================ #
@@ -146,4 +147,45 @@ for t, time in enumerate(meas_times):
         forcing_basepath=forcing_basepath,
         mpi_proc=mpi_proc,
         mpi_exe=mpi_exe)
+
+# ============================================================ #
+# Concatenate SM states
+# ============================================================ #
+# --- Load states at measurement times --- #
+print('Loading states...')
+list_da_state = []
+for t in meas_times:
+    state_nc = os.path.join(
+        dirs['states'],
+        'state.openloop.{}_{:05d}.nc'.format(
+            t.strftime('%Y%m%d'),
+            t.hour*3600+t.second))
+    da_state = xr.open_dataset(state_nc)['STATE_SOIL_MOISTURE']
+    list_da_state.append(da_state)
+# Concatenate states of all time together
+da_state_all_times = xr.concat(list_da_state, dim='time')
+da_state_all_times['time'] = meas_times
+# Save concatenated truth states to netCDF file
+ds_state_all_times = xr.Dataset(
+    {'STATE_SOIL_MOISTURE': da_state_all_times})
+out_nc = os.path.join(
+        dirs['states'],
+        'openloop_state.{}_{}.nc'.format(
+            meas_times[0].strftime('%Y%m%d'),
+            meas_times[-1].strftime('%Y%m%d')))
+to_netcdf_state_file_compress(
+    ds_state_all_times, out_nc)
+# Calculate and save cell-average states to netCDF file
+da_tile_frac = determine_tile_frac(global_template)
+da_state_cellAvg = (da_state_all_times * da_tile_frac).sum(
+    dim='veg_class').sum(dim='snow_band')  # [time, nlayer, lat, lon]
+ds_state_cellAvg = xr.Dataset({'SOIL_MOISTURE': da_state_cellAvg})
+out_nc = os.path.join(
+        dirs['states'],
+        'openloop_state_cellAvg.{}_{}.nc'.format(
+            meas_times[0].strftime('%Y%m%d'),
+            meas_times[-1].strftime('%Y%m%d')))
+to_netcdf_state_file_compress(
+    ds_state_cellAvg, out_nc)
+
 
