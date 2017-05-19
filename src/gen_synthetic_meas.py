@@ -13,6 +13,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import pandas as pd
 import shutil
+import timeit
 
 from tonic.models.vic.vic import VIC
 from tonic.io import read_configobj
@@ -25,7 +26,8 @@ from da_utils import (Forcings, setup_output_dirs, propagate,
                       find_global_param_value, propagate_linear_model,
                       concat_clean_up_history_file,
                       calculate_scale_n_whole_field,
-                      calculate_cholesky_L)
+                      calculate_cholesky_L, to_netcdf_state_file_compress,
+                      determine_tile_frac)
 
 # =========================================================== #
 # Load command line arguments
@@ -169,10 +171,10 @@ list_history_paths.append(os.path.join(truth_subdirs['history'],
 # --- Calculate state perturbation covariance matrix --- #
 # Calculate perturvation magnitude [nlayer, lat, lon]
 da_scale = calculate_sm_noise_to_add_magnitude(
-                vic_history_path=os.path.join(
-                        cfg['CONTROL']['root_dir'],
-                        cfg['FORCINGS_STATES_PERTURB']['vic_history_path']),
-                sigma_percent=cfg['FORCINGS_STATES_PERTURB']['state_perturb_sigma_percent'])
+    vic_history_path=os.path.join(
+        cfg['CONTROL']['root_dir'],
+        cfg['FORCINGS_STATES_PERTURB']['vic_history_path']),
+    sigma_percent=cfg['FORCINGS_STATES_PERTURB']['state_perturb_sigma_percent'])
 # Extract veg_class and snow_band information from a state file
 state_time = meas_times[0]
 state_filename = os.path.join(truth_subdirs['states'],
@@ -304,14 +306,45 @@ concat_clean_up_history_file(list_history_paths,
 
 print('Simulating synthetic measurements...')
 
-# --- Load history file --- #
-ds_hist = xr.open_dataset(hist_concat_nc)
+# --- Load "truth" states at measurement times --- #
+print('\tLoading truth states...')
+list_da_state = []
+for t in meas_times:
+    truth_state_nc = os.path.join(
+        truth_subdirs['states'],
+        'perturbed.state.{}_{:05d}.nc'.format(
+            t.strftime('%Y%m%d'),
+            t.hour*3600+t.second))
+    da_state = xr.open_dataset(truth_state_nc)['STATE_SOIL_MOISTURE']
+    list_da_state.append(da_state)
+# Concatenate states of all time together
+da_truth_state_all_times = xr.concat(list_da_state, dim='time')
+da_truth_state_all_times['time'] = meas_times
+# Save concatenated truth states to netCDF file
+ds_truth_state_all_times = xr.Dataset(
+    {'STATE_SOIL_MOISTURE': da_truth_state_all_times})
+out_nc = os.path.join(
+        truth_subdirs['states'],
+        'truth_state.{}_{}.nc'.format(meas_times[0].strftime('%Y%m%d'),
+                                      meas_times[-1].strftime('%Y%m%d')))
+to_netcdf_state_file_compress(
+    ds_truth_state_all_times, out_nc)
+# Calculate and save cell-average states to netCDF file
+da_tile_frac = determine_tile_frac(global_template)
+da_state_cellAvg = (da_truth_state_all_times * da_tile_frac).sum(
+    dim='veg_class').sum(dim='snow_band')  # [time, nlayer, lat, lon]
+ds_state_cellAvg = xr.Dataset({'SOIL_MOISTURE': da_state_cellAvg})
+out_nc = os.path.join(
+        truth_subdirs['states'],
+        'truth_state_cellAvg.{}_{}.nc'.format(
+            meas_times[0].strftime('%Y%m%d'),
+            meas_times[-1].strftime('%Y%m%d')))
+to_netcdf_state_file_compress(
+    ds_state_cellAvg, out_nc)
 
-# --- Select out times of measurement --- #
-ds_hist_meas_times = ds_hist.sel(time=meas_times)
-
+print('Generate synthetic measurements...')
 # --- Select top-layer soil moisture --- #
-da_sm1_true = ds_hist_meas_times['OUT_SOIL_MOIST'].sel(nlayer=0)
+da_sm1_true = da_state_cellAvg.sel(nlayer=0)
 
 # --- Add noise --- #
 # Generate the standard deviation of noise to be added for each grid cell
@@ -325,8 +358,10 @@ da_sm1_perturbed = VarToPerturb_sm1.add_gaussian_white_noise(
 
 # --- Save synthetic measurement to netCDF file --- #
 ds_simulated = xr.Dataset({'simulated_surface_sm': da_sm1_perturbed})
-ds_simulated.to_netcdf(os.path.join(dirs['synthetic_meas'],
-                                    'synthetic_meas.{}_{}.nc'.format(start_time.strftime('%Y%m%d'),
-                                                                     end_time.strftime('%Y%m%d'))),
-                       format='NETCDF4_CLASSIC')
+ds_simulated.to_netcdf(
+    os.path.join(
+        dirs['synthetic_meas'],
+        'synthetic_meas.{}_{}.nc'.format(start_time.strftime('%Y%m%d'),
+                                        end_time.strftime('%Y%m%d'))),
+    format='NETCDF4_CLASSIC')
 
