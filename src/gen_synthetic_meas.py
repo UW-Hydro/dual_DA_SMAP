@@ -309,6 +309,7 @@ print('Simulating synthetic measurements...')
 # --- Load "truth" states at measurement times --- #
 print('\tLoading truth states...')
 list_da_state = []
+list_da_swe = []
 for t in meas_times:
     truth_state_nc = os.path.join(
         truth_subdirs['states'],
@@ -316,13 +317,18 @@ for t in meas_times:
             t.strftime('%Y%m%d'),
             t.hour*3600+t.second))
     da_state = xr.open_dataset(truth_state_nc)['STATE_SOIL_MOISTURE']
+    da_swe = xr.open_dataset(truth_state_nc)['STATE_SNOW_WATER_EQUIVALENT']
     list_da_state.append(da_state)
+    list_da_swe.append(da_swe)
 # Concatenate states of all time together
 da_truth_state_all_times = xr.concat(list_da_state, dim='time')
 da_truth_state_all_times['time'] = meas_times
+da_truth_swe_all_times = xr.concat(list_da_swe, dim='time')
+da_truth_swe_all_times['time'] = meas_times
 # Save concatenated truth states to netCDF file
 ds_truth_state_all_times = xr.Dataset(
-    {'STATE_SOIL_MOISTURE': da_truth_state_all_times})
+    {'STATE_SOIL_MOISTURE': da_truth_state_all_times,
+     'STATE_SNOW_WATER_EQUIVALENT': da_truth_swe_all_times})
 out_nc = os.path.join(
         truth_subdirs['states'],
         'truth_state.{}_{}.nc'.format(meas_times[0].strftime('%Y%m%d'),
@@ -333,7 +339,10 @@ to_netcdf_state_file_compress(
 da_tile_frac = determine_tile_frac(global_template)
 da_state_cellAvg = (da_truth_state_all_times * da_tile_frac).sum(
     dim='veg_class').sum(dim='snow_band')  # [time, nlayer, lat, lon]
-ds_state_cellAvg = xr.Dataset({'SOIL_MOISTURE': da_state_cellAvg})
+da_swe_cellAvg = (da_truth_swe_all_times * da_tile_frac).sum(
+    dim='veg_class').sum(dim='snow_band')  # [time, lat, lon]
+ds_state_cellAvg = xr.Dataset({'SOIL_MOISTURE': da_state_cellAvg,
+                               'SWE': da_swe_cellAvg})
 out_nc = os.path.join(
         truth_subdirs['states'],
         'truth_state_cellAvg.{}_{}.nc'.format(
@@ -341,6 +350,7 @@ out_nc = os.path.join(
             meas_times[-1].strftime('%Y%m%d')))
 to_netcdf_state_file_compress(
     ds_state_cellAvg, out_nc)
+
 
 print('Generate synthetic measurements...')
 # --- Select top-layer soil moisture --- #
