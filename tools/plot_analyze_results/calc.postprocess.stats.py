@@ -167,25 +167,8 @@ else:
 # Post-process results
 post_result_basedir = cfg['POSTPROCESS']['post_result_basedir']
 
-# gen_synthetic results
-gen_synth_basedir = cfg['EnKF']['gen_synth_basedir']
-truth_nc_filename = cfg['EnKF']['truth_nc_filename']
-synth_meas_nc_filename = cfg['EnKF']['synth_meas_nc_filename']
-
-# openloop
-openloop_nc = cfg['EnKF']['openloop_nc']
-
-# initial time
-init_time = pd.to_datetime(cfg['EnKF']['init_time'])
-
 # VIC global file template (for extracting param file and snow_band)
 vic_global_txt = cfg['EnKF']['vic_global_txt']
-
-# Forcings (for all basepaths, 'YYYY.nc' will be appended)
-orig_force_basepath = cfg['EnKF']['orig_force_basepath']
-truth_force_basepath = cfg['EnKF']['truth_force_basepath']
-# ens_force_basedir/ens_<i>/force.<YYYY>.nc, where <i> = 1, 2, ..., N
-ens_force_basedir = cfg['EnKF']['ens_force_basedir']
 
 # VIC parameter netCDF file
 vic_param_nc = cfg['EnKF']['vic_param_nc']
