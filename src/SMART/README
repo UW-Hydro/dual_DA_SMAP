@@ -1,0 +1,28 @@
+SMART version 3 - created on September, 24, 2016 for Yixin.
+
+Recommended execution line:
+
+SMART(6,3,0,999,100,3,5,1,0,0.60,1,1);
+
+See SMART.m for definition of all arguments
+
+New: You can now find the increment ensemble in the global variable "increment_ens" within SMART.m.
+
+However, I have NOT yet changed the code to yield an ensemble of rainfall corrections (i.e. correction.m STILL only corrects rainfall
+using a single deterministic (i.e. ensemble-averged) increment.
+
+A few other things to note:
+
+1) "increment_ens" is a matrix of size Number ensembles x Number of days. The determistic increment in "increment" is avaraged within 
+the window size (set using the last argument to SMART). For this project, the window size should (probably) be always set to 1...so this 
+difference is not important...however, keep that in mind is case you ever want to change the window size.
+
+2) The lambda value used to scale the increments should not vary across the ensemble. Keep that in mind when you modify "correction.m" to output
+an ensemble of corrected rainfall.
+
+3) As before, "sum_rain_corrected" contains the corrected rainfall.
+
+4) Changing the first argument from 6 to 5 will change the filtering approach to a standard Kalman filter/Kalman smoother and speed things up 
+greatly. The accuracy of the deterministic results will not be impacted; however, no ensemble will be produced.
+
+Email me with any questions.

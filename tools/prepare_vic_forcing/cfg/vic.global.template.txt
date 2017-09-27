@@ -1,0 +1,107 @@
+#######################################################################
+# VIC Model Parameters - 4.0.7
+# RCS ID $Id: global.param.sample,v 1.1.2.9 2007/02/06 01:02:21 vicadmin Exp $
+# Modified:     Jun 2012 for VIC ver.4.0.7 USBR WaterSMART runs
+#######################################################################
+# Simulation Parameters
+#######################################################################
+OUTPUT_FORCE    TRUE
+
+TIME_STEP 	$time_step	# model time step in hours (set to 24 if FULL_ENERGY = FALSE
+                        # set to < 24 if FULL_ENERGY = TRUE)
+SNOW_STEP	$time_step	# time step (hrs) for snow model (=TIME_STEP if TIME_STEP<24)
+STARTYEAR	$startyear	# year model simulation starts
+STARTMONTH	$startmonth	# month model simulation starts
+STARTDAY	$startday 	# day model simulation starts
+STARTHOUR	0	# hour model simulation starts
+ENDYEAR 	$endyear	# year model simulation ends
+ENDMONTH        $endmonth     # month model simulation ends
+ENDDAY          $endday      # day model simulation ends
+FULL_ENERGY 	FALSE	# TRUE = full energy bal; FALSE = water balance only
+FROZEN_SOIL	FALSE	# TRUE = calculate frozen soils
+#QUICK_FLUX	TRUE	# TRUE = simplified ground heatflux method, Liang et al (1999)
+                        # FALSE = finite element method, Cherkauer et al (1999)
+NO_FLUX		FALSE	# TRUE = noflux lower boundary for ground heatflux calc
+                        # FALSE = constant flux lower boundary condition.  
+                        # If NO_FLUX = TRUE, QUICK_FLUX MUST = FALSE
+DIST_PRCP	FALSE	# TRUE = use distributed precipitation
+CORRPREC	FALSE	# TRUE = correct precipitation for gauge undercatch
+MIN_WIND_SPEED	0.1	# minimum allowable wind speed (m/s)
+PREC_EXPT	0.6	# exponent for distributed precip eqn (use if DIST_PRCP=TRUE)
+MAX_SNOW_TEMP	0.5	# maximum temperature (C) at which snow can fall
+MIN_RAIN_TEMP -0.5     #minimum temperature (C) at which rain can fall
+
+#######################################################################
+# State Files and  Parameters
+#######################################################################
+#INIT_STATE	/raid2/ymao/VIC_RBM_east_RIPS/RIPS/model_run/output/vic/Maurer_0.125/Tennessee/state_spinup_ten.years.1949/Tennessee_spinup_ten.years.1949_19491231
+#STATENAME       /raid2/ymao/VIC_RBM_east_RIPS/RIPS/model_run/output/vic/Tennessee.calibrated.test/state_1949_1970
+#STATEYEAR       1970
+#STATEMONTH      12
+#STATEDAY        31
+#BINARY_STATE_FILE  FALSE  # TRUE if using binary state files; FALSE if ascii
+
+#######################################################################
+# Forcing Files and Parameters
+#######################################################################
+FORCING1    $forcing1
+GRID_DECIMAL  $grid_decimal		# Number of digits after decimal point in forcing file names
+N_TYPES       4 	# number of columns to read, including skipped -Maurer yyyy mm dd to be skipped GCM - yyyymmdd to be skipped
+FORCE_TYPE    $prec
+FORCE_TYPE    $tmax
+FORCE_TYPE    $tmin
+FORCE_TYPE    $wind
+FORCE_FORMAT  ASCII
+FORCE_DT      24
+FORCEYEAR     $forceyear
+FORCEMONTH    $forcemonth
+FORCEDAY      $forceday
+FORCEHOUR     0
+
+WIND_H          10.0    # height of wind speed measurement (m)
+MEASURE_H       2.0     # height of humidity measurement (m)
+ALMA_INPUT	FALSE	# TRUE = ALMA-compliant input variable units; 
+JULY_TAVG_SUPPLIED TRUE
+#FORCING2      FALSE
+
+#######################################################################
+# Land Surface Files and Parameters
+#######################################################################
+NLAYER		3	# number of soil layers
+NODES		5	# number of soil thermal nodes 
+SOIL        /raid2/ymao/data_assim/param/vic/ArkRed/Maurer/soil.ArkRed
+BASEFLOW	NIJSSEN2001	# ARNO or NIJSSEN2001
+#ARC_SOIL       FALSE   # TRUE = read soil parameters from ARC/INFO ASCII grids
+VEGPARAM    /raid2/ymao/VIC_RBM_east_RIPS/RIPS/model_run/param/vic/Maurer_AndyWood_8th/setup_from_Andy_Wood/veg/us_all.veg.wsne
+#GLOBAL_LAI 	TRUE    # TRUE read LAI from vegparam file; FALSE read LAI from veglib file
+VEGPARAM_LAI  TRUE 
+LAI_SRC  LAI_FROM_VEGPARAM
+ROOT_ZONES      3	# Number of root zones (must match format of veg param file)
+VEGLIB      /raid4/forecast/pnw_retro_forcing/vic.input.setup/LDAS_veg_lib
+SNOW_BAND  6 /raid2/ymao/VIC_RBM_east_RIPS/RIPS/model_run/param/vic/Maurer_AndyWood_8th/setup_from_Andy_Wood/snow/us_all.snowbands.wsne
+COMPUTE_TREELINE  10  # TRUE: you must specify the default understory veg type, eg 10
+
+#######################################################################
+# Output Files and Parameters
+#######################################################################
+RESULT_DIR  $result_dir
+OUT_STEP	0	# Output interval (hours); if 0, OUT_STEP = TIME_STEP
+SKIPYEAR 	0	# Number of years of output to omit from the output files
+COMPRESS	FALSE	# TRUE = compress input and output files when done
+BINARY_OUTPUT	FALSE	# TRUE = binary output files
+ALMA_OUTPUT  	FALSE	# TRUE = ALMA-compliant output units; FALSE = standard VIC units
+PRT_HEADER	FALSE	# TRUE = insert header at top of each output file; FALSE = no header
+PRT_SNOW_BAND	FALSE	# TRUE = write snowband output file with band-specific snow values
+
+#######################################################################
+# Output File Contents
+N_OUTFILES      1
+OUTFILE         force  7
+OUTVAR          OUT_AIR_TEMP
+OUTVAR          OUT_PREC
+OUTVAR          OUT_PRESSURE
+OUTVAR          OUT_SHORTWAVE
+OUTVAR          OUT_LONGWAVE
+OUTVAR          OUT_VP
+OUTVAR          OUT_WIND
+
