@@ -96,7 +96,6 @@ if cfg['SM']['sm_descend_nc'] is not None:
 # ============================================================ #
 # Aggregate all data to daily
 # ============================================================ #
-
 dict_da_daily = {}
 
 # --- Aggregate prec variables to daily (orig. units: mm/step) --- #
@@ -111,22 +110,22 @@ for var, da in dict_da.items():
 
 # --- Average and process soil moisture variables to daily --- #
 for var in ['sm_ascend', 'sm_descend']:
+    # Copy the shape of the DataArray from a prec variable
+    da_sm = dict_da_daily['prec_orig'].copy()
+    da_sm[:] = np.nan
     # If not missing
     if var in dict_da.keys():
         # Average to daily soil moisture
         da = dict_da[var]
         da_daily = da.groupby('time.date').mean(dim='time')
         # Put into dict
-        dict_da_daily[var] = da_daily
-    
+        da_sm.loc[da_daily['date'], :, :] = da_daily[:]
+        dict_da_daily[var] = da_sm
+
     # If missing, put in NAN
     else:
-        # Copy the shape of the DataArray from a prec variable
-        da_daily = dict_da_daily['prec_orig'].copy()
-        # Fill in all values with NAN
-        da_daily[:] = np.nan
         # Put into dict
-        dict_da_daily[var] = da_daily
+        dict_da_daily[var] = da_sm
 
 
 # ============================================================ #
