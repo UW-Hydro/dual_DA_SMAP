@@ -88,7 +88,7 @@ if cfg['SM']['sm_ascend_nc'] is not None:
 if cfg['SM']['sm_descend_nc'] is not None:
     da_sm_descend = xr.open_dataset(os.path.join(cfg['CONTROL']['root_dir'],
                                                 cfg['SM']['sm_descend_nc']))\
-                    [cfg['SM']['sm_ascend_varname']]
+                    [cfg['SM']['sm_descend_varname']]
     # put in dict
     dict_da['sm_descend'] = da_sm_descend
 
