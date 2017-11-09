@@ -4,6 +4,7 @@ import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import multiprocessing as mp
 
 from da_utils import (Forcings, perturb_forcings_ensemble, setup_output_dirs,
                       to_netcdf_forcing_file_compress, calculate_sm_noise_to_add_magnitude,
@@ -44,7 +45,7 @@ def load_nc_file(nc_file, start_year, end_year):
 def pert_prec_state_cell_ensemble(
     N, state_times, corrcoef,
     ds_force_orig, prec_std, out_forcing_basedir,
-    states_orig, scale_n_nloop, out_state_basedir, da_max_moist_n):
+    states_orig, scale_n_nloop, out_state_basedir, da_max_moist_n, nproc=1):
     ''' Perturb precipitation to produce a ensemble of perturbed forcing.
         Only for one-grid-cell case.
     
@@ -78,22 +79,46 @@ def pert_prec_state_cell_ensemble(
         Subdirs "ens_<i>" will be created, where <i> is ensemble index, 1, ..., N
         File names will be: state.YYYY_SSSSS.nc
     da_max_moist_n: <xarray.DataArray>
-            Maximum soil moisture for the whole domain and each tile
-            [unit: mm]. Soil moistures above maximum after perturbation will
-            be reset to maximum value.
-            Dimension: [lat, lon, n]
+        Maximum soil moisture for the whole domain and each tile
+        [unit: mm]. Soil moistures above maximum after perturbation will
+        be reset to maximum value.
+        Dimension: [lat, lon, n]
+    nproc: <int>
+        Number of processors to use
     '''
-    
-    for ens in range(N):
-        print('Perturbing forcing & states ens. {}...'.format(ens+1))
-        multiplier_prec_daily, noise_states_scaled = pert_prec_state_cell(
-            ens, state_times=state_times, corrcoef=corrcoef,
-            ds_force_orig=ds_force_orig, prec_std=prec_std,
-            out_forcing_basedir=out_forcing_basedir,
-            states_orig=states_orig, scale_n_nloop=scale_n_nloop,
-            out_state_basedir=out_state_basedir,
-            da_max_moist_n=da_max_moist_n,
-            seed=None)
+
+    # --- If nproc == 1, do a regular ensemble loop --- #
+    if nproc == 1: 
+        for ens in range(N):
+            print('Perturbing forcing & states ens. {}...'.format(ens+1))
+            multiplier_prec_daily, noise_states_scaled = pert_prec_state_cell(
+                ens, state_times=state_times, corrcoef=corrcoef,
+                ds_force_orig=ds_force_orig, prec_std=prec_std,
+                out_forcing_basedir=out_forcing_basedir,
+                states_orig=states_orig, scale_n_nloop=scale_n_nloop,
+                out_state_basedir=out_state_basedir,
+                da_max_moist_n=da_max_moist_n,
+                seed=None)
+    # --- If nproc > 1, use multiprocessing --- #
+    elif nproc > 1:
+        # --- Set up multiprocessing --- #
+        pool = mp.Pool(processes=nproc)
+        # --- Loop over each ensemble member --- #
+        for ens in range(N):
+            print('Perturbing forcing & states ens. {}...'.format(ens+1))
+            seed = np.random.randint(low=100000)
+            pool.apply_async(
+                pert_prec_state_cell,
+                (ens, state_times, corrcoef,
+                 ds_force_orig, prec_std,
+                 out_forcing_basedir,
+                 states_orig, scale_n_nloop,
+                 out_state_basedir,
+                 da_max_moist_n,
+                 seed))
+        # --- Finish multiprocessing --- #
+        pool.close()
+        pool.join()
 
 
 def pert_prec_state_cell(ens, state_times, corrcoef,

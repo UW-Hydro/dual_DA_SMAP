@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import sys
+import argparse
 
 from tonic.io import read_config, read_configobj
 
@@ -17,14 +18,25 @@ from error_utils import (load_nc_file, pert_prec_state_cell_ensemble)
 # ============================================================ #
 # Process command line arguments
 # ============================================================ #
+parser = argparse.ArgumentParser()
+parser.add_argument('--cfg',
+                    help='Config file')
+parser.add_argument('--corrcoef', type=float,
+                    help='Correlation coefficient of perturbation')
+parser.add_argument('--N', type=int,
+                    help='Ensemble size for perturbation')
+parser.add_argument('--nproc', type=int, default=1,
+                    help='Number of processors to use')
+args = parser.parse_args()
+
 # Read config file
-cfg = read_configobj(sys.argv[1])
-
+cfg = read_configobj(args.cfg)
 # Correlation coefficient of perturbation
-corrcoef = float(sys.argv[2])
-
+corrcoef = args.corrcoef
 # Perturbation ensemble size
-N = int(sys.argv[3])
+N = args.N
+# Number of processors to use
+nproc = args.nproc
 
 
 # ===================================================== #
@@ -135,6 +147,7 @@ pert_prec_state_cell_ensemble(
     ds_force_orig=ds_force_orig, prec_std=prec_std,
     out_forcing_basedir=force_pert_noise_basedir,
     states_orig=states_orig, scale_n_nloop=scale_n_nloop,
-    out_state_basedir=state_pert_noise_basedir, da_max_moist_n=da_max_moist_n)
+    out_state_basedir=state_pert_noise_basedir, da_max_moist_n=da_max_moist_n,
+    nproc=nproc)
 
 
