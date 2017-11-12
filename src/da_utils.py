@@ -533,8 +533,8 @@ class Forcings(object):
         
         # --- Calculate mu and sigma for the lognormal distribution --- #
         # (here mu and sigma are mean and std of the underlying normal dist.)
-        mu = -0.5 * np.log(std^2+1)
-        sigma = np.sqrt(np.log(std^2+1))
+        mu = -0.5 * np.log(np.square(std)+1)
+        sigma = np.sqrt(np.log(np.square(std)+1))
 
         # Calculate std of white noise and generate random white noise
         scale = sigma * np.sqrt(1 - phi * phi)
