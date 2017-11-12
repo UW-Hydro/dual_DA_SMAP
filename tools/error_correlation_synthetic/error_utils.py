@@ -182,8 +182,8 @@ def pert_prec_state_cell(ens, state_times, corrcoef,
     ### Step 2: Transform noise for precipitation
     # Calculate mu and sigma for the lognormal distribution
     # (here mu and sigma are mean and std of the underlying normal dist.)
-    mu_prec = -0.5 * np.log(prec_std^2 + 1)
-    sigma_prec = np.sqrt(np.log(prec_std^2 + 1))
+    mu_prec = -0.5 * np.log(np.square(prec_std) + 1)
+    sigma_prec = np.sqrt(np.log(np.square(prec_std) + 1))
     # Scale the normal noise
     prec_noise_normal = noise_correlated[:, 0] * sigma_prec + mu_prec
     # Transform to daily multiplier
