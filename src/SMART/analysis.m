@@ -1,4 +1,4 @@
-function [increment_sum,increment_sum_hold,sum_rain,sum_rain_sp,sum_rain_sp_hold,sum_rain_indep,increment_ens, innovation1] =...
+function [increment_sum,increment_sum_hold,sum_rain,sum_rain_sp,sum_rain_sp_hold,sum_rain_indep,increment_ens, innovation1, innovation1_not_norm] =...
     analysis(window_size,ist,filter_flag,transform_flag,API_model_flag,NUMEN,Q_fixed,P_inflation_fixed,...
     logn_var_constant,bb,rain_observed,rain_observed_hold,rain_indep,rain_true,sm_observed,...
     ta_observed,ta_observed_climatology,PET_observed,PET_observed_climatology,EVI_observed,...
@@ -31,6 +31,7 @@ API_filter(1:ist)=0;
 sm_observed_trans(1:ist)=0;
 increment(1:ist)=0;
 innovation1(1:ist)=0;
+innovation1_not_norm(1:ist)=0;
 API_COEFF_HOLD(1:ist)=0;
 
 P(1:ist)=0;
@@ -238,9 +239,11 @@ while (converge_flag == 0)
             if (sm_observed(k) < 0)
                 increment(k)=-999;
                 innovation1(k)=-999;
+                innovation1_not_norm(k)=-999;
             else
                 count_updates = count_updates + 1;
                 innovation1(k)  = (sm_observed_trans(k) - (API_filter(k)))/sqrt(P(k) + R_API(k));
+                innovation1_not_norm(k)  = sm_observed_trans(k) - (API_filter(k));
                 innovation_cross_sum = innovation_cross_sum + innovation1(k)*innovation_last;
                 innovation_last = innovation1(k);
                 increment(k)= K(k)*(sm_observed_trans(k) - API_filter(k));
@@ -296,6 +299,7 @@ while (converge_flag == 0)
             if (sm_observed(k) < 0)
                 increment(k)=-999;
                 innovation1(k)=-999;
+                innovation1_not_norm(k)=-999;
             else
                 % Calculate gain K
                 P(k) = var(API_filter_EnKF(k,:));
@@ -307,11 +311,12 @@ while (converge_flag == 0)
                 hold_perturbation = sqrt(R_API(k))*randn(1,NUMEN);
                 
                 innovation1(k)  = (sm_observed_trans(k) - background)/sqrt(P(k) + R_API(k));
+                innovation1_not_norm(k)  = sm_observed_trans(k) - background;
                 innovation_cross_sum = innovation_cross_sum + innovation1(k)*innovation_last;
                 innovation_last = innovation1(k);
                 
                 increment(k) = K(k)*(sm_observed_trans(k) - background);
-                increment_ens(k,:) = K(k)*(sm_observed_trans(k) + hold_perturbation - API_filter_EnKF(k,:));
+                increment_ens(k,:) = K(k)*(sm_observed_trans(k) - API_filter_EnKF(k,:));
                 
                 API_filter_EnKF(k,:) = hold_state + K(k)*(sm_observed_trans(k) + hold_perturbation - hold_state);
                 
@@ -343,9 +348,11 @@ while (converge_flag == 0)
             if (sm_observed(k) < 0)
                 increment(k)=-999;
                 innovation1(k)=-999;
+                innovation1_not_norm(k)=-999;
             else
                 count_updates = count_updates + 1;
                 innovation1(k)  = (sm_observed_trans(k) - (API_filter(k)))/sqrt(P(k) + R_API(k));
+                innovation1_not_norm(k)  = sm_observed_trans(k) - API_filter(k);
                 innovation_cross_sum = innovation_cross_sum + innovation1(k)*innovation_last;
                 innovation_last = innovation1(k);
                 increment(k)= K(k)*(sm_observed_trans(k) - (API_filter(k)));
@@ -407,6 +414,7 @@ while (converge_flag == 0)
             if (sm_observed(k) < 0)
                 increment(k)=-999;
                 innovation1(k)=-999;
+                innovation1_not_norm(k)=-999;
             else
                 count_updates=count_updates + 1;
                 eps = 1e-12;
@@ -431,6 +439,7 @@ while (converge_flag == 0)
                 end;
                 
                 innovation1(k)  = (sm_observed_trans(k) - background)/sqrt(P(k) + R_API(k));
+                innovation1_not_norm(k)  = sm_observed_trans(k) - background;
                 innovation_cross_sum = innovation_cross_sum + innovation1(k)*innovation_last;
                 innovation_last = innovation1(k);
                 
@@ -546,4 +555,5 @@ for k=2:floor(ist/window_size)
         end
     end
 end
+
 end
