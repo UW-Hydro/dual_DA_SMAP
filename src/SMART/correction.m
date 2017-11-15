@@ -1,9 +1,10 @@
-function [sum_rain_corrected,optimized_fraction] = correction(increment_sum,increment_sum_hold,sum_rain_sp,sum_rain_indep,lambda_flag)
+function [sum_rain_corrected, sum_rain_corrected_ens, optimized_fraction] = correction(increment_sum,increment_sum_hold, increment_ens, sum_rain_sp,sum_rain_indep,lambda_flag, filter_flag, NUMEN)
 
 % Initialize corrected rainfall (sum in each window) (Yixin)
 d = size(sum_rain_sp);
 ist = d(2);
 sum_rain_corrected(1:ist)=0;
+sum_rain_corrected_ens(1:ist, 1:NUMEN) = 0;
 
 % Find optimized lambda
 % --- Only keep the time steps when there is an increment and there is
@@ -26,14 +27,15 @@ increment_sum(increment_sum < -500) = 0;
 
 for k=1:ist
     sum_rain_corrected(k) = sum_rain_sp(k)+(optimized_fraction*increment_sum(k));
+    % If ensemble method, save ensemble of corrected rainfall
+    if (filter_flag == 2 || filter_flag == 6)
+        sum_rain_corrected_ens(k, :) = sum_rain_sp(k)+(optimized_fraction*increment_ens(k, :));
+    end
 end
 
 % Set negative rainfall to zero after correction
-for k=1:ist
-   if (sum_rain_corrected(k) < 0) % this introduces a bias
-        sum_rain_corrected(k) = 0;
-    end
-end
+sum_rain_corrected(sum_rain_corrected<0) = 0;
+sum_rain_corrected_ens(sum_rain_corrected_ens<0) = 0;
 
 end
 

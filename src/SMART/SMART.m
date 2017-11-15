@@ -86,7 +86,7 @@ for j=1:numpixels %space loop
     rain_observed = prec_orig(j, :); % Satellite-based precipitation [1 * ntime];
     rain_indep = prec_for_tuning_lambda(j, :); % Calibration target
     rain_true = prec_true(j, :); % Used as benchmark
-    sma_observed = sm_ascend(j, :); % Soil Moisture - Ascending
+    sma_observed = sm_ascend(j, :); % Soil Moisture - Ascending    
     smd_observed = sm_descend(j, :); % Soil Moisture - Descending
     sm_quality = sm_error(j, :);  % Soil moisture standard error
     
@@ -135,21 +135,24 @@ for j=1:numpixels %space loop
         end
         
         % Calculate Increments
-        [increment_sum,increment_sum_hold,sum_rain,sum_rain_sp,sum_rain_sp_hold,sum_rain_sp2,increment_ens, innovation(:, j)] = ...
+        [increment_sum,increment_sum_hold,sum_rain,sum_rain_sp,sum_rain_sp_hold,sum_rain_sp2,increment_ens, innovation(:, j), innovation_not_norm] = ...
             analysis(window_size,ist,filter_flag,transform_flag,API_model_flag,NUMEN,Q_fixed,P_inflation,...
             logn_var,bb,rain_observed,rain_observed_hold,rain_indep,rain_true,sm_observed,...
             ta_observed,ta_observed_climatology,PET_observed,PET_observed_climatology,EVI_observed,...
             API_mean,sm_quality, API_range, slope_parameter_API);
         
         % Correct Rainfall..Yixin, this sub-routine will have to be changed to accomodate ensemble
-        [sum_rain_corrected,optimized_fraction] = ...
-            correction(increment_sum,increment_sum_hold,sum_rain_sp,sum_rain_sp2,lambda_flag);       lambda(j) = optimized_fraction;
+        [sum_rain_corrected, sum_rain_corrected_ens, optimized_fraction] = ...
+            correction(increment_sum,increment_sum_hold,increment_ens, sum_rain_sp,sum_rain_sp2,lambda_flag, filter_flag, NUMEN);
+        lambda(j) = optimized_fraction;
         
         RAIN_SMART_SMOS(:,j) = sum_rain_corrected(:);
+        RAIN_SMART_SMOS_ENS(:, :, j) = sum_rain_corrected_ens;
 %     end
 end
 
 save([output_dir '/SMART_corrected_rainfall.mat'], 'RAIN_SMART_SMOS');  % [ntime, npixel]
+save([output_dir '/SMART_corrected_rainfall_ens.mat'], 'RAIN_SMART_SMOS_ENS');  % [ntime, n_ens, npixel]
 save([output_dir '/innovation.mat'], 'innovation');  % [ntime, npixel]
 save([output_dir '/lambda.mat'], 'lambda');  % [npixel]
 
