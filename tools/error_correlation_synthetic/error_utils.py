@@ -43,7 +43,7 @@ def load_nc_file(nc_file, start_year, end_year):
 
 
 def pert_prec_state_cell_ensemble(
-    N, state_times, corrcoef,
+    N, state_times, corrcoef, phi,
     ds_force_orig, prec_std, out_forcing_basedir,
     states_orig, scale_n_nloop, out_state_basedir, da_max_moist_n, nproc=1):
     ''' Perturb precipitation to produce a ensemble of perturbed forcing.
@@ -59,6 +59,8 @@ def pert_prec_state_cell_ensemble(
     corrcoef: <float>
         Correlation coefficient between the (additive/multiplicative) noises added
         to states and forcings
+    phi: <float>
+        AR(1) autocorrelation coefficient for both state & forcing perturbation
     ds_force_orig: <xr.Dataset>
         Original VIC-format forcing
     prec_std: <float>
@@ -93,6 +95,7 @@ def pert_prec_state_cell_ensemble(
             print('Perturbing forcing & states ens. {}...'.format(ens+1))
             multiplier_prec_daily, noise_states_scaled = pert_prec_state_cell(
                 ens, state_times=state_times, corrcoef=corrcoef,
+                phi=phi,
                 ds_force_orig=ds_force_orig, prec_std=prec_std,
                 out_forcing_basedir=out_forcing_basedir,
                 states_orig=states_orig, scale_n_nloop=scale_n_nloop,
@@ -109,7 +112,7 @@ def pert_prec_state_cell_ensemble(
             seed = np.random.randint(low=100000)
             pool.apply_async(
                 pert_prec_state_cell,
-                (ens, state_times, corrcoef,
+                (ens, state_times, corrcoef, phi,
                  ds_force_orig, prec_std,
                  out_forcing_basedir,
                  states_orig, scale_n_nloop,
@@ -121,7 +124,7 @@ def pert_prec_state_cell_ensemble(
         pool.join()
 
 
-def pert_prec_state_cell(ens, state_times, corrcoef,
+def pert_prec_state_cell(ens, state_times, corrcoef, phi,
                          ds_force_orig, prec_std, out_forcing_basedir,
                          states_orig, scale_n_nloop, out_state_basedir, da_max_moist_n,
                          seed=None):
@@ -138,6 +141,8 @@ def pert_prec_state_cell(ens, state_times, corrcoef,
     corrcoef: <float>
         Correlation coefficient between the (additive/multiplicative) noises added
         to states and forcings
+    phi: <float>
+        AR(1) autocorrelation coefficient for both state & forcing perturbation
     ds_force_orig: <xr.Dataset>
         Original VIC-format forcing
     prec_std: <float>
@@ -171,14 +176,28 @@ def pert_prec_state_cell(ens, state_times, corrcoef,
 
     # === Generate correlated noises for states and forcings === #
     ### Step 1: Generate two series of correlated noises, both with
-    # zero mean and unit variance
+    # zero mean and unit variance. Autocorrelation is also set by user.
     mean = [0, 0]
     cov = [[1, corrcoef], [corrcoef, 1]]
+    # Calculate scale for the white noise for a unit-variance AR(1) process
+    # and generate correlated white noise
+    scale = 1 * np.sqrt(1 - phi * phi)
     if seed is None:
-        noise_correlated = np.random.multivariate_normal(mean, cov, len(state_times))
+        # Generate white noise of dimension [time, 2]
+        white_noise_correlated = np.random.multivariate_normal(mean, cov, len(state_times)) * scale
     else:
         rng = np.random.RandomState(seed)
-        noise_correlated = rng.multivariate_normal(mean, cov, len(state_times))
+        white_noise_correlated = rng.multivariate_normal(mean, cov, len(state_times)) * scale
+    # Generate AR(1) auto-correlated noise
+    # - Initialize
+    ar1 = np.empty([len(state_times), 2])
+    # Generate data for the first time point
+    ar1[0, :] = white_noise_correlated[0, :]
+    # Loop over each time point
+    for t in range(1, len(state_times)):
+        ar1[t, :] = 0 + phi * (ar1[t-1, :] - 0) + white_noise_correlated[t, :]
+    # Save the final two series of noise (autocorrelated; correlated)
+    noise_correlated = ar1
     ### Step 2: Transform noise for precipitation
     # Calculate mu and sigma for the lognormal distribution
     # (here mu and sigma are mean and std of the underlying normal dist.)

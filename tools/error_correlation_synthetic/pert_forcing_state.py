@@ -23,6 +23,8 @@ parser.add_argument('--cfg',
                     help='Config file')
 parser.add_argument('--corrcoef', type=float,
                     help='Correlation coefficient of perturbation')
+parser.add_argument('--phi', type=float,
+                    help='Autocorrelation parameter of AR(1) for both state and forcing perturbation')
 parser.add_argument('--N', type=int,
                     help='Ensemble size for perturbation')
 parser.add_argument('--nproc', type=int, default=1,
@@ -33,6 +35,8 @@ args = parser.parse_args()
 cfg = read_configobj(args.cfg)
 # Correlation coefficient of perturbation
 corrcoef = args.corrcoef
+# Autocorrelation parameter of AR(1) for both state and forcing perturbation
+phi = args.phi
 # Perturbation ensemble size
 N = args.N
 # Number of processors to use
@@ -97,7 +101,8 @@ force_pert_basedir = setup_output_dirs(
     mkdirs=['perturbed_forcings'])['perturbed_forcings']
 force_pert_noise_basedir = setup_output_dirs(
     force_pert_basedir,
-    mkdirs=['corrcoef_{}'.format(corrcoef)])['corrcoef_{}'.format(corrcoef)]
+    mkdirs=['corrcoef_{}_phi_{}'.format(corrcoef, phi)])\
+    ['corrcoef_{}_phi_{}'.format(corrcoef, phi)]
 
 
 # ===================================================== #
@@ -119,7 +124,7 @@ state_pert_basedir = setup_output_dirs(
     mkdirs=['perturbed_states'])['perturbed_states']
 state_pert_noise_basedir = setup_output_dirs(
     state_pert_basedir,
-    mkdirs=['corrcoef_{}'.format(corrcoef)])['corrcoef_{}'.format(corrcoef)]
+    mkdirs=['corrcoef_{}_phi_{}'.format(corrcoef, phi)])['corrcoef_{}_phi_{}'.format(corrcoef, phi)]
 
 # --- Prepare for state perturbation --- #
 # --- (Same perturbation for all tiles/layers, with different magtinude for each layer) --- #
@@ -143,7 +148,7 @@ np.random.seed(1111)
 # Add perturbation to generate an ensemble of perturbed states & forcings
 # (same multiplier for prec every day)
 pert_prec_state_cell_ensemble(
-    N=N, state_times=state_times, corrcoef=corrcoef,
+    N=N, state_times=state_times, corrcoef=corrcoef, phi=phi,
     ds_force_orig=ds_force_orig, prec_std=prec_std,
     out_forcing_basedir=force_pert_noise_basedir,
     states_orig=states_orig, scale_n_nloop=scale_n_nloop,
