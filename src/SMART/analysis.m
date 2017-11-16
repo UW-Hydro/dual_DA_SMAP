@@ -56,7 +56,7 @@ sm2_observed_DOY(1:365)=0;
 count_DOY_sm(1:365)=0;
 count_DOY_API(1:365)=0;
 var_API(1:365)=0;
-DOY(1:365)=0;
+%DOY(1:365)=0;
 
 %total_mean_TA = mean(ta_observed_climatology(ta_observed_climatology > -100));%Global average high temperature
 %total_mean_PET = mean(PET_observed_climatology(PET_observed_climatology > -100));%Global average high temperature
