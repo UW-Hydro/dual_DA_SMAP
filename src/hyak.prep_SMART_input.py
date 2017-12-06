@@ -118,9 +118,11 @@ for var in ['sm_ascend', 'sm_descend']:
         # Average to daily soil moisture
         da = dict_da[var]
         da_daily = da.groupby('time.date').mean(dim='time')
-        # Put into dict (assume daily-mean SM represents the SM at the end of the day)
-        # (i.e., shifted back by one day)
-        da_daily = da_daily.shift(date=1)
+        # Put into dict
+        # NOTE: (assume the "daily-mean" SM represents the SM at 00:00 on the date)
+        # (since SMART assumes the SM observation on the corresponding day with rainfall
+        # to be at the end of the day, we need to shift the SM date forward by one day)
+        da_daily = da_daily.shift(date=-1)
         da_sm.loc[da_daily['date'], :, :] = da_daily[:]
         dict_da_daily[var] = da_sm
 
