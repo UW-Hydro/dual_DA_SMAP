@@ -1457,7 +1457,7 @@ def to_netcdf_state_file_compress(ds_state, out_nc):
                        encoding=dict_encode)
 
 
-def to_netcdf_forcing_file_compress(ds_force, out_nc):
+def to_netcdf_forcing_file_compress(ds_force, out_nc, time_dim='time'):
     ''' This function saves a VIC-forcing-file-format ds to netCDF, with
         compression.
 
@@ -1467,6 +1467,8 @@ def to_netcdf_forcing_file_compress(ds_force, out_nc):
         Forcing dataset to save
     out_nc: <str>
         Path of output netCDF file
+    time_dim: <str>
+        Time dimension name in ds_force. Default: 'time'
     '''
 
     dict_encode = {}
@@ -1474,7 +1476,7 @@ def to_netcdf_forcing_file_compress(ds_force, out_nc):
         # determine chunksizes
         chunksizes = []
         for i, dim in enumerate(ds_force[var].dims):
-            if dim == 'time':  # for time dimension, chunksize = 1
+            if dim == time_dim:  # for time dimension, chunksize = 1
                 chunksizes.append(1)
             else:
                 chunksizes.append(len(ds_force[dim]))
@@ -3710,4 +3712,36 @@ def correct_prec_from_SMART(da_prec_orig, window_size, da_prec_corr_window,
     
     return da_prec_corrected
 
+
+def rescale_and_save_SMART_prec(da_prec_orig, window_size,
+                                da_prec_corr_window, start_date, out_dir, out_prefix):
+    ''' Rescale and save SMART-corrected precipitation (one ensemble member)
+    Parameters
+    ----------
+    da_prec_orig: <xr.DataArray>
+        Original precipitation
+    window_size: <int>
+        Window size in SMART
+    da_prec_corr_window_ens: <xr.DataArray>
+        SMART-corrected window-averaged precipitation
+    start_date: <pd.datetime>
+        Start date of simulation
+    out_dir: <str>
+        Output directory for rescaled precipitation
+    out_prefix: <str>
+        Prefix of the output prec file ("YYYY.nc" will be appended)
+    '''
+
+    # Rescale
+    da_prec_corrected = correct_prec_from_SMART(
+        da_prec_orig,
+        window_size,
+        da_prec_corr_window,
+        start_date)
+    # Save to file
+    ds_prec_corrected = xr.Dataset({'prec_corrected': da_prec_corrected})
+    for year, ds in ds_prec_corrected.groupby('time.year'):
+        to_netcdf_forcing_file_compress(
+            ds_force=ds_prec_corrected,
+            out_nc=os.path.join(out_dir, '{}{}.nc'.format(out_prefix, year)))
 
