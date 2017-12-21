@@ -3742,6 +3742,6 @@ def rescale_and_save_SMART_prec(da_prec_orig, window_size,
     ds_prec_corrected = xr.Dataset({'prec_corrected': da_prec_corrected})
     for year, ds in ds_prec_corrected.groupby('time.year'):
         to_netcdf_forcing_file_compress(
-            ds_force=ds_prec_corrected,
+            ds_force=ds,
             out_nc=os.path.join(out_dir, '{}{}.nc'.format(out_prefix, year)))
 
