@@ -101,6 +101,8 @@ da_meas = xr.DataArray(data, coords=[time, lat, lon, [0]],
 # --- in the original forcing file                              --- #
 # ----------------------------------------------------------------- #
 print('Replacing precip data...')
+# Set flag for whether to delete the forcing file after running
+forcing_delete = 0
 # If use original forcing for post-processing
 if ens_prec == 'orig':
     vic_forcing_basepath = os.path.join(
@@ -136,21 +138,19 @@ else:
                                 da_prec)
         # Save replaced forcings to netCDF file
         if ens_prec == 'mean':
-            to_netcdf_forcing_file_compress(
-                ds_prec_replaced,
-                out_nc=os.path.join(
+            vic_forcing_basepath = os.path.join(
                     dirs['forcings'],
-                    'forc.post_prec.ens_mean.{}.nc'.format(year)))
+                    'forc.post_prec.ens_mean.state_ens{}.'.format(ens_state)) 
         else:
-            to_netcdf_forcing_file_compress(
-                ds_prec_replaced,
-                out_nc=os.path.join(
+            vic_forcing_basepath = os.path.join(
                     dirs['forcings'],
-                    'forc.post_prec.ens{}.{}.nc'.format(ens_prec, year)))
-    # Set VIC forcing
-    vic_forcing_basepath = os.path.join(
-                dirs['forcings'],
-                'forc.post_prec.ens{}.'.format(ens_prec))
+                    'forc.post_prec.ens{}.state_ens{}.'.format(
+                        ens_prec, ens_state))
+        to_netcdf_forcing_file_compress(
+            ds_prec_replaced,
+            out_nc='{}{}.nc'.format(vic_forcing_basepath, year))
+    # Set flag to delete forcing after VIC run
+    forcing_delete = 1
 
 
 # ----------------------------------------------------------------- #
@@ -230,5 +230,10 @@ to_netcdf_forcing_file_compress(
         'history.concat.{}_{}.nc'.format(start_year, end_year)))
 for f in list_history_files:
     os.remove(f)
+# --- Clean up forcing files --- #
+if forcing_delete == 1:
+    for year in range(start_year, end_year+1):
+        f = '{}{}.nc'.format(vic_forcing_basepath, year)
+        os.remove(f)
 
 
