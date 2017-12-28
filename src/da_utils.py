@@ -3333,7 +3333,7 @@ def run_vic_assigned_states(start_time, end_time, vic_exe, init_state_nc,
     
     Returns
     ----------
-    list_history_files: <list>
+    list_history_files_concat: <list>
         A list of all output history file paths in order
     
     Require
@@ -3344,6 +3344,7 @@ def run_vic_assigned_states(start_time, end_time, vic_exe, init_state_nc,
     '''
     
     list_history_files = []  # A list of resulted history file paths
+    list_history_files_concat = []  # A list of final concatenated history file paths
     
     # --- Run VIC from start_time to the first assigned state time --- #
     run_start_time = start_time
@@ -3415,8 +3416,10 @@ def run_vic_assigned_states(start_time, end_time, vic_exe, init_state_nc,
                             'history.concat.{}.nc'.format(year))
             concat_clean_up_history_file(list_history_files,
                                          output_file)
+            list_history_files_concat.append(output_file)
             # Reset history file list
             list_history_files = []
+    return list_history_files_concat
 
 
 def rmse(true, est):
