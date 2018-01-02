@@ -123,6 +123,10 @@ da_innov = da_2D_to_3D_from_SMART(
                 out_time_varname='time',
                 out_time_coord=pd.date_range(start_date, end_date, freq='D'))\
            ['innov']
+# Remove -999 innovation values (for missing measurement time points)
+innov = da_innov.values
+innov[innov==-999] = np.nan
+da_innov[:] = innov
 
 # --- Convert lambda param to [lat, lon] --- #
 da_lambda = da_2D_to_3D_from_SMART(
