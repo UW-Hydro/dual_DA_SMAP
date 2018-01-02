@@ -355,11 +355,11 @@ print('\tMeasurements...')
 ds_meas = xr.open_dataset(os.path.join(gen_synth_basedir, 'synthetic_meas',
                                        synth_meas_nc_filename))
 
-## --- EnKF results --- #
-#print('\tEnKF results...')
-#ds_EnKF_mean = xr.open_dataset(os.path.join(
-#                    output_rootdir, 'data.EnKF_results', 'ens_mean',
-#                    'ens_mean.concat.{}_{}.nc'.format(start_year, end_year)))
+# --- EnKF results --- #
+print('\tEnKF results...')
+ds_EnKF_mean = xr.open_dataset(os.path.join(
+                    output_rootdir, 'data.EnKF_results', 'ens_mean',
+                    'ens_mean.concat.{}_{}.nc'.format(start_year, end_year)))
 
 
 # ======================================================== #
@@ -395,8 +395,6 @@ plt.title('Temporal variance of normalized innovation, '
 fig.savefig(os.path.join(output_dir, 'innov_norm_var.png'), format='png')
 
 
-exit()
-
 # ======================================================== #
 # Extract soil layer depths
 # ======================================================== #
@@ -413,15 +411,14 @@ depth_sm3 = da_soil_depth.sel(nlayer=2)  # [lat, lon]
 # --- Extract variables --- #
 da_truth = ds_truth['OUT_SOIL_MOIST'].sel(nlayer=0) / depth_sm1
 da_openloop = ds_openloop['OUT_SOIL_MOIST'].sel(nlayer=0) / depth_sm1
-da_EnKF_mean = ds_EnKF_mean['OUT_SOIL_MOIST'].sel(nlayer=0) / depth_sm1
-
+da_EnKF_mean = ds_EnKF_mean['OUT_SOIL_MOIST'].sel(nlayer=0) / depth_sm1 
 # --- Calculate RMSE --- #
 # Determine the total number of loops
 nloop = len(lat_coord) * len(lon_coord)
 # Reshape variables
-truth = da_truth.values.reshape([len(time_coord), nloop])  # [time, nloop]
-openloop = da_openloop.values.reshape([len(time_coord), nloop])  # [time, nloop]
-EnKF_mean = da_EnKF_mean.values.reshape([len(time_coord), nloop])  # [time, nloop]
+truth = da_truth.values.reshape([len(da_truth['time']), nloop])  # [time, nloop]
+openloop = da_openloop.values.reshape([len(da_truth['time']), nloop])  # [time, nloop]
+EnKF_mean = da_EnKF_mean.values.reshape([len(da_truth['time']), nloop])  # [time, nloop]
 # Calculate RMSE for all grid cells
 rmse_openloop = np.array(list(map(
             lambda j: rmse(truth[:, j], openloop[:, j]),
@@ -474,9 +471,9 @@ da_EnKF_mean = ds_EnKF_mean['OUT_SOIL_MOIST'].sel(nlayer=1) / depth_sm2
 # Determine the total number of loops
 nloop = len(lat_coord) * len(lon_coord)
 # Reshape variables
-truth = da_truth.values.reshape([len(time_coord), nloop])  # [time, nloop]
-openloop = da_openloop.values.reshape([len(time_coord), nloop])  # [time, nloop]
-EnKF_mean = da_EnKF_mean.values.reshape([len(time_coord), nloop])  # [time, nloop]
+truth = da_truth.values.reshape([len(da_truth['time']), nloop])  # [time, nloop]
+openloop = da_openloop.values.reshape([len(da_truth['time']), nloop])  # [time, nloop]
+EnKF_mean = da_EnKF_mean.values.reshape([len(da_truth['time']), nloop])  # [time, nloop]
 # Calculate RMSE for all grid cells
 rmse_openloop = np.array(list(map(
             lambda j: rmse(truth[:, j], openloop[:, j]),
@@ -530,9 +527,9 @@ da_EnKF_mean = ds_EnKF_mean['OUT_SOIL_MOIST'].sel(nlayer=2) / depth_sm3
 # Determine the total number of loops
 nloop = len(lat_coord) * len(lon_coord)
 # Reshape variables
-truth = da_truth.values.reshape([len(time_coord), nloop])  # [time, nloop]
-openloop = da_openloop.values.reshape([len(time_coord), nloop])  # [time, nloop]
-EnKF_mean = da_EnKF_mean.values.reshape([len(time_coord), nloop])  # [time, nloop]
+truth = da_truth.values.reshape([len(da_truth['time']), nloop])  # [time, nloop]
+openloop = da_openloop.values.reshape([len(da_truth['time']), nloop])  # [time, nloop]
+EnKF_mean = da_EnKF_mean.values.reshape([len(da_truth['time']), nloop])  # [time, nloop]
 # Calculate RMSE for all grid cells
 rmse_openloop = np.array(list(map(
             lambda j: rmse(truth[:, j], openloop[:, j]),
@@ -587,9 +584,9 @@ da_EnKF_mean = ds_EnKF_mean['OUT_RUNOFF']
 # Determine the total number of loops
 nloop = len(lat_coord) * len(lon_coord)
 # Reshape variables
-truth = da_truth.values.reshape([len(time_coord), nloop])  # [time, nloop]
-openloop = da_openloop.values.reshape([len(time_coord), nloop])  # [time, nloop]
-EnKF_mean = da_EnKF_mean.values.reshape([len(time_coord), nloop])  # [time, nloop]
+truth = da_truth.values.reshape([len(da_truth['time']), nloop])  # [time, nloop]
+openloop = da_openloop.values.reshape([len(da_truth['time']), nloop])  # [time, nloop]
+EnKF_mean = da_EnKF_mean.values.reshape([len(da_truth['time']), nloop])  # [time, nloop]
 
 # Calculate RMSE for all grid cells
 rmse_openloop = np.array(list(map(

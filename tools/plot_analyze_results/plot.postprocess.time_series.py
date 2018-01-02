@@ -287,19 +287,12 @@ truth_nc_filename = cfg['EnKF']['truth_nc_filename']
 synth_meas_nc_filename = cfg['EnKF']['synth_meas_nc_filename']
 
 # openloop
-openloop_nc = cfg['EnKF']['openloop_nc']
-
-# initial time
-init_time = pd.to_datetime(cfg['EnKF']['init_time'])
+openloop_nc = os.path.join(cfg['EnKF']['openloop_basedir'],
+                           'history',
+                           'history.openloop.1980-01-01-00000.nc')
 
 # VIC global file template (for extracting param file and snow_band)
 vic_global_txt = cfg['EnKF']['vic_global_txt']
-
-# Forcings (for all basepaths, 'YYYY.nc' will be appended)
-orig_force_basepath = cfg['EnKF']['orig_force_basepath']
-truth_force_basepath = cfg['EnKF']['truth_force_basepath']
-# ens_force_basedir/ens_<i>/force.<YYYY>.nc, where <i> = 1, 2, ..., N
-ens_force_basedir = cfg['EnKF']['ens_force_basedir']
 
 # VIC parameter netCDF file
 vic_param_nc = cfg['EnKF']['vic_param_nc']
@@ -771,6 +764,59 @@ if not linear_model:
     plt.title('Baseflow, {}, {}, N={}'.format(lat, lon, N))
     # Save figure
     fig.savefig(os.path.join(output_dir, '{}_{}.post.baseflow.png'.format(lat, lon)),
+                format='png')
+
+# ========================================================== #
+# Plot - baseflow, aggregated to daily
+# ========================================================== #
+if not linear_model:
+    print('\tPlot - baseflow...')
+    # --- RMSE --- #
+    # extract time series
+    ts_truth = ds_truth['OUT_BASEFLOW'].sel(
+                    lat=lat, lon=lon,
+                    time=slice(plot_start_time, plot_end_time)).to_series()\
+               .resample("D", how='sum')
+    da_post = ds_post['OUT_BASEFLOW'].sel(time=slice(plot_start_time, plot_end_time))\
+              .resample(freq="D", how='sum', dim='time')
+    ts_post_mean = da_post.mean(dim='N').\
+                   to_series()
+    ts_openloop = ds_openloop['OUT_BASEFLOW'].sel(
+                    lat=lat, lon=lon,
+                    time=slice(plot_start_time, plot_end_time)).to_series()\
+                  .resample("D", how='sum')
+    # Calculate post_mean vs. truth
+    df_truth_post = pd.concat([ts_truth, ts_post_mean], axis=1, keys=['truth', 'post_mean']).dropna()
+    rmse_post_mean = rmse(df_truth_post['truth'], df_truth_post['post_mean'])
+    # Calculate open-loop vs. truth
+    df_truth_openloop = pd.concat([ts_truth, ts_openloop], axis=1, keys=['truth', 'openloop']).dropna()
+    rmse_openloop = rmse(df_truth_openloop['truth'], df_truth_openloop['openloop'])
+    
+    # ----- Regular plots ----- #
+    # Create figure
+    fig = plt.figure(figsize=(12, 6))
+    # plot each ensemble member
+    for i in range(N):
+        if i == 0:
+            legend=True
+        else:
+            legend=False
+        da_post.sel(N=i+1).to_series().plot(
+                    color='blue', style='-', alpha=0.3,
+                    label='Post-processed, mean RMSE={:.3f} mm'.format(rmse_post_mean),
+                    legend=legend)
+    # plot truth
+    ts_truth.plot(color='k', style='-', label='Truth', legend=True)
+    # plot open-loop
+    ts_openloop.plot(color='m', style='--',
+                     label='Open-loop, RMSE={:.3f} mm'.format(rmse_openloop),
+                     legend=True)
+    # Make plot looks better
+    plt.xlabel('Time')
+    plt.ylabel('Baseflow (mm)')
+    plt.title('Baseflow, daily, {}, {}, N={}'.format(lat, lon, N))
+    # Save figure
+    fig.savefig(os.path.join(output_dir, '{}_{}.post.baseflow_daily.png'.format(lat, lon)),
                 format='png')
 
 # ========================================================== #
