@@ -2618,7 +2618,7 @@ def propagate(start_time, end_time, vic_exe, vic_global_template_file,
                        vic_model_steps_per_day, init_state_nc, out_state_basepath,
                        out_history_dir, out_history_fileprefix,
                        out_global_basepath, out_log_dir,
-                       forcing_basepath, mpi_proc=None, mpi_exe='mpiexec'):
+                       forcing_basepath, mpi_proc=None, mpi_exe='mpiexec', delete_log=True):
     ''' This function propagates (via VIC) from an initial state (or no initial state)
         to a certain time point.
 
@@ -2654,7 +2654,9 @@ def propagate(start_time, end_time, vic_exe, vic_global_template_file,
         Default: None
     mpi_exe: <str>
         Path for MPI exe. Only used if mpi_proc is not None
-
+    delete_log: <bool>
+        Whether to delete all log files in the log directory after running.
+        Default: True
 
     Require
     ----------
@@ -2684,8 +2686,9 @@ def propagate(start_time, end_time, vic_exe, vic_global_template_file,
     check_returncode(returncode, expected=0)
 
     # Delete log files (to save space)
-    for f in glob.glob(os.path.join(out_log_dir, "*")):
-        os.remove(f)
+    if delete_log:
+        for f in glob.glob(os.path.join(out_log_dir, "*")):
+            os.remove(f)
 
 
 def propagate_linear_model(start_time, end_time, lat_coord, lon_coord,
@@ -3297,7 +3300,8 @@ def run_vic_assigned_states(start_time, end_time, vic_exe, init_state_nc,
                             vic_forcing_basepath, vic_model_steps_per_day,
                             output_global_root_dir,
                             output_vic_history_root_dir,
-                            output_vic_log_root_dir, mpi_proc=None, mpi_exe=None):
+                            output_vic_log_root_dir, mpi_proc=None, mpi_exe=None,
+                            delete_log=True):
     ''' Run VIC with assigned initial states and other assigned state files during the simulation time. All VIC runs do not output state file in the end.
     
     Parameters
@@ -3330,6 +3334,9 @@ def run_vic_assigned_states(start_time, end_time, vic_exe, init_state_nc,
         Number of processors to use for VIC MPI run. None for not using MPI
     mpi_exe: <str>
         Path for MPI exe
+    delete_log: <bool>
+        Whether to delete all log files in the log directory after running
+        Default: True
     
     Returns
     ----------
@@ -3362,7 +3369,8 @@ def run_vic_assigned_states(start_time, end_time, vic_exe, init_state_nc,
               out_log_dir=output_vic_log_root_dir,
               forcing_basepath=vic_forcing_basepath,
               mpi_proc=mpi_proc,
-              mpi_exe=mpi_exe)
+              mpi_exe=mpi_exe,
+              delete_log=delete_log)
     list_history_files.append(os.path.join(
                     output_vic_history_root_dir,
                     'history.{}-{:05d}.nc'.format(
