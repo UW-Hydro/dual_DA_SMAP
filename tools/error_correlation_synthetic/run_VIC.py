@@ -23,6 +23,8 @@ parser.add_argument('--cfg',
                     help='Config file')
 parser.add_argument('--corrcoef', type=float,
                     help='Correlation coefficient of perturbation')
+parser.add_argument('--phi', type=float,
+                    help='Autocorrelation parameter of AR(1) for both state and forcing perturbation')
 parser.add_argument('--ens', type=int,
                     help='Ensemble index, starting from 1')
 args = parser.parse_args()
@@ -31,6 +33,8 @@ args = parser.parse_args()
 cfg = read_configobj(args.cfg)
 # Correlation coefficient of perturbation
 corrcoef = args.corrcoef
+# Autocorrelation parameter of AR(1) for both state and forcing perturbation
+phi = args.phi
 # Perturbation ensemble size
 ens = args.ens
 
@@ -71,7 +75,7 @@ vic_exe = VIC(vic_exe_path)
 dict_assigned_state_nc = OrderedDict()
 for i, time in enumerate(state_times):
     state_path = os.path.join(
-        output_dir, 'perturbed_states', 'corrcoef_{}'.format(corrcoef),
+        output_dir, 'perturbed_states', 'corrcoef_{}_phi_{}'.format(corrcoef, phi),
         'ens_{}'.format(ens),
         'state.{}_{:05d}.nc'.format(time.strftime('%Y%m%d'), time.second))
     if i == 0:
@@ -80,13 +84,14 @@ for i, time in enumerate(state_times):
         dict_assigned_state_nc[time] = state_path
 # Forcing basepath
 vic_forcing_basepath = os.path.join(
-    output_dir, 'perturbed_forcings', 'corrcoef_{}'.format(corrcoef),
+    output_dir, 'perturbed_forcings', 'corrcoef_{}_phi_{}'.format(corrcoef, phi),
     'ens_{}'.format(ens), 'force.')
 # Output directories
 vic_output_dir = setup_output_dirs(
     output_dir, mkdirs=['vic_output'])['vic_output']
 vic_output_dir = setup_output_dirs(
-    vic_output_dir, mkdirs=['corrcoef_{}'.format(corrcoef)])['corrcoef_{}'.format(corrcoef)]
+    vic_output_dir, mkdirs=['corrcoef_{}_phi_{}'.format(corrcoef, phi)])\
+    ['corrcoef_{}_phi_{}'.format(corrcoef, phi)]
 
 subdir_name = 'ens_{}'.format(ens)
 global_subdir = setup_output_dirs(
