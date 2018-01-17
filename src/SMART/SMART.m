@@ -1,5 +1,6 @@
-
 function SMART(varargin)
+
+rng(11);
 
 %% Process input arguments
 p = inputParser;
