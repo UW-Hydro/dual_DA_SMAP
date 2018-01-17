@@ -1,4 +1,4 @@
-function [sum_rain_corrected, sum_rain_corrected_ens, optimized_fraction] = correction(increment_sum,increment_sum_hold, increment_ens, sum_rain_sp,sum_rain_indep,lambda_flag, filter_flag, NUMEN)
+ function [sum_rain_corrected, sum_rain_corrected_ens, optimized_fraction] = correction(increment_sum,increment_sum_hold, increment_sum_ens, sum_rain_sp,sum_rain_indep,lambda_flag, filter_flag, NUMEN, rain_perturbed_sum_ens)
 
 % Initialize corrected rainfall (sum in each window) (Yixin)
 d = size(sum_rain_sp);
@@ -29,7 +29,7 @@ for k=1:ist
     sum_rain_corrected(k) = sum_rain_sp(k)+(optimized_fraction*increment_sum(k));
     % If ensemble method, save ensemble of corrected rainfall
     if (filter_flag == 2 || filter_flag == 6)
-        sum_rain_corrected_ens(k, :) = sum_rain_sp(k)+(optimized_fraction*increment_ens(k, :));
+        sum_rain_corrected_ens(k, :) = rain_perturbed_sum_ens(k, :)+(optimized_fraction*increment_sum_ens(k, :));
     end
 end
 

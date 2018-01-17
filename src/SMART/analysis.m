@@ -1,4 +1,4 @@
-function [increment_sum,increment_sum_hold,sum_rain,sum_rain_sp,sum_rain_sp_hold,sum_rain_indep,increment_ens, innovation1, innovation1_not_norm] =...
+function [increment_sum,increment_sum_hold,sum_rain,sum_rain_sp,sum_rain_sp_hold,sum_rain_indep,increment_sum_ens, innovation1, innovation1_not_norm, rain_perturbed_sum_ens] =...
     analysis(window_size,ist,filter_flag,transform_flag,API_model_flag,NUMEN,Q_fixed,P_inflation_fixed,...
     logn_var_constant,bb,rain_observed,rain_observed_hold,rain_indep,rain_true,sm_observed,...
     ta_observed,ta_observed_climatology,PET_observed,PET_observed_climatology,EVI_observed,...
@@ -11,7 +11,6 @@ if (filter_flag ~= 1 || filter_flag ~=5)
     API_filter_EnKF(1:ist,1:NUMEN)=0;
     API_filter_EnKF_prior(1:ist,1:NUMEN)=0;
     API_filter_PART(1:ist,1:NUMEN)=0;
-    increment_ens(1:ist,1:NUMEN)=0;
     API_COEFF_E(1:ist,1:NUMEN)=0.00;
     API_COEFF_V(1:ist,1:NUMEN)=0.80;
     ones(1:NUMEN)=1;
@@ -30,6 +29,8 @@ API_COEFF_EF(1:ist)=0;
 API_filter(1:ist)=0;
 sm_observed_trans(1:ist)=0;
 increment(1:ist)=0;
+increment_ens(1:ist, 1:NUMEN) = 0;
+rain_perturbed_ens(1:ist, 1:NUMEN) = 0;
 innovation1(1:ist)=0;
 innovation1_not_norm(1:ist)=0;
 API_COEFF_HOLD(1:ist)=0;
@@ -44,6 +45,8 @@ sum_rain_sp(1:floor(ist/window_size)) = 0;
 sum_rain_sp_hold(1:floor(ist/window_size)) = 0;
 sum_rain_indep(1:floor(ist/window_size)) = 0;
 increment_sum(1:floor(ist/window_size)) = 0;
+increment_sum_ens(1:floor(ist/window_size), 1:NUMEN)=0;
+rain_perturbed_sum_ens(1:floor(ist/window_size), 1:NUMEN)=0;
 API_DOY(1:365)=0;
 API2_DOY(1:365)=0;
 mean_API(1:365)=0;
@@ -205,6 +208,11 @@ for k=2:ist % rescaling observations and defining R
     end
 end
 
+% Initialize ensemble perturbed rainfall to be observed rainfall
+for (i = 1:NUMEN)
+    rain_perturbed_ens(:, i) = rain_observed;
+end
+
 while (converge_flag == 0)
     innovation_cross_sum = 0;
     count_updates = 0;
@@ -279,7 +287,8 @@ while (converge_flag == 0)
             
             % Propagate ensemble (Yixin)
             API_COEFF_V(k,:) = ones*API_COEFF(k);
-            mult_factor = exp(randn(1,NUMEN)*sqrt(log(logn_var + 1)) - log(logn_var + 1)/2);   
+            mult_factor = exp(randn(1,NUMEN)*sqrt(log(logn_var + 1)) - log(logn_var + 1)/2);
+            rain_perturbed_ens(k, :) = mult_factor * rain_observed(k);
             temp_total(1:NUMEN)=nan;
             for e=1:NUMEN
                 temp_total(e) = API_short(API_filter_EnKF(k-1,e),API_COEFF_V(k,e),bb,1);
@@ -288,7 +297,7 @@ while (converge_flag == 0)
 %                       temp_total(e) = API_short(API_filter_EnKF(k-1,e),API_COEFF_V(k,e),bb,24);
 %                  end
             end
-            API_filter_EnKF(k,:) = temp_total + mult_factor*rain_observed(k) + sqrt(Q)*randn(1,NUMEN) + sqrt(P_inflation)*rain_observed(k)*randn(1,NUMEN);         
+            API_filter_EnKF(k,:) = temp_total + rain_perturbed_ens(k, :) + sqrt(Q)*randn(1,NUMEN) + sqrt(P_inflation)*rain_observed(k)*randn(1,NUMEN);         
             API_filter_EnKF_prior(k,:) = API_filter_EnKF(k,:);
             
             % Calculate gain K and update (Yixin)
@@ -547,13 +556,19 @@ for k=2:floor(ist/window_size)
         sum_rain_sp(k) = sum_rain_sp(k) + rain_observed((k-1)*window_size + i);
         sum_rain_indep(k) = sum_rain_indep(k) + rain_indep((k-1)*window_size + i);
         sum_rain_sp_hold(k) = sum_rain_sp_hold(k) + rain_observed_hold((k-1)*window_size + i);
+        rain_perturbed_sum_ens(k, :) = rain_perturbed_sum_ens(k, :) + rain_perturbed_ens((k-1)*window_size + i);
         
         if (increment((k-1)*window_size + i) ~= -999)
-            if (increment_sum(k) ~= -999); increment_sum(k) = increment_sum(k) + increment((k-1)*window_size + i);end;
-            if (increment_sum(k) == -999); increment_sum(k) = increment((k-1)*window_size + i);end;
+            if (increment_sum(k) ~= -999)
+                increment_sum(k) = increment_sum(k) + increment((k-1)*window_size + i);
+                increment_sum_ens(k, :) = increment_sum_ens(k, :) + increment_ens((k-1)*window_size + i, :);
+            end
+            if (increment_sum(k) == -999)
+                increment_sum(k) = increment((k-1)*window_size + i);
+                increment_sum_ens(k, :) = increment_ens((k-1)*window_size + i, :);
+            end
             increment_sum_hold(k) = increment_sum(k);
         end
     end
 end
-
 end
