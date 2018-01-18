@@ -556,7 +556,7 @@ for k=2:floor(ist/window_size)
         sum_rain_sp(k) = sum_rain_sp(k) + rain_observed((k-1)*window_size + i);
         sum_rain_indep(k) = sum_rain_indep(k) + rain_indep((k-1)*window_size + i);
         sum_rain_sp_hold(k) = sum_rain_sp_hold(k) + rain_observed_hold((k-1)*window_size + i);
-        rain_perturbed_sum_ens(k, :) = rain_perturbed_sum_ens(k, :) + rain_perturbed_ens((k-1)*window_size + i);
+        rain_perturbed_sum_ens(k, :) = rain_perturbed_sum_ens(k, :) + rain_perturbed_ens(((k-1)*window_size + i), :);
         
         if (increment((k-1)*window_size + i) ~= -999)
             if (increment_sum(k) ~= -999)
