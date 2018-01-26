@@ -1,0 +1,6 @@
+[submodule "tonic"]
+	path = tonic
+	url = https://github.com/yixinmao/tonic.git
+[submodule "VIC"]
+	path = VIC
+	url = https://github.com/yixinmao/VIC.git
