@@ -219,7 +219,8 @@ list_history_files = run_vic_assigned_states(
     output_vic_history_root_dir=hist_subdir,
     output_vic_log_root_dir=log_subdir,
     mpi_proc=mpi_proc,
-    mpi_exe=cfg['VIC']['mpi_exe'])
+    mpi_exe=cfg['VIC']['mpi_exe'],
+    delete_log=False)
 # --- Concat all years and clean up --- #
 list_ds_hist = [xr.open_dataset(f) for f in list_history_files]
 ds_concat = xr.concat(list_ds_hist, dim='time')
