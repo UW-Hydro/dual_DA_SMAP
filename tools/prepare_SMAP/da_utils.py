@@ -1,0 +1,491 @@
+import numpy as np
+import pandas as pd
+import os
+import string
+from collections import OrderedDict
+import xarray as xr
+import datetime as dt
+import multiprocessing as mp
+import shutil
+import scipy.linalg as la
+import glob
+import h5py
+from scipy.stats import rankdata
+import cartopy.crs as ccrs
+import cartopy.io.shapereader as shpreader
+from cartopy.mpl.gridliner import LONGITUDE_FORMATTER, LATITUDE_FORMATTER
+from scipy.sparse import coo_matrix
+import xesmf as xe
+
+from tonic.models.vic.vic import VIC, default_vic_valgrind_error_code
+
+import timeit
+
+
+def setup_output_dirs(out_basedir, mkdirs=['results', 'state',
+                                            'logs', 'plots']):
+    ''' This function creates output directories.
+
+    Parameters
+    ----------
+    out_basedir: <str>
+        Output base directory for all output files
+    mkdirs: <list>
+        A list of subdirectories to make
+
+    Require
+    ----------
+    os
+    OrderedDict
+
+    Returns
+    ----------
+    dirs: <OrderedDict>
+        A dictionary of subdirectories
+    '''
+    dirs = OrderedDict()
+    for d in mkdirs:
+        dirs[d] = os.path.join(out_basedir, d)
+
+    for dirname in dirs.values():
+        os.makedirs(dirname, exist_ok=True)
+
+    return dirs
+
+
+
+def calculate_smap_domain_from_vic_domain(da_vic_domain, da_smap_example):
+    ''' Calculate the smallest SMAP domain needed to cover the entire VIC domain.
+        Note: here the entire input VIC domain is going to be covered without considering
+        its 0/1 masks.
+    
+    Parameters
+    ----------
+    da_vic_domain: <xr.DataArray>
+        Input VIC domain. Here the entire input VIC domain is going to be covered without
+        considering its 0/1 masks.
+    da_smap_example: <xr.DataArray>
+        An example SMAP DataArray. This typically can be the extracted SMAP data for one day.
+    
+    Returns
+    ----------
+    da_smap_domain: <xr.DataArray>
+        SMAP domain
+    '''
+    
+    # --- Calculate the range of lat lon edges of the VIC domain --- #
+    vic_lat_edges = edges_from_centers(da_vic_domain['lat'].values)
+    vic_lon_edges = edges_from_centers(da_vic_domain['lon'].values)
+    vic_domain_lat_range = np.sort(np.array([vic_lat_edges[0], vic_lat_edges[-1]]))
+    vic_domain_lon_range = np.sort(np.array([vic_lon_edges[0], vic_lon_edges[-1]]))
+    # --- Calculate the smallest SMAP lat lon range that completely contains the VIC domain --- #
+    # (Note that SMAP lats are in descending order)
+    lats_smap = da_smap_example['lat'].values
+    lons_smap = da_smap_example['lon'].values
+    # lat lower
+    smap_lat_edges = edges_from_centers(lats_smap)
+    smap_lat_lower_ind = len(smap_lat_edges) - np.searchsorted(np.sort(smap_lat_edges), vic_domain_lat_range[0]) - 1
+    smap_lat_lower = lats_smap[smap_lat_lower_ind]
+    # lat upper
+    smap_lat_upper_ind = len(smap_lat_edges) - np.searchsorted(np.sort(smap_lat_edges), vic_domain_lat_range[1]) - 1
+    smap_lat_upper = lats_smap[smap_lat_upper_ind]
+    # lon lower
+    smap_lon_edges = edges_from_centers(lons_smap)
+    smap_lon_lower_ind = np.searchsorted(np.sort(smap_lon_edges), vic_domain_lon_range[0]) - 1
+    smap_lon_lower = lons_smap[smap_lon_lower_ind]
+    # lon upper
+    smap_lon_upper_ind = np.searchsorted(np.sort(smap_lon_edges), vic_domain_lon_range[1]) - 1
+    smap_lon_upper = lons_smap[smap_lon_upper_ind]
+    # --- Construct the SMAP domain needed --- #
+    da_smap_domain_example = da_smap_example[0, :, :].sel(
+        lat=slice(smap_lat_upper+0.05, smap_lat_lower-0.05),
+        lon=slice(smap_lon_lower-0.05, smap_lon_upper+0.05))
+    mask = np.ones([len(da_smap_domain_example['lat']), len(da_smap_domain_example['lon'])]).astype('int')
+    da_smap_domain = xr.DataArray(
+        mask,
+        coords=[da_smap_domain_example['lat'], da_smap_domain_example['lon']],
+        dims=['lat', 'lon'])
+    
+    return da_smap_domain
+
+
+def extract_smap_static_info(filename, orbit="AM"):
+    ''' This function extracts lat, lon and missing value info from raw SMAP L3 HDF5 file.
+    
+    Parameters
+    ----------
+    filename: <str>
+        File path of a SMAP L3 HDF5 file
+    orbit: <str>
+        "AM" or "PM". Static info should be same for either orbit. Default: "AM".
+    
+    Reterns
+    -------
+    lat: <numpy.array>
+        A 1-D array of sorted latitudes of the domain (descending order)
+    lon: <numpy.array>
+        A 1-D array of sorted longitudes of the domain (ascending order)
+    '''
+    
+    with h5py.File(filename, 'r') as f:
+        # Extract data info
+        if orbit == "AM":
+            lats = f['Soil_Moisture_Retrieval_Data_AM'.format(orbit)]['latitude'].value
+            lons = f['Soil_Moisture_Retrieval_Data_AM']['longitude'].value
+            missing_value = f['Soil_Moisture_Retrieval_Data_AM']['soil_moisture'].attrs['_FillValue']
+        else:
+            lats = f['Soil_Moisture_Retrieval_Data_PM'.format(orbit)]['latitude_pm'].value
+            lons = f['Soil_Moisture_Retrieval_Data_PM']['longitude_pm'].value
+            missing_value = f['Soil_Moisture_Retrieval_Data_PM']['soil_moisture_pm'].attrs['_FillValue']
+        # Mask missing lat and lon
+        latlat_masked = np.ma.masked_equal(lats, missing_value)  # 2-D
+        lonlon_masked = np.ma.masked_equal(lons, missing_value)  # 2-D
+        # Convert to clean 1-D lat and lon
+        lat_uniq = np.unique(latlat_masked)
+        lat = np.sort(np.array(lat_uniq[~np.ma.getmask(lat_uniq)]), )[::-1]  # lat in descending order
+        lon_uniq = np.unique(lonlon_masked)
+        lon = np.sort(np.array(lon_uniq[~np.ma.getmask(lon_uniq)]))  # lon in ascending order
+    
+    return lat, lon
+
+
+def extract_smap_sm(filename, orbit):
+    ''' This function extracts soil moisture values [cm3/cm3] from a raw SMAP L3 HDF5 file.
+    
+    Parameters
+    ----------
+    filename: <str>
+        File path of a SMAP L3 HDF5 file
+    orbit: <str>
+        "AM" or "PM"
+    
+    Reterns
+    -------
+    sm: <numpy.array>
+        A 2-D soil moisture data of the whole domain (with np.nan for missing value)
+    '''
+    
+    with h5py.File(filename, 'r') as f:
+        # Extract soil moisture data
+        if orbit == "AM":
+            sm = f['Soil_Moisture_Retrieval_Data_AM']['soil_moisture'].value
+            missing_value = f['Soil_Moisture_Retrieval_Data_AM']['soil_moisture'].attrs['_FillValue']
+        else:
+            sm = f['Soil_Moisture_Retrieval_Data_PM']['soil_moisture_pm'].value
+            missing_value = f['Soil_Moisture_Retrieval_Data_PM']['soil_moisture_pm'].attrs['_FillValue']
+        # Mask missing points
+        sm[sm==missing_value] = np.nan
+        # sm_masked = np.ma.masked_equal(sm, missing_value)
+        
+    return sm
+
+
+def extract_smap_multiple_days(filename, start_date, end_date, da_smap_domain=None):
+    ''' This function imports a chunk of days of SMAP L3 data and put in a xr.DataArray, skipping missing dates
+
+    Parameters
+    ----------
+    filename: <str>
+        Template file path of SMAP L3 HDF5 files, with the "YYYYMMDD" part replaced by "{}", and the rest replaced by *.
+        e.g.: './path/SMAP_L3_SM_P_{}_*.h5'
+    start_date: <str>
+        Start time of the period, in "YYYYMMDD" format.
+        e.g.: "20150401"
+    end_date: <str>
+        End time of the period, in "YYYYMMDD" format.
+        e.g.: "20150430"
+    da_smap_domain: <xr.DataArray>
+        SMAP domain to extract. None for keeping the global domain
+    '''
+
+    # Extract static info
+    lat, lon = extract_smap_static_info(glob.glob(filename.format(start_date))[0])
+
+    # Process time period
+    dates = pd.date_range(start_date, end_date)  # dates only
+    times = pd.date_range("{}-{:02d}".format(start_date, 6),
+                          "{}-{:02d}".format(end_date, 18),
+                          freq='12H')  # AM and PM measurement times
+
+    # Initialize a DataArray for the entire global domain
+    da_global = xr.DataArray(np.empty([len(lat), len(lon)]),
+                             coords=[lat, lon], dims=['lat', 'lon'])
+
+    # Initialize domain da
+    if da_smap_domain is None:  # if there is no domain file, extract the entire global domain
+        da = xr.DataArray(np.empty([len(times), len(lat), len(lon)]),
+                          coords=[times, lat, lon], dims=['time', 'lat', 'lon'])
+    if da_smap_domain is not None:  # if there is a domain file, extract domain only
+        da = xr.DataArray(np.empty([len(times), len(da_smap_domain['lat']),
+                                    len(da_smap_domain['lon'])]),
+                          coords=[times, da_smap_domain['lat'], da_smap_domain['lon']],
+                          dims=['time', 'lat', 'lon'])
+    da[:] = np.nan
+
+    # Load data for each day
+    if da_smap_domain is not None:
+        domain_lat_range = [da_smap_domain['lat'].values[0],
+                            da_smap_domain['lat'].values[-1]]
+        domain_lon_range = [da_smap_domain['lon'].values[0],
+                            da_smap_domain['lon'].values[-1]]
+    for date in dates:
+        print('Loading {}'.format(date))
+        date_str = date.strftime("%Y%m%d")  # date in YYYYMMMDD
+        # --- Load AM data for this day --- #
+        try:
+            sm_am = extract_smap_sm(glob.glob(filename.format(date_str))[0], "AM")
+            if da_smap_domain is not None:
+                da_global[:, :] = sm_am
+                da_domain_data = da_global.sel(
+                    lat=slice(domain_lat_range[0]+0.05, domain_lat_range[1]-0.05),
+                    lon=slice(domain_lon_range[0]-0.05, domain_lon_range[1]+0.05))
+                sm_am = da_domain_data.values
+        except:
+            print("Warning: cannot load AM data for {}. Assign missing value for this time.".format(date_str))
+            continue
+        # Put in the final da
+        time = date + pd.DateOffset(hours=6)
+        da.loc[time, :, :] = sm_am
+        # --- Load PM data for this day --- #
+        try:
+            sm_pm = extract_smap_sm(glob.glob(filename.format(date_str))[0], "PM")
+            if da_smap_domain is not None:
+                da_global[:, :] = sm_pm
+                da_domain_data = da_global.sel(
+                    lat=slice(domain_lat_range[0]+0.05, domain_lat_range[1]-0.05),
+                    lon=slice(domain_lon_range[0]-0.05, domain_lon_range[1]+0.05))
+                sm_pm = da_domain_data.values
+        except:
+            print("Warning: cannot load PM data for {}. Assign missing value for this time.".format(date_str))
+            continue
+        # Put in da
+        time = date + pd.DateOffset(hours=18)
+        da.loc[time, :, :] = sm_pm
+
+    return da
+
+
+def edges_from_centers(centers):
+    ''' Return an array of grid edge values from grid center values
+    Parameters
+    ----------
+    centers: <np.array>
+        A 1-D array of grid centers. Typically grid-center lats or lons. Dim: [n]
+    
+    Returns
+    ----------
+    edges: <np.array>
+        A 1-D array of grid edge values. Dim: [n+1] 
+    '''
+    
+    edges = np.zeros(len(centers)+1)
+    edges[1:-1] = (centers[:-1] + centers[1:]) / 2
+    edges[0] = centers[0] - (edges[1] - centers[0])
+    edges[-1] = centers[-1] + (centers[-1] - edges[-2])
+    
+    return edges
+    dirs = OrderedDict()
+    for d in mkdirs:
+        dirs[d] = os.path.join(out_basedir, d)
+
+    for dirname in dirs.values():
+        os.makedirs(dirname, exist_ok=True)
+
+    return dirs
+
+
+def add_gridlines(axis, xlocs=[-80, -90, -100, -110, -120],
+                  ylocs=[30, 35, 40], alpha=1):
+    gl = axis.gridlines(draw_labels=True, xlocs=xlocs, ylocs=ylocs,
+                        alpha=alpha)
+    gl.xlabels_top = False
+    gl.ylabels_right = False
+    gl.xformatter = LONGITUDE_FORMATTER
+    gl.yformatter = LATITUDE_FORMATTER
+    return gl
+
+
+def find_global_param_value(gp, param_name, second_param=False):
+    ''' Return the value of a global parameter
+
+    Parameters
+    ----------
+    gp: <str>
+        Global parameter file, read in by read()
+    param_name: <str>
+        The name of the global parameter to find
+    second_param: <bool>
+        Whether to read a second value for the parameter (e.g., set second_param=True to
+        get the snowband param file path when SNOW_BAND>1)
+
+    Returns
+    ----------
+    line_list[1]: <str>
+        The value of the global parameter
+    (optional) line_list[2]: <str>
+        The value of the second value in the global parameter file when second_param=True
+    '''
+    for line in iter(gp.splitlines()):
+        line_list = line.split()
+        if line_list == []:
+            continue
+        key = line_list[0]
+        if key == param_name:
+            if second_param == False:
+                return line_list[1]
+            else:
+                return line_list[1], line_list[2]
+
+
+def process_weight_file(orig_weight_nc, output_weight_nc, n_source, n_target,
+                        da_source_domain, process_method=None):
+    ''' Process the weight file generated by xESMF.
+    Currently, use conservative remapping.
+    Process rules:
+        1) If a target grid cell is partially covered by source grid cells
+        (regardless of the coverage), then those source cells will be scaled and
+        used to remap to that target cell.
+        2) 
+
+    Parameters
+    ----------
+    orig_weight_nc: <str>
+        Original weight netCDF file output from xESMF
+    output_weight_nc: <str>
+        Path for output new weight file
+    n_source: <int>
+        Number of grid cells in the source grid
+    n_target: <int>
+        Number of grid cells in the target grid
+    da_source_domain: <xr.DataArray>
+        Domain file for the source domain. Should be 0 or 1 mask.
+    process_method:
+        This option is not implemented yet (right now, there is only one way of processing
+        the weight file). Can be extended to have the option of, e.g., setting a threshold
+        for whether to remap for a target cell or not if the coverage is low
+
+    Requres
+    ----------
+    from scipy.sparse import coo_matrix
+    import xesmf as xe
+    '''
+
+    # --- Read in the original xESMF weight file --- #
+    A = xe.frontend.read_weights(orig_weight_nc, n_source, n_target)
+    weight_array = A.toarray()  # [n_target, n_source]
+
+    # --- For grid cells in the source domain that is inactive, assign weight 0 --- #
+    # --- (xESMF always assumes full rectangular domain and does not consider domain shape) --- #
+    # Flatten the source domain file
+    N_source_lat = da_source_domain.values.shape[0]
+    N_source_lon = da_source_domain.values.shape[1]
+    source_domain_flat = da_source_domain.values.reshape([N_source_lat * N_source_lon])
+    # Set weights for the masked source domain as zero
+    masked_flag_flat = (source_domain_flat > -10e-15) & (source_domain_flat < 10e-15)
+    weight_array[:, masked_flag_flat] = 0
+
+    # --- Adjust weights for target grid cells whose sum < 1 --- #
+    # Loop over each target grid cell
+    for i in range(n_target):
+        sum_weight = weight_array[i, :].sum()
+        # If sum of weight is 0, there is no active source cell in the target cell.
+        # Set all weights for this target cell to -1
+        if sum_weight > -10e-15 and sum_weight < 10e-15:
+            weight_array[i, :] = -1
+        # Otherwise, the sum of weight should really be 1. If the sum < 1, rescale to 1
+        elif sum_weight < (1 - 10e-15):
+            weight_array[i, :] /= sum_weight
+        elif sum_weight > (1 + 10e-15):
+            raise ValueError('Error: xESMF weight sum exceeds 1. Something is wrong!')
+    
+    # --- Write new weights to file --- #
+    data = weight_array[weight_array!=0]
+    ind = np.where(weight_array!=0)
+    row = ind[0] + 1  # adjust index to start from 1
+    col = ind[1] + 1
+    ds_weight_corrected = xr.Dataset({'S': (['n_s'],  data),
+                                      'col': (['n_s'],  col),
+                                      'row': (['n_s'],  row)},
+                                     coords={'n_s': (['n_s'], range(len(data)))})
+    ds_weight_corrected.to_netcdf(output_weight_nc, format='NETCDF4_CLASSIC')
+    return weight_array
+
+
+def remap_con(reuse_weight, da_source, final_weight_nc,
+              da_source_domain=None, da_target_domain=None,
+              tmp_weight_nc=None, process_method=None):
+    ''' Conservative remapping
+
+    Parameters
+    ----------
+    reuse_weight: <bool>
+        Whether to use an existing weight file directly, or to calculate weights
+    da_source: <xr.DataArray>
+        Source data. The dimension names must be "lat" and "lon".
+    final_weight_nc: <str>
+        If reuse_weight = False, path for outputing the final weight file;
+        if reuse_weight = True, path for the weight file to use for regridding
+    da_source_domain: <xr.DataArray> (Only needed when reuse_weight = False)
+        Domain of the source grid.
+    da_target_domain: <xr.DataArray> (Only needed when reuse_weight = False)
+        Domain of the target grid.
+    tmp_weight_nc: <str> (Only needed when reuse_weight = False)
+        Path for outputing the temporary weight file from xESMF
+    process_method: (Only needed when reuse_weight = False)
+        This option is not implemented yet (right now, there is only one way of processing
+        the weight file). Can be extended to have the option of, e.g., setting a threshold
+        for whether to remap for a target cell or not if the coverage is low
+
+    Return
+    ----------
+    da_remapped: <xr.DataArray>
+        Remapped data
+
+    Requires
+    ----------
+    process_weight_file
+    import xesmf as xe
+    '''
+
+    # --- Grab coordinate information --- #
+    src_lons = da_source['lon'].values
+    src_lats = da_source['lat'].values
+    target_lons = da_target_domain['lon'].values
+    target_lats = da_target_domain['lat'].values
+    lon_in_edges = edges_from_centers(src_lons)
+    lat_in_edges = edges_from_centers(src_lats)
+    lon_out_edges = edges_from_centers(target_lons)
+    lat_out_edges = edges_from_centers(target_lats)
+    grid_in = {'lon': src_lons,
+               'lat': src_lats,
+               'lon_b': lon_in_edges,
+               'lat_b': lat_in_edges}
+    grid_out = {'lon': target_lons,
+                'lat': target_lats,
+                'lon_b': lon_out_edges,
+                'lat_b': lat_out_edges}
+    # --- If reuse_weight = False, calculate weights --- #
+    if reuse_weight is False:
+        # Create regridder using xESMF
+        regridder = xe.Regridder(grid_in, grid_out, 'conservative',
+                                 filename=tmp_weight_nc)
+        # Process the weight file to be correct, and save to final_weight_nc
+        weight_array = process_weight_file(
+            tmp_weight_nc, final_weight_nc,
+            len(src_lons) * len(src_lats),
+            len(target_lons) * len(target_lats),
+            da_source_domain,
+            process_method=None)  # weight_array: [n_target, n_source]
+    # --- Use the final weight file to regrid input data --- #
+    regridder = xe.Regridder(grid_in, grid_out, 'conservative',
+                             filename=final_weight_nc, reuse_weights=True)
+    weight_array = regridder.A.toarray()  # extract weight_array
+    da_remapped = regridder(da_source)
+    # If weight for a target cell is negative, it means that the target cell
+    # does not overlap with any valid source cell. Thus set the remapped value to NAN
+    nan_weights = (weight_array.sum(axis=1).reshape([len(target_lats), len(target_lons)]) < 0)
+    data = da_remapped.values
+    data[..., nan_weights] = np.nan
+    da_remapped[:] = data
+
+    return da_remapped, weight_array
