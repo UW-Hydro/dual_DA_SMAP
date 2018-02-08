@@ -25,7 +25,8 @@ from da_utils import (EnKF_VIC, setup_output_dirs, generate_VIC_global_file,
                       calculate_max_soil_moist_domain,
                       convert_max_moist_n_state,
                       calculate_scale_n_whole_field,
-                      calculate_cholesky_L)
+                      calculate_cholesky_L,
+                      extract_mismatched_grid_weight_info)
 
 
 # ============================================================ #
@@ -95,7 +96,8 @@ da_meas_orig = ds_meas_orig[cfg['EnKF']['meas_var_name']]
 # Only select out the period within the EnKF run period
 start_time = pd.to_datetime(cfg['EnKF']['start_time'])
 da_meas = da_meas_orig.sel(time=slice(cfg['EnKF']['start_time'], cfg['EnKF']['end_time']))
-while (pd.to_datetime(da_meas['time'][0].values) - start_time).days <= 0:
+# If the first measurement time point is the same as start_time, exclude this point
+if (pd.to_datetime(da_meas['time'][0].values) - start_time).seconds <= 3600:
     da_meas = da_meas[1:, :, :]
 # Convert da_meas dimension to [time, lat, lon, m] (currently m = 1)
 time = da_meas['time']
@@ -145,7 +147,16 @@ da_max_moist_n = convert_max_moist_n_state(da_max_moist, nveg, nsnow)
 if linear_model:
     da_max_moist_n[:, :, :] = 99999
 
+# --- For mismatched grid case, load weight information --- #
+if cfg['GRID_MISMATCH']['mismatched_grid']:
+    weight_nc = os.path.join(cfg['CONTROL']['root_dir'],
+                             cfg['GRID_MISMATCH']['weight_nc'])
+else:
+    weight_nc = None
+
+# -------------------------------------------------------- #
 # --- Run EnKF --- #
+# -------------------------------------------------------- #
 start_time = pd.to_datetime(cfg['EnKF']['start_time'])
 end_time = pd.to_datetime(cfg['EnKF']['end_time'])
 print('Start running EnKF for ', start_time, 'to', end_time, '...')
@@ -174,6 +185,8 @@ if not linear_model:
          output_vic_state_root_dir=dirs['states'],
          output_vic_history_root_dir=dirs['history'],
          output_vic_log_root_dir=dirs['logs'],
+         mismatched_grid=cfg['GRID_MISMATCH']['mismatched_grid'],
+         weight_nc=weight_nc,
          nproc=nproc,
          debug=debug,
          output_temp_dir=dirs['temp'])
