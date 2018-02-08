@@ -3834,8 +3834,10 @@ def extract_mismatched_grid_weight_info(da_vic_domain, da_meas, weight_nc):
     ----------
     list_source_ind2D_weight_all: <list>
         Length of the list: number of meas cells (n_target)
-        Each element: a list of ((2D-index), weight) of source cells
-        that overlap with ONE target cell
+        Each element: a list of ((2D-index), weight_target, weight_source)
+        of source cells that overlap with ONE target cell.
+        "weight_target" sums up to 1 for each TARGET grid cell;
+        "weight_source" sums up to 1 for each SOURCE grid cell in the domain
     
     Requires
     ----------
@@ -4034,7 +4036,8 @@ def update_states_mismatched_grid(y_est_remapped, list_K, da_meas, R, state_nc_b
         for j in range(n_contrib):
             # Identify contributing cell index and weight
             ind_source_2D = list_source_ind2D_weight_all[i_target][j][0]
-            weight = list_source_ind2D_weight_all[i_target][j][1]
+            weight = list_source_ind2D_weight_all[i_target][j][2]  # this is weight_source,
+                                                                   # adding up to 1 for each source cell
             # Weighted-add unstacked delta to the final delta
             ind_source_1D = map_ind_2D_to_1D(ind_2D_lat=ind_source_2D[0],
                                              ind_2D_lon=ind_source_2D[1],
@@ -4093,18 +4096,29 @@ def find_source_ind2D_weight(ind_target_1D, weight_array, len_x_source):
     Returns
     ----------
     list_ind2D_weight_source: <list>
-        A list of tuples of ((ind_lat, ind_lon), weight) of the source domain.
+        A list of tuples of ((ind_lat, ind_lon), weight_target, weight_source) of the source domain.
         The length of the list is the totol number of source cells that contribute
         weights to this target cell. Each tuple is the 2D index (starting from 0) of
         each contributing source cell.
+        weight_target is the original weights, adding up to 1 for each target cell;
+        weight_source is the weights normalized for each source cell (adding up to 1 for each source cell)
     
     Requires
     ----------
     map_coord_1D_to_2D
     '''
-    
-    list_ind2D_weight_source = [(map_ind_1D_to_2D(ind, len_x_source), weight_array[ind_target_1D, ind])
-                         for ind in np.where(weight_array[ind_target_1D, :] > 0)[0]]
+
+   
+    # Calculate weights normalized for each SOURCE grid cell instead
+    # (i.e., weights add up to one for each source grid cell)
+    weight_array_tmp = weight_array.copy()
+    weight_array_tmp[weight_array_tmp<0] = 0
+    weigth_source_norm = weight_array_tmp / weight_array_tmp.sum(axis=0)
+ 
+    list_ind2D_weight_source = [(map_ind_1D_to_2D(ind, len_x_source),
+                                 weight_array[ind_target_1D, ind],
+                                 weigth_source_norm[ind_target_1D, ind])
+                                for ind in np.where(weight_array[ind_target_1D, :] > 0)[0]]
     
     return list_ind2D_weight_source
 
