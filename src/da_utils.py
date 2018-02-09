@@ -11,6 +11,7 @@ import shutil
 import scipy.linalg as la
 import glob
 import xesmf as xe
+import pickle
 
 from tonic.models.vic.vic import VIC, default_vic_valgrind_error_code
 
@@ -855,8 +856,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
             # Save soil moisture perturbation
             if debug:
                 ds_perturbation = xr.Dataset({'STATE_SOIL_MOISTURE':
-                                             (ds - class_states.ds)\
-                                  ['STATE_SOIL_MOISTURE']})
+                                              da_perturbation})
                 ds_perturbation.to_netcdf(os.path.join(
                         debug_dir,
                         'perturbation.ens{}.nc').format(i+1))
@@ -993,17 +993,25 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                                 nproc=nproc)
         if mismatched_grid is False:  # if no mismatch
             da_K = calculate_gain_K_whole_field(da_x, da_y_est, R)
-        else:  # if mismatche grid
+        else:  # if mismatched grid
             list_K, y_est_remapped = calculate_gain_K_whole_field_mismatched_grid(
                 da_x, da_y_est, R,
                 list_source_ind2D_weight_all,
                 weight_nc, da_meas)
         if debug:
-            ds_K = xr.Dataset({'K': da_K})
-            ds_K.to_netcdf(os.path.join(debug_update_dir,
-                                        'K.{}_{:05d}.nc'.format(
-                                            current_time.strftime('%Y%m%d'),
-                                            current_time.hour*3600+current_time.second)))
+            if mismatched_grid is False:  # if no mismatch
+                ds_K = xr.Dataset({'K': da_K})
+                ds_K.to_netcdf(os.path.join(debug_update_dir,
+                                            'K.{}_{:05d}.nc'.format(
+                                                current_time.strftime('%Y%m%d'),
+                                                current_time.hour*3600+current_time.second)))
+            else:  # if mismatched grid
+                K_name = os.path.join(debug_update_dir,
+                                            'K.{}_{:05d}.pickle'.format(
+                                                current_time.strftime('%Y%m%d'),
+                                                current_time.hour*3600+current_time.second))
+                with open(K_name, 'wb') as f:
+                    pickle.dump(list_K, f)
         time2 = timeit.default_timer()
         print('\t\tTime of calculating gain K: {}'.format(time2-time1))
 
@@ -1359,74 +1367,40 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         print('Time of concatenating update increment: {}'.format(time2-time1))
 
         # --- Gain K --- #
-        time1 = timeit.default_timer()
-        print('\tConcatenating debugging results - gain K...')
-        list_da = []
-        list_file_to_delete = []
-        times = da_meas[da_meas_time_var].values
-        for time in times:
-            t = pd.to_datetime(time)
-            # Load data
-            fname = '{}/K.{}_{:05d}.nc'.format(
-                        debug_update_dir, t.strftime('%Y%m%d'),
-                        t.hour*3600+t.second)
-            da = xr.open_dataset(fname)['K']
-            # Put data in array
-            list_da.append(da)
-            # Add individual file to list to delete
-            list_file_to_delete.append(fname)
-        # Concat all times
-        da_concat = xr.concat(list_da, dim='time')
-        da_concat['time'] = da_meas[da_meas_time_var].values
-        # Write to file
-        ds_concat = xr.Dataset({'K': da_concat})
-        ds_concat.to_netcdf(
-            os.path.join(
-                debug_update_dir,
-                'K.concat.{}_{}.nc'.format(
-                        pd.to_datetime(times[0]).year,
-                        pd.to_datetime(times[-1]).year)),
-            format='NETCDF4_CLASSIC')
-        # Delete individule files
-        for f in list_file_to_delete:
-            os.remove(f)
-        time2 = timeit.default_timer()
-        print('Time of concatenating gain K: {}'.format(time2-time1))
-
-        # --- Measurement perturbation --- #
-        time1 = timeit.default_timer()
-        print('\tConcatenating debugging results - meas. perturbation...')
-        list_da = []
-        list_file_to_delete = []
-        times = da_meas[da_meas_time_var].values
-        for time in times:
-            t = pd.to_datetime(time)
-            # Load data
-            fname = '{}/meas_perturbation.{}_{:05d}.nc'.format(
-                        debug_update_dir, t.strftime('%Y%m%d'),
-                        t.hour*3600+t.second)
-            da = xr.open_dataset(fname)['meas_perturbation']
-            # Put data in array
-            list_da.append(da)
-            # Add individual file to list to delete
-            list_file_to_delete.append(fname)
-        # Concat all times
-        da_concat = xr.concat(list_da, dim='time')
-        da_concat['time'] = da_meas[da_meas_time_var].values
-        # Write to file
-        ds_concat = xr.Dataset({'meas_perturbation': da_concat})
-        ds_concat.to_netcdf(
-            os.path.join(
-                debug_update_dir,
-                'meas_perturbation.concat.{}_{}.nc'.format(
-                        pd.to_datetime(times[0]).year,
-                        pd.to_datetime(times[-1]).year)),
-            format='NETCDF4_CLASSIC')
-        # Delete individule files
-        for f in list_file_to_delete:
-            os.remove(f)
-        time2 = timeit.default_timer()
-        print('Time of concatenating gain meas perturbation: {}'.format(time2-time1))
+        if mismatched_grid is False:
+            time1 = timeit.default_timer()
+            print('\tConcatenating debugging results - gain K...')
+            list_da = []
+            list_file_to_delete = []
+            times = da_meas[da_meas_time_var].values
+            for time in times:
+                t = pd.to_datetime(time)
+                # Load data
+                fname = '{}/K.{}_{:05d}.nc'.format(
+                            debug_update_dir, t.strftime('%Y%m%d'),
+                            t.hour*3600+t.second)
+                da = xr.open_dataset(fname)['K']
+                # Put data in array
+                list_da.append(da)
+                # Add individual file to list to delete
+                list_file_to_delete.append(fname)
+            # Concat all times
+            da_concat = xr.concat(list_da, dim='time')
+            da_concat['time'] = da_meas[da_meas_time_var].values
+            # Write to file
+            ds_concat = xr.Dataset({'K': da_concat})
+            ds_concat.to_netcdf(
+                os.path.join(
+                    debug_update_dir,
+                    'K.concat.{}_{}.nc'.format(
+                            pd.to_datetime(times[0]).year,
+                            pd.to_datetime(times[-1]).year)),
+                format='NETCDF4_CLASSIC')
+            # Delete individule files
+            for f in list_file_to_delete:
+                os.remove(f)
+            time2 = timeit.default_timer()
+            print('Time of concatenating gain K: {}'.format(time2-time1))
 
 
 def to_netcdf_history_file_compress(ds_hist, out_nc):
@@ -4020,7 +3994,7 @@ def update_states_mismatched_grid(y_est_remapped, list_K, da_meas, R, state_nc_b
     list_delta = [np.dot(list_K[i],
                          meas_time_flat[i, :, :] + v[i, :, :] - y_est_remapped[i, :])
                   if (list_K[i].shape[0] > 0 and ~np.isnan(meas_time_flat[i].squeeze()))
-                  else np.ones([list_K[i].shape[0], 1]) * 99999
+                  else np.zeros([list_K[i].shape[0], 1])
                   for i in range(n_target)]
     
     # --- Re-distribute delta to original VIC cells for the whole domain --- #
