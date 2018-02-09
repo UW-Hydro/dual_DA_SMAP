@@ -284,14 +284,6 @@ def edges_from_centers(centers):
     edges[-1] = centers[-1] + (centers[-1] - edges[-2])
     
     return edges
-    dirs = OrderedDict()
-    for d in mkdirs:
-        dirs[d] = os.path.join(out_basedir, d)
-
-    for dirname in dirs.values():
-        os.makedirs(dirname, exist_ok=True)
-
-    return dirs
 
 
 def add_gridlines(axis, xlocs=[-80, -90, -100, -110, -120],
@@ -411,8 +403,8 @@ def process_weight_file(orig_weight_nc, output_weight_nc, n_source, n_target,
     return weight_array
 
 
-def remap_con(reuse_weight, da_source, final_weight_nc,
-              da_source_domain=None, da_target_domain=None,
+def remap_con(reuse_weight, da_source, final_weight_nc, da_target_domain,
+              da_source_domain=None,
               tmp_weight_nc=None, process_method=None):
     ''' Conservative remapping
 
@@ -421,14 +413,15 @@ def remap_con(reuse_weight, da_source, final_weight_nc,
     reuse_weight: <bool>
         Whether to use an existing weight file directly, or to calculate weights
     da_source: <xr.DataArray>
-        Source data. The dimension names must be "lat" and "lon".
+        Source data. The data can be more than 3-D, but the last two dimensions
+        must be "lat" and "lon".
     final_weight_nc: <str>
         If reuse_weight = False, path for outputing the final weight file;
         if reuse_weight = True, path for the weight file to use for regridding
+    da_target_domain: <xr.DataArray>
+        Domain of the target grid.
     da_source_domain: <xr.DataArray> (Only needed when reuse_weight = False)
         Domain of the source grid.
-    da_target_domain: <xr.DataArray> (Only needed when reuse_weight = False)
-        Domain of the target grid.
     tmp_weight_nc: <str> (Only needed when reuse_weight = False)
         Path for outputing the temporary weight file from xESMF
     process_method: (Only needed when reuse_weight = False)
@@ -489,3 +482,116 @@ def remap_con(reuse_weight, da_source, final_weight_nc,
     da_remapped[:] = data
 
     return da_remapped, weight_array
+
+
+def rescale_SMAP_domain(da_smap, da_reference, smap_times_am, smap_times_pm,
+                        method='moment_2nd'):
+    ''' Rescale SMAP data to be in the same regime of a reference field.
+        Rescale each grid cell separately.
+        AM and PM will be rescaled separately.
+        Currently ignores all NANs in da_reference.
+    
+    Parameters
+    ----------
+    da_smap: <xr.DataArray>
+        Original SMAP field. Dimension: [time, lat, lon]
+    da_reference: <xr.DataArray>
+        Refererence data. Dimension: [time, lat, lon].
+        Can be different time length from da_input, but must be the same spatial grid.
+    smap_times_am: <numpy.ndarray>
+        Time points of SMAP AM
+    smap_times_pm: <numpy.ndarray>
+        Time points of SMAP PM
+    method: <str>
+        Options: "moment_2nd" - matching mean and standard deviation
+    
+    Returns
+    ----------
+    da_smap_rescaled: <xr.DataArray>
+        Rescaled SMAP data
+    '''
+    
+    # --- Extract AM and PM data from da_reference
+    # Extract SMAP AM time points
+    da_reference_AMtimes = da_reference.sel(time=smap_times_am)
+    # Extract SMAP PM time points
+    da_reference_PMtimes = da_reference.sel(time=smap_times_pm)
+    
+    # --- Rescale SMAP data (for AM and PM seperately) --- #
+    ncells = len(da_smap['lat']) * len(da_smap['lon'])
+    # Rescale SMAP AM
+    da_smap_AM = da_smap.sel(time=smap_times_am_ind)
+    da_smap_AM_rescaled = rescale_domain(da_smap_AM, da_reference_AMtimes, method='moment_2nd')
+    # Rescale SMAP PM
+    da_smap_PM = da_smap.sel(time=smap_times_pm_ind)
+    da_smap_PM_rescaled = rescale_domain(da_smap_PM, da_reference_PMtimes, method='moment_2nd')
+    # Put AM and PM back together
+    da_smap_rescaled = xr.concat([da_smap_AM_rescaled, da_smap_PM_rescaled], dim='time').sortby('time')
+    
+    return da_smap_rescaled
+
+
+def rescale_domain(da_input, da_reference, method):
+    ''' Rescales an input domain of time series to be in the same regime of a reference domain.
+    Currently ignores all NANs in da_reference.
+    
+    Parameters
+    ----------
+    da_input: <xr.DataArray>
+        Input data. Dimension: [time, lat, lon]
+    da_reference: <xr.DataArray>
+        Refererence data. Dimension: [time, lat, lon]. Can be different length from da_input.
+    method: <str>
+        Options: "moment_2nd" - matching mean and standard deviation
+    
+    Returns
+    ----------
+    da_rescaled: <xr.DataArray>
+        Rescaled data
+    '''
+    
+    # Rescale input data for each grid cell
+    ncells = len(da_input['lat']) * len(da_input['lon'])
+    da_input_flat = da_input.values.reshape([-1, ncells]) # [time, lat*lon]
+    da_reference_flat = da_reference.values.reshape([-1, ncells])  # [time, lat*lon]
+    data_rescaled_flat = np.asarray(
+        [rescale_ts(da_input_flat[:, i], da_reference_flat[:, i], method='moment_2nd')
+         for i in range(ncells)])  # [lat*lon, time]
+    data_rescaled = data_rescaled_flat.reshape([len(da_smap['lat']), len(da_smap['lon']), -1])  # [lat, lon, time]
+    data_rescaled = np.rollaxis(data_rescaled, 2, 0)  # [time, lat, lon]
+    # Put back into da
+    da_rescaled = da_input.copy()
+    da_rescaled[:] = data_rescaled
+    
+    return da_rescaled
+
+
+def rescale_ts(ts_input, ts_reference, method):
+    ''' Rescales an input time series to be in the same regime of a reference time series.
+    Currently ignores all NANs in ts_reference.
+    
+    Parameters
+    ----------
+    ts_input: <np.array> or <pd.Series>
+        Input time series
+    ts_reference: <np.array> or <pd.Series>
+        Reference time series
+    method: <str>
+        Options: "moment_2nd" - matching mean and standard deviation
+    
+    Returns
+    ----------
+    ts_rescaled: <np.array>
+        Rescaled time series
+    '''
+    
+    if method == "moment_2nd":
+        mean_reference = np.nanmean(ts_reference)
+        std_reference = np.nanstd(ts_reference, ddof=0)
+        mean_input = np.nanmean(ts_input)
+        std_input = np.nanstd(ts_input, ddof=0)
+        ts_rescaled = mean_reference + (ts_input - mean_input) / std_input * std_reference
+        
+    return ts_rescaled
+
+
