@@ -520,10 +520,10 @@ def rescale_SMAP_domain(da_smap, da_reference, smap_times_am, smap_times_pm,
     # --- Rescale SMAP data (for AM and PM seperately) --- #
     ncells = len(da_smap['lat']) * len(da_smap['lon'])
     # Rescale SMAP AM
-    da_smap_AM = da_smap.sel(time=smap_times_am_ind)
+    da_smap_AM = da_smap.sel(time=smap_times_am)
     da_smap_AM_rescaled = rescale_domain(da_smap_AM, da_reference_AMtimes, method='moment_2nd')
     # Rescale SMAP PM
-    da_smap_PM = da_smap.sel(time=smap_times_pm_ind)
+    da_smap_PM = da_smap.sel(time=smap_times_pm)
     da_smap_PM_rescaled = rescale_domain(da_smap_PM, da_reference_PMtimes, method='moment_2nd')
     # Put AM and PM back together
     da_smap_rescaled = xr.concat([da_smap_AM_rescaled, da_smap_PM_rescaled], dim='time').sortby('time')
@@ -557,7 +557,8 @@ def rescale_domain(da_input, da_reference, method):
     data_rescaled_flat = np.asarray(
         [rescale_ts(da_input_flat[:, i], da_reference_flat[:, i], method='moment_2nd')
          for i in range(ncells)])  # [lat*lon, time]
-    data_rescaled = data_rescaled_flat.reshape([len(da_smap['lat']), len(da_smap['lon']), -1])  # [lat, lon, time]
+    data_rescaled = data_rescaled_flat.reshape(
+        [len(da_input['lat']), len(da_input['lon']), -1])  # [lat, lon, time]
     data_rescaled = np.rollaxis(data_rescaled, 2, 0)  # [time, lat, lon]
     # Put back into da
     da_rescaled = da_input.copy()

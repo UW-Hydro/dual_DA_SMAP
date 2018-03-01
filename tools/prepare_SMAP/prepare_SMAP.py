@@ -1,6 +1,8 @@
 import xarray as xr
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.io.shapereader as shpreader
@@ -111,14 +113,31 @@ da_smap = extract_smap_multiple_days(
 
 
 # ============================================================ #
-# Convert SMAP time to UTC # !!!!!!!!!!!!!!!!! Still need to do !!!!!!!!!!!!!!!!!!!
+# Convert SMAP time to VIC-forcing-data time zone
 # ============================================================ #
-# --- Get a list of SMAP measurement time points --- #
+# --- Shift SMAP data to the VIC-forcing-data time zone --- #
+# Shift SMAP time
+shift_hours = int(cfg['TIME']['smap_shift_hours'])
+smap_times_shifted = \
+    [pd.to_datetime(t) + pd.DateOffset(seconds=3600*shift_hours)
+     for t in da_smap['time'].values]
+da_smap['time'] = smap_times_shifted
+
+# --- Exclude SMAP data points after shifting that are outside of the processing time period --- #
+da_smap = da_smap.sel(
+    time=slice(start_date.strftime('%Y%m%d')+'-00',
+               end_date.strftime('%Y%m%d')+'-23'))
+
+# --- Get a list of SMAP AM & PM time points after shifting --- #
 # AM
-smap_times_am_ind = np.asarray([pd.to_datetime(t).hour==6 for t in da_smap['time'].values])
+am_hour = (6 + shift_hours) if (6 + shift_hours) < 24 else (6 + shift_hours - 24)
+smap_times_am_ind = np.asarray([pd.to_datetime(t).hour==am_hour
+                                for t in da_smap['time'].values])
 smap_times_am = da_smap['time'].values[smap_times_am_ind]
 # PM
-smap_times_pm_ind = np.asarray([pd.to_datetime(t).hour==18 for t in da_smap['time'].values])
+pm_hour = (18 + shift_hours) if (18 + shift_hours) < 24 else (18 + shift_hours - 24)
+smap_times_pm_ind = np.asarray([pd.to_datetime(t).hour==pm_hour
+                                for t in da_smap['time'].values])
 smap_times_pm = da_smap['time'].values[smap_times_pm_ind]
 
 
@@ -138,10 +157,14 @@ ds_smap.to_netcdf(
 # ============================================================ #
 # --- Load reference VIC history file --- #
 ds_vic_hist = xr.open_dataset(cfg['RESCALE']['vic_history_nc'])
-# --- Extract the domain to be consistent with SMAP data --- #
+
+# --- Extract the domain and period to be consistent with SMAP data --- #
 ds_vic_hist = ds_vic_hist.sel(
     lat=slice(da_vic_domain['lat'].values[0]-0.05, da_vic_domain['lat'].values[-1]+0.05),
-    lon=slice(da_vic_domain['lon'].values[0]-0.05, da_vic_domain['lon'].values[-1]+0.05))
+    lon=slice(da_vic_domain['lon'].values[0]-0.05, da_vic_domain['lon'].values[-1]+0.05),
+    time=slice(start_date.strftime('%Y%m%d')+'-00',
+               end_date.strftime('%Y%m%d')+'-23'))
+
 # --- Extract VIC surface soil moisture at time steps matching SMAP AM & PM --- #
 # Shift the VIC soil moisture time to the correct time point
 # (since the SOIL moisture output is timestep-end)
@@ -149,6 +172,7 @@ vic_model_steps_per_day = cfg['RESCALE']['vic_model_steps_per_day']
 vic_timestep = int(24 / vic_model_steps_per_day)  # [hour]
 vic_sm_times = [pd.to_datetime(t) + pd.DateOffset(hours=vic_timestep) for t in ds_vic_hist['time'].values]
 da_vic_sm = ds_vic_hist['OUT_SOIL_MOIST'].sel(nlayer=0).copy()
+
 # --- Remap VIC surface SM data to SMAP grid cell resolution --- #
 da_vic_remapped, weight_array = remap_con(
     reuse_weight=False,
@@ -158,10 +182,12 @@ da_vic_remapped, weight_array = remap_con(
     da_target_domain=da_smap_domain,
     tmp_weight_nc=os.path.join(output_subdir_tmp, 'vic_to_smap_weights.tmp.nc'),
     process_method=None)
+
 # --- Rescale SMAP data (for AM and PM seperately) --- #
 da_smap_rescaled = rescale_SMAP_domain(da_smap, da_vic_remapped,
                     smap_times_am, smap_times_pm,
                     method='moment_2nd')
+
 # --- Save rescaled SMAP data to file --- #
 ds_smap_rescaled = xr.Dataset({'soil_moisture': da_smap_rescaled})
 ds_smap_rescaled.to_netcdf(
