@@ -382,12 +382,12 @@ def process_weight_file(orig_weight_nc, output_weight_nc, n_source, n_target,
         sum_weight = weight_array[i, :].sum()
         # If sum of weight is 0, there is no active source cell in the target cell.
         # Set all weights for this target cell to -1
-        if sum_weight > -10e-15 and sum_weight < 10e-15:
+        if sum_weight > -10e-14 and sum_weight < 10e-14:
             weight_array[i, :] = -1
         # Otherwise, the sum of weight should really be 1. If the sum < 1, rescale to 1
-        elif sum_weight < (1 - 10e-15):
+        elif sum_weight < (1 - 10e-14):
             weight_array[i, :] /= sum_weight
-        elif sum_weight > (1 + 10e-15):
+        elif sum_weight > (1 + 10e-14):
             raise ValueError('Error: xESMF weight sum exceeds 1. Something is wrong!')
     
     # --- Write new weights to file --- #
