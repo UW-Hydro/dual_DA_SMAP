@@ -521,10 +521,10 @@ def rescale_SMAP_domain(da_smap, da_reference, smap_times_am, smap_times_pm,
     ncells = len(da_smap['lat']) * len(da_smap['lon'])
     # Rescale SMAP AM
     da_smap_AM = da_smap.sel(time=smap_times_am)
-    da_smap_AM_rescaled = rescale_domain(da_smap_AM, da_reference_AMtimes, method='moment_2nd')
+    da_smap_AM_rescaled = rescale_domain(da_smap_AM, da_reference_AMtimes, method=method)
     # Rescale SMAP PM
     da_smap_PM = da_smap.sel(time=smap_times_pm)
-    da_smap_PM_rescaled = rescale_domain(da_smap_PM, da_reference_PMtimes, method='moment_2nd')
+    da_smap_PM_rescaled = rescale_domain(da_smap_PM, da_reference_PMtimes, method=method)
     # Put AM and PM back together
     da_smap_rescaled = xr.concat([da_smap_AM_rescaled, da_smap_PM_rescaled], dim='time').sortby('time')
     
@@ -555,7 +555,9 @@ def rescale_domain(da_input, da_reference, method):
     da_input_flat = da_input.values.reshape([-1, ncells]) # [time, lat*lon]
     da_reference_flat = da_reference.values.reshape([-1, ncells])  # [time, lat*lon]
     data_rescaled_flat = np.asarray(
-        [rescale_ts(da_input_flat[:, i], da_reference_flat[:, i], method='moment_2nd')
+        [rescale_ts(pd.Series(da_input_flat[:, i], index=da_input['time'].values),
+                    pd.Series(da_reference_flat[:, i], index=da_reference['time'].values),
+                    method=method)
          for i in range(ncells)])  # [lat*lon, time]
     data_rescaled = data_rescaled_flat.reshape(
         [len(da_input['lat']), len(da_input['lon']), -1])  # [lat, lon, time]
@@ -570,29 +572,88 @@ def rescale_domain(da_input, da_reference, method):
 def rescale_ts(ts_input, ts_reference, method):
     ''' Rescales an input time series to be in the same regime of a reference time series.
     Currently ignores all NANs in ts_reference.
-    
+
     Parameters
     ----------
-    ts_input: <np.array> or <pd.Series>
+    ts_input: <pd.Series>
         Input time series
-    ts_reference: <np.array> or <pd.Series>
+    ts_reference: <pd.Series>
         Reference time series
     method: <str>
         Options: "moment_2nd" - matching mean and standard deviation
-    
+                 "moment_2nd_season" - matching mean and standard deviation; mean is
+                     sampled using  31-day window of year; standard deviation is kept
+                     constant temporally (following SMART paper 2011)
+
     Returns
     ----------
-    ts_rescaled: <np.array>
+    ts_rescaled: <pd.Series>
         Rescaled time series
     '''
-    
+
     if method == "moment_2nd":
         mean_reference = np.nanmean(ts_reference)
         std_reference = np.nanstd(ts_reference, ddof=0)
         mean_input = np.nanmean(ts_input)
         std_input = np.nanstd(ts_input, ddof=0)
         ts_rescaled = mean_reference + (ts_input - mean_input) / std_input * std_reference
-        
+    elif method == "moment_2nd_season":
+        std_reference = np.nanstd(ts_reference, ddof=0)
+        std_input = np.nanstd(ts_input, ddof=0)
+        # Calculate window-mean for both reference and input series
+        # Dict key: (month, day); value: mean value from the ts
+        dict_window_mean_reference = calculate_seasonal_window_mean(ts_reference)
+        dict_window_mean_input = calculate_seasonal_window_mean(ts_input)
+        # Construct time series of "mean_reference" and "mean_input"
+        # (mean_reference ts is constructed at the input data timestep)
+        list_mean_reference = [dict_window_mean_reference[(t.month, t.day)]
+                               for t in ts_input.index]
+        ts_mean_reference = pd.Series(list_mean_reference, index=ts_input.index)
+        list_mean_input = [dict_window_mean_input[(t.month, t.day)]
+                               for t in ts_input.index]
+        ts_mean_input = pd.Series(list_mean_input, index=ts_input.index)
+        # Rescale input ts
+        ts_rescaled = ts_mean_reference + (ts_input - ts_mean_input) / std_input * std_reference
+
     return ts_rescaled
 
 
+def calculate_seasonal_window_mean(ts):
+    ''' Calculates seasonal window mean values of a time series.
+        (mean value of 31-day-window of all years)
+    
+    Parameters
+    ----------
+    ts: <pd.Series>
+        Time series to calculate
+    
+    Returns
+    ----------
+    dict_window_mean: <dict>
+        Dict of window-mean values for the ts
+        key: (month, day); value: mean value from the ts
+    '''
+    
+    # Extract all indices for each (month, day) of a full year
+    d_fullyear = pd.date_range('20160101', '20161231')
+    dayofyear_fullyear = [(d.month, d.day) for d in d_fullyear]
+    list_dayofyear_index = [(ts.index.month==d[0]) & (ts.index.day==d[1]) for d in dayofyear_fullyear]
+    keys = dayofyear_fullyear
+    values = list_dayofyear_index
+    dict_dayofyear_index = dict(zip(keys, values))
+    
+    # Calculate window-mean value for each (month, day)
+    dict_window_mean = {}  # key: (month, day); value: mean value from the ts
+    for d in d_fullyear:
+        # Identify (month, day)s in a 31-day window centered around the current day
+        d_window = pd.date_range(d.date() - pd.DateOffset(days=15),
+                                 d.date() + pd.DateOffset(days=15))
+        dayofyear_window = [(d.month, d.day) for d in d_window]
+        # Extract all data points in the window of all years
+        ts_window = pd.concat([ts.loc[dict_dayofyear_index[d]]
+                               for d in dayofyear_window])
+        # Calculate window mean value
+        mean_ts = ts_window.mean()
+        dict_window_mean[(d.month, d.day)] = mean_ts
+    
+    return dict_window_mean

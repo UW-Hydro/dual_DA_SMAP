@@ -171,7 +171,8 @@ ds_vic_hist = ds_vic_hist.sel(
 vic_model_steps_per_day = cfg['RESCALE']['vic_model_steps_per_day']
 vic_timestep = int(24 / vic_model_steps_per_day)  # [hour]
 vic_sm_times = [pd.to_datetime(t) + pd.DateOffset(hours=vic_timestep) for t in ds_vic_hist['time'].values]
-da_vic_sm = ds_vic_hist['OUT_SOIL_MOIST'].sel(nlayer=0).copy()
+da_vic_sm = ds_vic_hist['OUT_SOIL_MOIST'].sel(nlayer=0).copy(deep=True)
+da_vic_sm['time'] = vic_sm_times
 
 # --- Remap VIC surface SM data to SMAP grid cell resolution --- #
 da_vic_remapped, weight_array = remap_con(
@@ -186,13 +187,14 @@ da_vic_remapped, weight_array = remap_con(
 # --- Rescale SMAP data (for AM and PM seperately) --- #
 da_smap_rescaled = rescale_SMAP_domain(da_smap, da_vic_remapped,
                     smap_times_am, smap_times_pm,
-                    method='moment_2nd')
+                    method=cfg['RESCALE']['rescale_method'])
 
 # --- Save rescaled SMAP data to file --- #
 ds_smap_rescaled = xr.Dataset({'soil_moisture': da_smap_rescaled})
 ds_smap_rescaled.to_netcdf(
     os.path.join(output_subdir_data_scaled,
-                 'soil_moisture_scaled.{}_{}.nc'.format(
+                 'soil_moisture_scaled.{}.{}_{}.nc'.format(
+                     cfg['RESCALE']['rescale_method'],
                      start_date.strftime('%Y%m%d'),
                      end_date.strftime('%Y%m%d'))),
     format='NETCDF4_CLASSIC')
