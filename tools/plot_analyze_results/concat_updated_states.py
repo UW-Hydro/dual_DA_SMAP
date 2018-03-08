@@ -164,37 +164,37 @@ elif nproc > 1:
     pool.join()
 
 
-# ========================================================== #
-# Calculate ensemble-mean updated SM & SWE states
-# ========================================================== #
-# --- Calculate ensemble-mean updated SM states --- #
-print('Calculating ensemble-mean updated SM states...')
-da_all_ens = xr.concat(list_da_concat, dim='N')
-da_ens_mean = da_all_ens.mean(dim='N')
-# Save ensemble-mean updated SM states to netCDF file
-ds_ens_mean = xr.Dataset(
-    {'STATE_SOIL_MOISTURE': da_ens_mean})
-out_nc = os.path.join(
-    output_concat_states_dir,
-    'updated_state.{}_{}.ens_mean.nc'.format(
-        meas_times[0].strftime('%Y%m%d'),
-        meas_times[-1].strftime('%Y%m%d')))
-to_netcdf_state_file_compress(ds_ens_mean, out_nc)
-
-# --- Calculate ensemble-mean cell-avg updated SM states --- #
-print('Calculating ensemble-mean cell-avg updated SM states...')
-da_tile_frac = determine_tile_frac(vic_global_txt)
-da_state_cellAvg = (da_ens_mean * da_tile_frac).sum(
-    dim='veg_class').sum(dim='snow_band')  # [time, nlayer, lat, lon]
-ds_state_cellAvg = xr.Dataset({'SOIL_MOISTURE': da_state_cellAvg})
-out_nc = os.path.join(
-    output_concat_states_dir,
-    'updated_state_cellAvg.{}_{}.ens_mean.nc'.format(
-        meas_times[0].strftime('%Y%m%d'),
-        meas_times[-1].strftime('%Y%m%d')))
-to_netcdf_state_file_compress(
-    ds_state_cellAvg, out_nc)
-
-
-
-
+## ========================================================== #
+## Calculate ensemble-mean updated SM & SWE states
+## ========================================================== #
+## --- Calculate ensemble-mean updated SM states --- #
+#print('Calculating ensemble-mean updated SM states...')
+#da_all_ens = xr.concat(list_da_concat, dim='N')
+#da_ens_mean = da_all_ens.mean(dim='N')
+## Save ensemble-mean updated SM states to netCDF file
+#ds_ens_mean = xr.Dataset(
+#    {'STATE_SOIL_MOISTURE': da_ens_mean})
+#out_nc = os.path.join(
+#    output_concat_states_dir,
+#    'updated_state.{}_{}.ens_mean.nc'.format(
+#        meas_times[0].strftime('%Y%m%d'),
+#        meas_times[-1].strftime('%Y%m%d')))
+#to_netcdf_state_file_compress(ds_ens_mean, out_nc)
+#
+## --- Calculate ensemble-mean cell-avg updated SM states --- #
+#print('Calculating ensemble-mean cell-avg updated SM states...')
+#da_tile_frac = determine_tile_frac(vic_global_txt)
+#da_state_cellAvg = (da_ens_mean * da_tile_frac).sum(
+#    dim='veg_class').sum(dim='snow_band')  # [time, nlayer, lat, lon]
+#ds_state_cellAvg = xr.Dataset({'SOIL_MOISTURE': da_state_cellAvg})
+#out_nc = os.path.join(
+#    output_concat_states_dir,
+#    'updated_state_cellAvg.{}_{}.ens_mean.nc'.format(
+#        meas_times[0].strftime('%Y%m%d'),
+#        meas_times[-1].strftime('%Y%m%d')))
+#to_netcdf_state_file_compress(
+#    ds_state_cellAvg, out_nc)
+#
+#
+#
+#
