@@ -684,10 +684,12 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
              vic_model_steps_per_day, output_vic_global_root_dir,
              output_vic_state_root_dir, output_vic_history_root_dir,
              output_vic_log_root_dir,
+             output_restart_log_dir,
              mismatched_grid=False,
              weight_nc=None,
              nproc=1,
              mpi_proc=None, mpi_exe='mpiexec', debug=False, output_temp_dir=None,
+             restart=None,
              linear_model=False, linear_model_prec_varname=None,
              dict_linear_model_param=None):
     ''' This function runs ensemble kalman filter (EnKF) on VIC (image driver)
@@ -744,6 +746,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         Directory for VIC output result files
     output_vic_log_root_dir: <str>
         Directory for VIC output log files
+    output_restart_log_dir: <str>
+        Directory for saving random state for restarting
     mismatched_grid: <bool>
         Whether the measurement grid mismatches VIC grid.
         Default: False
@@ -760,6 +764,9 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
     output_temp_dir: <str>
         Directory for temp files (for dignostic purpose); only used when
         debug = True
+    restart: None or <str>
+        Restart time; None for starting from scratch (i.e., not restarting)
+        Default: None
     linear_model: <bool>
         Whether to run a linear model instead of VIC for propagation.
         Default is 'False', which is to run VIC
@@ -818,144 +825,143 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                 mkdirs=['EnKF_ensemble_concat'])['EnKF_ensemble_concat']
 
     # --- Step 1. Initialize ---#
-    init_state_time = start_time
-    print('\tGenerating ensemble initial states at ', init_state_time)
-    time1 = timeit.default_timer()
-    # Load initial state file
-    ds_states = xr.open_dataset(init_state_nc)
-    class_states = States(ds_states)
-
-    # Determine the number of EnKF states in each VIC grid cell, n
-    n = len(class_states.da_EnKF['n'])
-    # Set up initial state subdirectories
-    init_state_dir_name = 'init.{}_{:05d}'.format(
-                                    init_state_time.strftime('%Y%m%d'),
-                                    init_state_time.hour*3600+init_state_time.second)
-    init_state_dir = setup_output_dirs(
-                            output_vic_state_root_dir,
+    if restart is None:
+        init_state_time = start_time
+        print('\tGenerating ensemble initial states at ', init_state_time)
+        time1 = timeit.default_timer()
+        # Load initial state file
+        ds_states = xr.open_dataset(init_state_nc)
+        class_states = States(ds_states)
+        # Determine the number of EnKF states in each VIC grid cell, n
+        n = len(class_states.da_EnKF['n'])
+        # Set up initial state subdirectories
+        init_state_dir_name = 'init.{}_{:05d}'.format(
+                                        init_state_time.strftime('%Y%m%d'),
+                                        init_state_time.hour*3600+init_state_time.second)
+        init_state_dir = setup_output_dirs(
+                                output_vic_state_root_dir,
+                                mkdirs=[init_state_dir_name])[init_state_dir_name]
+        # For each ensemble member, add Gaussian noise to sm states with covariance P,
+        # and save each ensemble member states
+        if debug:
+            debug_dir = setup_output_dirs(
+                            output_temp_dir,
                             mkdirs=[init_state_dir_name])[init_state_dir_name]
-    # For each ensemble member, add Gaussian noise to sm states with covariance P,
-    # and save each ensemble member states
-    if debug:
-        debug_dir = setup_output_dirs(
-                        output_temp_dir,
-                        mkdirs=[init_state_dir_name])[init_state_dir_name]
-    # --- If nproc == 1, do a regular ensemble loop --- #
-    if nproc == 1:
-        for i in range(N):
-            seed = np.random.randint(low=100000)
-            da_perturbation = perturb_soil_moisture_states_class_input(
-                    class_states=class_states,
-                    L=L,
-                    scale_n_nloop=scale_n_nloop,
-                    out_states_nc=os.path.join(init_state_dir,
-                                               'state.ens{}.nc'.format(i+1)),
-                    da_max_moist_n=da_max_moist_n,
-                    adjust_negative=adjust_negative,
-                    seed=seed)
-            # Save soil moisture perturbation
-            if debug:
-                ds_perturbation = xr.Dataset({'STATE_SOIL_MOISTURE':
-                                              da_perturbation})
-                ds_perturbation.to_netcdf(os.path.join(
-                        debug_dir,
-                        'perturbation.ens{}.nc').format(i+1))
-    # --- If nproc > 1, use multiprocessing --- #
-    elif nproc > 1:
-        # --- Set up multiprocessing --- #
-        pool = mp.Pool(processes=nproc)
-        # --- Loop over each ensemble member --- #
-        for i in range(N):
-            seed = np.random.randint(low=100000)
-            pool.apply_async(
-                perturb_soil_moisture_states_class_input,
-                (class_states, L, scale_n_nloop,
-                 os.path.join(init_state_dir, 'state.ens{}.nc'.format(i+1)),
-                 da_max_moist_n, adjust_negative, seed))
-        # --- Finish multiprocessing --- #
-        pool.close()
-        pool.join()
-
-    time2 = timeit.default_timer()
-    print('\t\tTime of perturbing init state: {}'.format(time2-time1))
+        # --- If nproc == 1, do a regular ensemble loop --- #
+        if nproc == 1:
+            for i in range(N):
+                seed = np.random.randint(low=100000)
+                da_perturbation = perturb_soil_moisture_states_class_input(
+                        class_states=class_states,
+                        L=L,
+                        scale_n_nloop=scale_n_nloop,
+                        out_states_nc=os.path.join(init_state_dir,
+                                                   'state.ens{}.nc'.format(i+1)),
+                        da_max_moist_n=da_max_moist_n,
+                        adjust_negative=adjust_negative,
+                        seed=seed)
+                # Save soil moisture perturbation
+                if debug:
+                    ds_perturbation = xr.Dataset({'STATE_SOIL_MOISTURE':
+                                                  da_perturbation})
+                    ds_perturbation.to_netcdf(os.path.join(
+                            debug_dir,
+                            'perturbation.ens{}.nc').format(i+1))
+        # --- If nproc > 1, use multiprocessing --- #
+        elif nproc > 1:
+            # --- Set up multiprocessing --- #
+            pool = mp.Pool(processes=nproc)
+            # --- Loop over each ensemble member --- #
+            for i in range(N):
+                seed = np.random.randint(low=100000)
+                pool.apply_async(
+                    perturb_soil_moisture_states_class_input,
+                    (class_states, L, scale_n_nloop,
+                     os.path.join(init_state_dir, 'state.ens{}.nc'.format(i+1)),
+                     da_max_moist_n, adjust_negative, seed))
+            # --- Finish multiprocessing --- #
+            pool.close()
+            pool.join()
+    
+        time2 = timeit.default_timer()
+        print('\t\tTime of perturbing init state: {}'.format(time2-time1))
 
     # --- Step 2. Propagate (run VIC) until the first measurement time point ---#
-    # Initialize dictionary of history file paths for each ensemble member
-    dict_ens_list_history_files = {}
-    for i in range(N):
-        dict_ens_list_history_files['ens{}'.format(i+1)] = []
-
-    # Determine VIC run period
-    vic_run_start_time = start_time
-    vic_run_end_time = pd.to_datetime(da_meas[da_meas_time_var].values[0]) - \
-                       pd.DateOffset(hours=24/vic_model_steps_per_day)
-    print('\tPropagating (run VIC) until the first measurement time point ',
-          pd.to_datetime(da_meas[da_meas_time_var].values[0]))
-    time1 = timeit.default_timer()
-    # Set up output states, history and global files directories
-    propagate_output_dir_name = 'propagate.{}_{:05d}-{}'.format(
-                        vic_run_start_time.strftime('%Y%m%d'),
-                        vic_run_start_time.hour*3600+vic_run_start_time.second,
-                        vic_run_end_time.strftime('%Y%m%d'))
-    out_state_dir = setup_output_dirs(
-                            output_vic_state_root_dir,
-                            mkdirs=[propagate_output_dir_name])[propagate_output_dir_name]
-    out_history_dir = setup_output_dirs(
-                            output_vic_history_root_dir,
-                            mkdirs=[propagate_output_dir_name])[propagate_output_dir_name]
-    out_global_dir = setup_output_dirs(
-                            output_vic_global_root_dir,
-                            mkdirs=[propagate_output_dir_name])[propagate_output_dir_name]
-    out_log_dir = setup_output_dirs(
-                            output_vic_log_root_dir,
-                            mkdirs=[propagate_output_dir_name])[propagate_output_dir_name]
-    # Propagate all ensemble members
-    if not linear_model:
-        propagate_ensemble(
-                N,
-                start_time=vic_run_start_time,
-                end_time=vic_run_end_time,
-                vic_exe=vic_exe,
-                vic_global_template_file=vic_global_template,
-                vic_model_steps_per_day=vic_model_steps_per_day,
-                init_state_dir=init_state_dir,
-                out_state_dir=out_state_dir,
-                out_history_dir=out_history_dir,
-                out_global_dir=out_global_dir,
-                out_log_dir=out_log_dir,
-                ens_forcing_basedir=ens_forcing_basedir,
-                ens_forcing_prefix=ens_forcing_prefix,
-                nproc=nproc,
-                mpi_proc=mpi_proc,
-                mpi_exe=mpi_exe)
-    else:
-        propagate_ensemble_linear_model(
-                N,
-                start_time=vic_run_start_time,
-                end_time=vic_run_end_time,
-                lat_coord=da_meas['lat'],
-                lon_coord=da_meas['lon'],
-                model_steps_per_day=vic_model_steps_per_day,
-                init_state_dir=init_state_dir,
-                out_state_dir=out_state_dir,
-                out_history_dir=out_history_dir,
-                ens_forcing_basedir=ens_forcing_basedir,
-                ens_forcing_prefix=ens_forcing_prefix,
-                prec_varname=linear_model_prec_varname,
-                dict_linear_model_param=dict_linear_model_param,
-                nproc=nproc)
-    # Clean up log dir
-    shutil.rmtree(out_log_dir)
-    
-    # Put output history file paths into dictionary
-    for i in range(N):
-        dict_ens_list_history_files['ens{}'.format(i+1)].append(os.path.join(
-                    out_history_dir, 'history.ens{}.{}-{:05d}.nc'.format(
-                            i+1,
-                            vic_run_start_time.strftime('%Y-%m-%d'),
-                            vic_run_start_time.hour*3600+vic_run_start_time.second)))
-    time2 = timeit.default_timer()
-    print('\t\tTime of propagation: {}'.format(time2-time1))
+    if restart is None:
+        # Initialize dictionary of history file paths for each ensemble member
+        dict_ens_list_history_files = {}
+        for i in range(N):
+            dict_ens_list_history_files['ens{}'.format(i+1)] = []
+        # Determine VIC run period
+        vic_run_start_time = start_time
+        vic_run_end_time = pd.to_datetime(da_meas[da_meas_time_var].values[0]) - \
+                           pd.DateOffset(hours=24/vic_model_steps_per_day)
+        print('\tPropagating (run VIC) until the first measurement time point ',
+              pd.to_datetime(da_meas[da_meas_time_var].values[0]))
+        time1 = timeit.default_timer()
+        # Set up output states, history and global files directories
+        propagate_output_dir_name = 'propagate.{}_{:05d}-{}'.format(
+                            vic_run_start_time.strftime('%Y%m%d'),
+                            vic_run_start_time.hour*3600+vic_run_start_time.second,
+                            vic_run_end_time.strftime('%Y%m%d'))
+        out_state_dir = setup_output_dirs(
+                                output_vic_state_root_dir,
+                                mkdirs=[propagate_output_dir_name])[propagate_output_dir_name]
+        out_history_dir = setup_output_dirs(
+                                output_vic_history_root_dir,
+                                mkdirs=[propagate_output_dir_name])[propagate_output_dir_name]
+        out_global_dir = setup_output_dirs(
+                                output_vic_global_root_dir,
+                                mkdirs=[propagate_output_dir_name])[propagate_output_dir_name]
+        out_log_dir = setup_output_dirs(
+                                output_vic_log_root_dir,
+                                mkdirs=[propagate_output_dir_name])[propagate_output_dir_name]
+        # Propagate all ensemble members
+        if not linear_model:
+            propagate_ensemble(
+                    N,
+                    start_time=vic_run_start_time,
+                    end_time=vic_run_end_time,
+                    vic_exe=vic_exe,
+                    vic_global_template_file=vic_global_template,
+                    vic_model_steps_per_day=vic_model_steps_per_day,
+                    init_state_dir=init_state_dir,
+                    out_state_dir=out_state_dir,
+                    out_history_dir=out_history_dir,
+                    out_global_dir=out_global_dir,
+                    out_log_dir=out_log_dir,
+                    ens_forcing_basedir=ens_forcing_basedir,
+                    ens_forcing_prefix=ens_forcing_prefix,
+                    nproc=nproc,
+                    mpi_proc=mpi_proc,
+                    mpi_exe=mpi_exe)
+        else:
+            propagate_ensemble_linear_model(
+                    N,
+                    start_time=vic_run_start_time,
+                    end_time=vic_run_end_time,
+                    lat_coord=da_meas['lat'],
+                    lon_coord=da_meas['lon'],
+                    model_steps_per_day=vic_model_steps_per_day,
+                    init_state_dir=init_state_dir,
+                    out_state_dir=out_state_dir,
+                    out_history_dir=out_history_dir,
+                    ens_forcing_basedir=ens_forcing_basedir,
+                    ens_forcing_prefix=ens_forcing_prefix,
+                    prec_varname=linear_model_prec_varname,
+                    dict_linear_model_param=dict_linear_model_param,
+                    nproc=nproc)
+        # Clean up log dir
+        shutil.rmtree(out_log_dir)
+        # Put output history file paths into dictionary
+        for i in range(N):
+            dict_ens_list_history_files['ens{}'.format(i+1)].append(os.path.join(
+                        out_history_dir, 'history.ens{}.{}-{:05d}.nc'.format(
+                                i+1,
+                                vic_run_start_time.strftime('%Y-%m-%d'),
+                                vic_run_start_time.hour*3600+vic_run_start_time.second)))
+        time2 = timeit.default_timer()
+        print('\t\tTime of propagation: {}'.format(time2-time1))
     
     # --- Step 3. Run EnKF --- #
     debug_innov_dir = setup_output_dirs(
@@ -969,13 +975,21 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                         output_temp_dir,
                         mkdirs=['update'])['update']
     # Initialize
-    state_dir_after_prop = out_state_dir
+    if restart is None:
+        state_dir_after_prop = out_state_dir
+    else:
+        restart_time = pd.to_datetime(restart)
 
     # Loop over each measurement time point
     for t, time in enumerate(da_meas[da_meas_time_var]):
 
-        # Determine last, current and next measurement time points
+        # (0) Determine the current and next measurement time points
+        # Determine current time
         current_time = pd.to_datetime(time.values)
+        # If restart, skip the time steps before the restart time
+        if restart is not None and current_time < restart_time:
+            continue
+        # Determine next time
         if t == len(da_meas[da_meas_time_var])-1:  # if this is the last measurement time
             next_time = end_time
         else:  # if not the last measurement time
@@ -983,119 +997,156 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                         pd.DateOffset(hours=24/vic_model_steps_per_day)
         print('\tCalculating for ', current_time, 'to', next_time)
 
-        # (1.1) Calculate gain K
-        time1 = timeit.default_timer()
-        da_x, da_y_est = get_soil_moisture_and_estimated_meas_all_ensemble(
-                                N,
-                                state_dir=state_dir_after_prop,
-                                state_time=current_time,
-                                da_tile_frac=da_tile_frac,
-                                nproc=nproc)
-        if mismatched_grid is False:  # if no mismatch
-            da_K = calculate_gain_K_whole_field(da_x, da_y_est, R)
-        else:  # if mismatched grid
-            list_K, y_est_remapped = calculate_gain_K_whole_field_mismatched_grid(
-                da_x, da_y_est, R,
-                list_source_ind2D_weight_all,
-                weight_nc, da_meas)
-        if debug:
-            if mismatched_grid is False:  # if no mismatch
-                ds_K = xr.Dataset({'K': da_K})
-                ds_K.to_netcdf(os.path.join(debug_update_dir,
-                                            'K.{}_{:05d}.nc'.format(
-                                                current_time.strftime('%Y%m%d'),
-                                                current_time.hour*3600+current_time.second)))
-            else:  # if mismatched grid
-                K_name = os.path.join(debug_update_dir,
-                                            'K.{}_{:05d}.pickle'.format(
-                                                current_time.strftime('%Y%m%d'),
-                                                current_time.hour*3600+current_time.second))
-                with open(K_name, 'wb') as f:
-                    pickle.dump(list_K, f)
-        time2 = timeit.default_timer()
-        print('\t\tTime of calculating gain K: {}'.format(time2-time1))
-
-        # (1.2) Calculate and save normalized innovation
-        time1 = timeit.default_timer()
-        if mismatched_grid:
-            y_est = y_est_remapped.reshape(
-                [len(da_meas['lat']), len(da_meas['lon']),
-                 y_est_remapped.shape[1], y_est_remapped.shape[2]])  # [lat, lon, m , N]
-            da_y_est = xr.DataArray(
-                y_est,
-                coords=[da_meas['lat'], da_meas['lon'],
-                        range(1, y_est_remapped.shape[1]+1),
-                        range(1, y_est_remapped.shape[2]+1)],
-                dims=['lat', 'lon', 'm', 'N'])
-        da_y_est_ensMean = da_y_est.mean(dim='N')  # [lat, lon, m]
-        # Calculate non-normalized innovation
-        innov = da_meas.loc[time, :, :, :].values - \
-                da_y_est_ensMean.values  # [lat, lon, m]
-        da_innov = xr.DataArray(innov, coords=[da_y_est_ensMean['lat'],
-                                               da_y_est_ensMean['lon'],
-                                               da_y_est_ensMean['m']],
-                                dims=['lat', 'lon', 'm'])
-        # Normalize innovation
-        da_Pyy = da_y_est.var(dim='N', ddof=1)  # [lat, lon, m]
-        innov_norm = innov / np.sqrt(da_Pyy.values + R)  # [lat, lon, m]
-        da_innov_norm = xr.DataArray(innov_norm,
-                                     coords=[da_y_est_ensMean['lat'],
-                                             da_y_est_ensMean['lon'],
-                                             da_y_est_ensMean['m']],
-                                     dims=['lat', 'lon', 'm'])
-        # Save normalized innovation to netCDf file
-        ds_innov_norm = xr.Dataset({'innov_norm': da_innov_norm})
-        ds_innov_norm.to_netcdf(os.path.join(
-                debug_innov_dir,
-                'innov_norm.{}_{:05d}.nc'.format(
-                        current_time.strftime('%Y%m%d'),
-                        current_time.hour*3600+current_time.second)))
-        time2 = timeit.default_timer()
-        print('\t\tTime of calculating innovation: {}'.format(time2-time1))
-
-        # (1.3) Update states for each ensemble member
-        # Set up dir for updated states
-        time1 = timeit.default_timer()
-        updated_states_dir_name = 'updated.{}_{:05d}'.format(
-                            current_time.strftime('%Y%m%d'),
-                            current_time.hour*3600+current_time.second)
-        out_updated_state_dir = setup_output_dirs(
-                output_vic_state_root_dir,
-                mkdirs=[updated_states_dir_name])[updated_states_dir_name]
-        # Update states and save to nc files
-        if mismatched_grid is False:
-            y_est = da_y_est
-            K = da_K
+        # if restart, skip the update step for the restart time
+        if restart is not None and current_time <= restart_time:
+            pass
         else:
-            y_est = y_est_remapped
-            K = list_K
-        da_x_updated, da_update_increm = update_states_ensemble(
-                y_est, K,
-                da_meas.loc[time, :, :, :],
-                R,
-                state_dir_before_update=state_dir_after_prop,
-                state_time=current_time,
-                out_vic_state_dir=out_updated_state_dir,
-                da_max_moist_n=da_max_moist_n,
-                mismatched_grid=mismatched_grid,
-                list_source_ind2D_weight_all=list_source_ind2D_weight_all,
-                adjust_negative=adjust_negative,
-                nproc=nproc)
-        if debug:
-            # Save update increment to netCDF file
-            ds_update_increm = xr.Dataset({'update_increment': da_update_increm})
-            ds_update_increm.to_netcdf(os.path.join(
-                    debug_update_dir,
-                    'update_increm.{}_{:05d}.nc'.format(
-                             current_time.strftime('%Y%m%d'),
-                             current_time.hour*3600+current_time.second)))
-        # Delete propagated states
-        shutil.rmtree(state_dir_after_prop)
-        time2 = timeit.default_timer()
-        print('\t\tTime of updating states: {}'.format(time2-time1))
+            # (1.1) Calculate gain K
+            time1 = timeit.default_timer()
+            da_x, da_y_est = get_soil_moisture_and_estimated_meas_all_ensemble(
+                                    N,
+                                    state_dir=state_dir_after_prop,
+                                    state_time=current_time,
+                                    da_tile_frac=da_tile_frac,
+                                    nproc=nproc)
+            if mismatched_grid is False:  # if no mismatch
+                da_K = calculate_gain_K_whole_field(da_x, da_y_est, R)
+            else:  # if mismatched grid
+                list_K, y_est_remapped = calculate_gain_K_whole_field_mismatched_grid(
+                    da_x, da_y_est, R,
+                    list_source_ind2D_weight_all,
+                    weight_nc, da_meas)
+            if debug:
+                if mismatched_grid is False:  # if no mismatch
+                    ds_K = xr.Dataset({'K': da_K})
+                    ds_K.to_netcdf(os.path.join(debug_update_dir,
+                                                'K.{}_{:05d}.nc'.format(
+                                                    current_time.strftime('%Y%m%d'),
+                                                    current_time.hour*3600+current_time.second)))
+                else:  # if mismatched grid
+                    K_name = os.path.join(debug_update_dir,
+                                                'K.{}_{:05d}.pickle'.format(
+                                                    current_time.strftime('%Y%m%d'),
+                                                    current_time.hour*3600+current_time.second))
+                    with open(K_name, 'wb') as f:
+                        pickle.dump(list_K, f)
+            time2 = timeit.default_timer()
+            print('\t\tTime of calculating gain K: {}'.format(time2-time1))
+    
+            # (1.2) Calculate and save normalized innovation
+            time1 = timeit.default_timer()
+            if mismatched_grid:
+                y_est = y_est_remapped.reshape(
+                    [len(da_meas['lat']), len(da_meas['lon']),
+                     y_est_remapped.shape[1], y_est_remapped.shape[2]])  # [lat, lon, m , N]
+                da_y_est = xr.DataArray(
+                    y_est,
+                    coords=[da_meas['lat'], da_meas['lon'],
+                            range(1, y_est_remapped.shape[1]+1),
+                            range(1, y_est_remapped.shape[2]+1)],
+                    dims=['lat', 'lon', 'm', 'N'])
+            da_y_est_ensMean = da_y_est.mean(dim='N')  # [lat, lon, m]
+            # Calculate non-normalized innovation
+            innov = da_meas.loc[time, :, :, :].values - \
+                    da_y_est_ensMean.values  # [lat, lon, m]
+            da_innov = xr.DataArray(innov, coords=[da_y_est_ensMean['lat'],
+                                                   da_y_est_ensMean['lon'],
+                                                   da_y_est_ensMean['m']],
+                                    dims=['lat', 'lon', 'm'])
+            # Normalize innovation
+            da_Pyy = da_y_est.var(dim='N', ddof=1)  # [lat, lon, m]
+            innov_norm = innov / np.sqrt(da_Pyy.values + R)  # [lat, lon, m]
+            da_innov_norm = xr.DataArray(innov_norm,
+                                         coords=[da_y_est_ensMean['lat'],
+                                                 da_y_est_ensMean['lon'],
+                                                 da_y_est_ensMean['m']],
+                                         dims=['lat', 'lon', 'm'])
+            # Save normalized innovation to netCDf file
+            ds_innov_norm = xr.Dataset({'innov_norm': da_innov_norm})
+            ds_innov_norm.to_netcdf(os.path.join(
+                    debug_innov_dir,
+                    'innov_norm.{}_{:05d}.nc'.format(
+                            current_time.strftime('%Y%m%d'),
+                            current_time.hour*3600+current_time.second)))
+            time2 = timeit.default_timer()
+            print('\t\tTime of calculating innovation: {}'.format(time2-time1))
+    
+            # (1.3) Update states for each ensemble member
+            # Set up dir for updated states
+            time1 = timeit.default_timer()
+            updated_states_dir_name = 'updated.{}_{:05d}'.format(
+                                current_time.strftime('%Y%m%d'),
+                                current_time.hour*3600+current_time.second)
+            out_updated_state_dir = setup_output_dirs(
+                    output_vic_state_root_dir,
+                    mkdirs=[updated_states_dir_name])[updated_states_dir_name]
+            # Update states and save to nc files
+            if mismatched_grid is False:
+                y_est = da_y_est
+                K = da_K
+            else:
+                y_est = y_est_remapped
+                K = list_K
+            da_x_updated, da_update_increm = update_states_ensemble(
+                    y_est, K,
+                    da_meas.loc[time, :, :, :],
+                    R,
+                    state_dir_before_update=state_dir_after_prop,
+                    state_time=current_time,
+                    out_vic_state_dir=out_updated_state_dir,
+                    da_max_moist_n=da_max_moist_n,
+                    mismatched_grid=mismatched_grid,
+                    list_source_ind2D_weight_all=list_source_ind2D_weight_all,
+                    adjust_negative=adjust_negative,
+                    nproc=nproc)
+            if debug:
+                # Save update increment to netCDF file
+                ds_update_increm = xr.Dataset({'update_increment': da_update_increm})
+                ds_update_increm.to_netcdf(os.path.join(
+                        debug_update_dir,
+                        'update_increm.{}_{:05d}.nc'.format(
+                                 current_time.strftime('%Y%m%d'),
+                                 current_time.hour*3600+current_time.second)))
+            # Delete propagated states
+            shutil.rmtree(state_dir_after_prop)
+            time2 = timeit.default_timer()
+            print('\t\tTime of updating states: {}'.format(time2-time1))
+    
+            # (1.4) Save the following current states to file:
+            # - random state
+            filename = os.path.join(
+                output_restart_log_dir,
+                '{}.after_update.random_state.pickle'.format(
+                    current_time.strftime("%Y%m%d-%H-%M-%S")))
+            random_state = np.random.get_state()
+            with open(filename, 'wb') as f:
+                pickle.dump(random_state, f)
+            # - dict_ens_list_history_files
+            filename = os.path.join(
+                output_restart_log_dir,
+                '{}.after_update.dict_ens_list_history_files.pickle'.format(
+                    current_time.strftime("%Y%m%d-%H-%M-%S")))
+            with open(filename, 'wb') as f:
+                pickle.dump(dict_ens_list_history_files, f)
 
         # (2) Perturb states
         time1 = timeit.default_timer()
+        # If restart, do the following setup for the restart time:
+        # - identify the updated state dir for the restart time
+        if restart is not None and current_time == restart_time:
+            # Identify the updated state dir for the restart time
+            out_updated_state_dir = os.path.join(
+                output_vic_state_root_dir,
+                'updated.{}_{:05d}'.format(
+                    current_time.strftime('%Y%m%d'),
+                    current_time.hour*3600+current_time.second))
+        # - Load dict_ens_list_history_files
+        filename = os.path.join(
+            output_restart_log_dir,
+            '{}.after_update.dict_ens_list_history_files.pickle'.format(
+                current_time.strftime("%Y%m%d-%H-%M-%S")))
+        with open(filename, 'rb') as f:
+            dict_ens_list_history_files = pickle.load(f)
         # Set up perturbed state subdirectories
         pert_state_dir_name = 'perturbed.{}_{:05d}'.format(
                                         current_time.strftime('%Y%m%d'),
@@ -1182,7 +1233,6 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                     nproc=nproc)
         # Clean up log dir
         shutil.rmtree(out_log_dir)
-
         # Put output history file paths into dictionary
         for i in range(N):
             dict_ens_list_history_files['ens{}'.format(i+1)].append(os.path.join(
@@ -1194,7 +1244,6 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         shutil.rmtree(pert_state_dir)
         time2 = timeit.default_timer()
         print('\t\tTime of propagation: {}'.format(time2-time1))
-
         # Point state directory to be updated to the propagated one
         state_dir_after_prop = out_state_dir
 
@@ -1250,7 +1299,6 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                 pool.join()
             time2 = timeit.default_timer()
             print('\t\tTime of propagation: {}'.format(time2-time1))
-
             # Delete history dirs containing individual files
             time1 = timeit.default_timer()
             for d in set_dir_to_delete:

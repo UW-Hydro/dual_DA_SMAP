@@ -15,6 +15,7 @@ from collections import OrderedDict
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import pickle
 
 from tonic.models.vic.vic import VIC
 from tonic.io import read_config, read_configobj
@@ -44,10 +45,28 @@ mpi_proc = int(sys.argv[3])
 # Whether to print out debug temp files or not
 debug = (sys.argv[4].lower() == 'true')
 
+# Restart time (format: YYYYMMDD_SSSSS); DA should have already been
+# propogated to this time, and will restart from the update step
+# "None" for starting from scratch
+restart = None if sys.argv[5].lower()=='none' else str(sys.argv[5])
+
+
 # ============================================================ #
 # Set random generation seed
 # ============================================================ #
-np.random.seed(cfg['CONTROL']['seed'])
+if restart is None:
+    np.random.seed(cfg['CONTROL']['seed'])
+else:  # If restart, load in the saved random state
+    restart_time = pd.to_datetime(restart)
+    random_state_file = os.path.join(
+        cfg['CONTROL']['root_dir'],
+        cfg['OUTPUT']['output_EnKF_basedir'],
+        'restart_log',
+        '{}.after_update.random_state.pickle'.format(
+            restart_time.strftime("%Y%m%d-%H-%M-%S")))
+    with open(random_state_file, 'rb') as f:
+        random_state = pickle.load(f)
+    np.random.set_state(random_state)
 
 
 # ============================================================ #
@@ -56,7 +75,7 @@ np.random.seed(cfg['CONTROL']['seed'])
 dirs = setup_output_dirs(os.path.join(cfg['CONTROL']['root_dir'],
                                       cfg['OUTPUT']['output_EnKF_basedir']),
                          mkdirs=['global', 'history', 'states',
-                                 'logs', 'plots', 'temp'])
+                                 'logs', 'plots', 'temp', 'restart_log'])
 
 
 # ============================================================ #
@@ -185,11 +204,13 @@ if not linear_model:
          output_vic_state_root_dir=dirs['states'],
          output_vic_history_root_dir=dirs['history'],
          output_vic_log_root_dir=dirs['logs'],
+         output_restart_log_dir=dirs['restart_log'],
          mismatched_grid=cfg['GRID_MISMATCH']['mismatched_grid'],
          weight_nc=weight_nc,
          nproc=nproc,
          debug=debug,
-         output_temp_dir=dirs['temp'])
+         output_temp_dir=dirs['temp'],
+         restart=restart)
 else:
     dict_ens_list_history_files = EnKF_VIC(
          N=cfg['EnKF']['N'],
@@ -214,9 +235,11 @@ else:
          output_vic_state_root_dir=dirs['states'],
          output_vic_history_root_dir=dirs['history'],
          output_vic_log_root_dir=dirs['logs'],
+         output_restart_log_dir=dirs['restart_log'],
          nproc=nproc,
          debug=debug,
          output_temp_dir=dirs['temp'],
+         restart=restart,
          linear_model='True',
          linear_model_prec_varname=prec_varname,
          dict_linear_model_param=dict_linear_model_param)
