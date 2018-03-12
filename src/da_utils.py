@@ -12,6 +12,7 @@ import scipy.linalg as la
 import glob
 import xesmf as xe
 import pickle
+import time
 
 from tonic.models.vic.vic import VIC, default_vic_valgrind_error_code
 
@@ -1232,7 +1233,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                     dict_linear_model_param=dict_linear_model_param,
                     nproc=nproc)
         # Clean up log dir
-        shutil.rmtree(out_log_dir)
+#        shutil.rmtree(out_log_dir)
         # Put output history file paths into dictionary
         for i in range(N):
             dict_ens_list_history_files['ens{}'.format(i+1)].append(os.path.join(
@@ -1856,9 +1857,13 @@ def propagate_ensemble(N, start_time, end_time, vic_exe, vic_global_template_fil
                                 output_global_basepath=os.path.join(
                                             out_global_dir,
                                             'global.ens{}'.format(i+1)))
+            out_log_dir_ens = setup_output_dirs(
+                out_log_dir,
+                mkdirs=['ens_{}'.format(i+1)])['ens_{}'.format(i+1)]
             # Run VIC
             pool.apply_async(run_vic_for_multiprocess,
-                             (vic_exe, global_file, out_log_dir, mpi_proc, mpi_exe))
+                             (vic_exe, global_file, out_log_dir_ens,
+                              mpi_proc, mpi_exe))
         
         # --- Finish multiprocessing --- #
         pool.close()
