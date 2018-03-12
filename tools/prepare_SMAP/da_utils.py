@@ -413,8 +413,7 @@ def remap_con(reuse_weight, da_source, final_weight_nc, da_target_domain,
     reuse_weight: <bool>
         Whether to use an existing weight file directly, or to calculate weights
     da_source: <xr.DataArray>
-        Source data. The data can be more than 3-D, but the last two dimensions
-        must be "lat" and "lon".
+        Source data. The dimension names must be "lat" and "lon".
     final_weight_nc: <str>
         If reuse_weight = False, path for outputing the final weight file;
         if reuse_weight = True, path for the weight file to use for regridding
@@ -469,11 +468,26 @@ def remap_con(reuse_weight, da_source, final_weight_nc, da_target_domain,
             len(target_lons) * len(target_lats),
             da_source_domain,
             process_method=None)  # weight_array: [n_target, n_source]
+    else:
+        print('Reusing weights: {}'.format(final_weight_nc))
     # --- Use the final weight file to regrid input data --- #
-    regridder = xe.Regridder(grid_in, grid_out, 'conservative',
-                             filename=final_weight_nc, reuse_weights=True)
-    weight_array = regridder.A.toarray()  # extract weight_array
-    da_remapped = regridder(da_source)
+    # Load final weights
+    n_source = len(src_lons) * len(src_lats)
+    n_target = len(target_lons) * len(target_lats)
+    A = xe.frontend.read_weights(final_weight_nc, n_source, n_target)
+    weight_array = A.toarray()  # [n_target, n_source]
+    # Apply weights to remap
+    array_remapped = xe.frontend.apply_weights(
+        A, da_source.values, len(target_lats), len(target_lons))
+    # Track metadata
+    varname = da_source.name
+    extra_dims = da_source.dims[0:-2]
+    da_remapped = xr.DataArray(
+        array_remapped,
+        dims=extra_dims + ('lat', 'lon'),
+        name=varname)
+    da_remapped.coords['lon'] = target_lons
+    da_remapped.coords['lat'] = target_lats
     # If weight for a target cell is negative, it means that the target cell
     # does not overlap with any valid source cell. Thus set the remapped value to NAN
     nan_weights = (weight_array.sum(axis=1).reshape([len(target_lats), len(target_lons)]) < 0)
