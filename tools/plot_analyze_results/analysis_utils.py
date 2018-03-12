@@ -317,6 +317,39 @@ def to_netcdf_state_file_compress(ds_state, out_nc):
                        encoding=dict_encode)
 
 
+def to_netcdf_history_file_compress(ds_hist, out_nc):
+    ''' This function saves a VIC-history-file-format ds to netCDF, with
+        compression.
+
+    Parameters
+    ----------
+    ds_hist: <xr.Dataset>
+        History dataset to save
+    out_nc: <str>
+        Path of output netCDF file
+    '''
+
+    dict_encode = {}
+    for var in ds_hist.data_vars:
+        # skip variables not starting with "OUT_"
+        if var.split('_')[0] != 'OUT':
+            continue
+        # determine chunksizes
+        chunksizes = []
+        for i, dim in enumerate(ds_hist[var].dims):
+            if dim == 'time':  # for time dimension, chunksize = 1
+                chunksizes.append(1)
+            else:
+                chunksizes.append(len(ds_hist[dim]))
+        # create encoding dict
+        dict_encode[var] = {'zlib': True,
+                            'complevel': 1,
+                            'chunksizes': chunksizes}
+    ds_hist.to_netcdf(out_nc,
+                      format='NETCDF4',
+                      encoding=dict_encode)
+
+
 def calculate_rmse(out_nc, ds_truth, ds_model,
                    var, depth_sm=None):
     ''' A wrap funciton that calculates RMSE for all domain and save to file; if
@@ -503,4 +536,75 @@ def add_gridlines(axis, xlocs=[-80, -90, -100, -110, -120],
     gl.xformatter = LONGITUDE_FORMATTER
     gl.yformatter = LATITUDE_FORMATTER
     return gl
+
+
+def edges_from_centers(centers):
+    ''' Return an array of grid edge values from grid center values
+    Parameters
+    ----------
+    centers: <np.array>
+        A 1-D array of grid centers. Typically grid-center lats or lons. Dim: [n]
+
+    Returns
+    ----------
+    edges: <np.array>
+        A 1-D array of grid edge values. Dim: [n+1]
+    '''
+
+    edges = np.zeros(len(centers)+1)
+    edges[1:-1] = (centers[:-1] + centers[1:]) / 2
+    edges[0] = centers[0] - (edges[1] - centers[0])
+    edges[-1] = centers[-1] + (centers[-1] - edges[-2])
+
+    return edges
+
+
+def map_ind_2D_to_1D(ind_2D_lat, ind_2D_lon, len_x):
+    ''' Maps an index of a 2D array to an index in a flattened 1D array.
+        The 2D domain [lat, lon] is flattened into 1D as 2D.reshape([lat*lon]).
+
+    Parameters
+    ----------
+    ind_2D_lat: <int>
+        y or lat index in the 2D array. Index starts from 0.
+    ind_2D_lon: <int>
+        y or lon index in the 2D array. Index starts from 0.
+    len_x: <int>
+        Length of x (lon) in the 2D domain. Index starts from 0.
+
+    Returns
+    ----------
+    ind_1D: <int>
+        Index in the flattened array. Index starts from 0.
+    '''
+
+    if ind_2D_lon < len_x:
+        ind_1D = ind_2D_lat * len_x + ind_2D_lon
+    else:
+        raise ValueError('x or lon index in a 2D domain exceeds the dimension!')
+
+    return(ind_1D)
+
+
+def map_ind_1D_to_2D(ind_1D, len_x):
+    ''' Maps an index of a flattened array to an index in a 2D domain.
+        The 2D domain [lat, lon] is flattened into 1D as 2D.reshape([lat*lon]).
+
+    Parameters
+    ----------
+    ind_1D: <int>
+        Index in a flattened array. Index starts from 0.
+    len_x: <int>
+        Length of x (lon) in the 2D domain. Index starts from 0.
+
+    Returns
+    ----------
+    ind_2D: (<int>, <int>)
+        Index in the 2D array. Index starts from 0. (lat, lon) order.
+    '''
+
+    ind_2D_lat = ind_1D // len_x
+    ind_2D_lon = ind_1D % len_x
+
+    return(ind_2D_lat, ind_2D_lon)
 
