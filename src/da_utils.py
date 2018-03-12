@@ -2361,7 +2361,7 @@ def update_states(da_y_est, da_K, da_meas, R, state_nc_before_update,
     # Save VIC states to netCDF file (with compression)
     to_netcdf_state_file_compress(ds_updated, out_vic_state_nc)
 
-    return da_x_updated, da_update_increm, da_v
+    return da_x_updated, da_update_increm
 
 
 def update_states_ensemble(y_est, K, da_meas, R, state_dir_before_update,
