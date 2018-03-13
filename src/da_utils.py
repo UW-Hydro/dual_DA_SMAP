@@ -1190,8 +1190,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
 
         # (2) Perturb states
         time1 = timeit.default_timer()
-        # If restart, do the following setup for the restart time:
-        # - identify the updated state dir for the restart time
+        # --- If restart, do the following setup for the restart time: --- #
         if restart is not None and current_time == restart_time:
             # Identify the updated state dir for the restart time
             out_updated_state_dir = os.path.join(
@@ -1199,6 +1198,11 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                 'updated.{}_{:05d}'.format(
                     current_time.strftime('%Y%m%d'),
                     current_time.hour*3600+current_time.second))
+            # If bias correction, identify the updated reference state
+            if bias_correct:
+                updated_states_avg_nc = os.path.join(out_updated_state_dir, 'state.ensref.nc')
+            # If debug and bias correction, identify output dir
+            debug_bc_dir = os.path.join(output_temp_dir, 'bias_correct')
         # - Load dict_ens_list_history_files
         filename = os.path.join(
             output_restart_log_dir,
