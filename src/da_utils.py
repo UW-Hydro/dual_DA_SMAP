@@ -307,6 +307,7 @@ class States(object):
                     lambda j: np.dot(K[j, :, :],
                                      y_meas[j, :, :] + v[j, :, :] - y_est[j, :, :]),
                     range(nloop))))  # [nloop, n, 1]
+        delta[np.isnan(delta)] = 0
         # Reshape delta
         delta = delta.reshape([len(lat_coord), len(lon_coord), n])  # [lat, lon, n]
         # Update states - add delta to orig. states
@@ -2446,7 +2447,7 @@ def update_states(da_y_est, da_K, da_meas, R, da_sm_to_update,
     '''
 
     # Convert EnKF states back to VIC states
-    class_states = States(xr.dataset({'STATE_SOIL_MOISTURE': da_sm_to_update}))
+    class_states = States(xr.Dataset({'STATE_SOIL_MOISTURE': da_sm_to_update}))
     # Update states
     da_x_updated, da_v = class_states.update_soil_moisture_states(
                                         da_K, da_meas,
