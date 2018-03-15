@@ -992,8 +992,23 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                 debug_bc_dir = setup_output_dirs(
                             output_temp_dir,
                             mkdirs=['bias_correct'])['bias_correct']
-                # da_delta to file
-                ds_delta = xr.Dataset({'delta_soil_moisture': da_delta})
+                # Aggregate to cellAvg
+                veg_class = da_tile_frac['veg_class']
+                snow_band = da_tile_frac['snow_band']
+                nlayer = range(0, 3)  ############# THIS IS NOT GENERAL ###############
+                array_data_tiles = da_delta.values.reshape(
+                    [len(veg_class), len(snow_band),
+                     len(nlayer), len(da_tile_frac['lat']),
+                     len(da_tile_frac['lon'])])
+                da_data_tiles = xr.DataArray(
+                    array_data_tiles,
+                    dims=['veg_class', 'snow_band', 'nlayer', 'lat', 'lon'],
+                    coords=[veg_class, snow_band,
+                        nlayer, da_tile_frac['lat'],
+                        da_tile_frac['lon']])
+                da_data_cellAvg = (da_data_tiles * da_tile_frac).sum(dim='veg_class').sum(dim='snow_band')
+                # Save da_delta to file
+                ds_delta = xr.Dataset({'delta_soil_moisture': da_data_cellAvg})
                 ds_delta.to_netcdf(os.path.join(
                         debug_bc_dir,
                         'delta.{}_{:05d}.nc'.format(
@@ -1143,8 +1158,23 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                     adjust_negative=adjust_negative,
                     nproc=nproc)
             if debug:
-                # Save update increment to netCDF file
-                ds_update_increm = xr.Dataset({'update_increment': da_update_increm})
+                # --- Save update increment to netCDF file --- #
+                # Aggregated to cellAvg
+                veg_class = da_tile_frac['veg_class']
+                snow_band = da_tile_frac['snow_band']
+                nlayer = list_da_updated[0]['nlayer']
+                array_data_tiles = da_update_increm.values.reshape(
+                    [len(da_update_increm['N']), len(da_update_increm['lat']),
+                     len(da_update_increm['lon']), len(nlayer),
+                     len(veg_class), len(snow_band)])
+                da_data_tiles = xr.DataArray(
+                    array_data_tiles,
+                    dims=['N', 'lat', 'lon', 'nlayer', 'veg_class', 'snow_band'],
+                    coords=[da_update_increm['N'], da_update_increm['lat'],
+                            da_update_increm['lon'], nlayer, veg_class, snow_band])
+                da_data_cellAvg = (da_data_tiles * da_tile_frac).sum(dim='veg_class').sum(dim='snow_band')
+                # Save
+                ds_update_increm = xr.Dataset({'update_increment': da_data_cellAvg})
                 ds_update_increm.to_netcdf(os.path.join(
                         debug_update_dir,
                         'update_increm.{}_{:05d}.nc'.format(
@@ -1229,10 +1259,26 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                     adjust_negative=adjust_negative,
                     nproc=nproc)
         if debug:
+            # Aggregate to cellAvg
             da_perturbation = xr.concat(list_da_perturbation, dim='N')
             da_perturbation['N'] = range(1, N+1)
+            veg_class = da_tile_frac['veg_class']
+            snow_band = da_tile_frac['snow_band']
+            nlayer = range(0, 3)  ############# THIS IS NOT GENERAL ###############
+            array_data_tiles = da_perturbation.values.reshape(
+                    [N, len(veg_class), len(snow_band),
+                     len(nlayer), len(da_perturbation['lat']),
+                     len(da_perturbation['lon'])])
+            da_data_tiles = xr.DataArray(
+                array_data_tiles,
+                dims=['N', 'veg_class', 'snow_band', 'nlayer', 'lat', 'lon'],
+                coords=[range(N), veg_class, snow_band,
+                        nlayer, da_update_increm['lat'],
+                        da_update_increm['lon']])
+            da_data_cellAvg = (da_data_tiles * da_tile_frac).sum(dim='veg_class').sum(dim='snow_band')
+            # Save to file
             ds_perturbation = xr.Dataset({'soil_moisture_perturbation':
-                                          da_perturbation})
+                                          da_data_cellAvg})
             ds_perturbation.to_netcdf(os.path.join(
                         debug_perturbation_dir,
                         'perturbation.{}_{:05d}.nc').format(
@@ -1324,8 +1370,23 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
             list_da_sm_prop, da_delta = bias_correct_propagated_states(
                 N, state_time, out_state_dir)
             if debug:
+                # Aggregate to cellAvg
+                veg_class = da_tile_frac['veg_class']
+                snow_band = da_tile_frac['snow_band']
+                nlayer = range(0, 3)  ############# THIS IS NOT GENERAL ###############
+                array_data_tiles = da_delta.values.reshape(
+                    [len(veg_class), len(snow_band),
+                     len(nlayer), len(da_tile_frac['lat']),
+                     len(da_tile_frac['lon'])])
+                da_data_tiles = xr.DataArray(
+                    array_data_tiles,
+                    dims=['veg_class', 'snow_band', 'nlayer', 'lat', 'lon'],
+                    coords=[veg_class, snow_band,
+                        nlayer, da_data_tiles['lat'],
+                        da_data_tiles['lon']])
+                da_data_cellAvg = (da_data_tiles * da_tile_frac).sum(dim='veg_class').sum(dim='snow_band')
                 # Save da_delta to file
-                ds_delta = xr.Dataset({'delta_soil_moisture': da_delta})
+                ds_delta = xr.Dataset({'delta_soil_moisture': da_data_cellAvg})
                 ds_delta.to_netcdf(os.path.join(
                         debug_bc_dir,
                         'delta.{}_{:05d}.nc'.format(
@@ -1357,35 +1418,46 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
             # --- If nproc == 1, do a regular ensemble loop --- #
             if nproc == 1:
                 # Concat for each ensemble member and delete individual files
-                for i in range(N):
+                n_ens = N
+                ens_list = list(range(1, N+1))
+                if bias_correct:
+                    n_ens = N + 1
+                    ens_list.append(ref)
+                for i in range(n_ens):
                     # Concat and clean up
                     list_history_files=dict_ens_list_history_files\
-                                       ['ens{}'.format(i+1)]
+                                       ['ens{}'.format(ens_list[i])]
                     output_file=os.path.join(
                                     out_hist_concat_dir,
                                     'history.ens{}.concat.{}.nc'.format(
-                                        i+1, year))
+                                        ens_list[i], year))
                     concat_clean_up_history_file(list_history_files,
                                                  output_file)
                     # Reset history file list
-                    dict_ens_list_history_files['ens{}'.format(i+1)] = []
+                    dict_ens_list_history_files['ens{}'.format(ens_list[i])] = []
             # --- If nproc > 1, use multiprocessing --- #
             elif nproc > 1:
                 # Set up multiprocessing
                 pool = mp.Pool(processes=nproc)
+                # Concat for each ensemble member and delete individual files
+                n_ens = N
+                ens_list = list(range(1, N+1))
+                if bias_correct:
+                    n_ens = N + 1
+                    ens_list.append('ref')
                 # Loop over each ensemble member
-                for i in range(N):
+                for i in range(n_ens):
                     # Concat and clean up
                     list_history_files=dict_ens_list_history_files\
-                                       ['ens{}'.format(i+1)]
+                                       ['ens{}'.format(ens_list[i])]
                     output_file=os.path.join(
                                     out_hist_concat_dir,
                                     'history.ens{}.concat.{}.nc'.format(
-                                        i+1, year))
+                                        ens_list[i], year))
                     pool.apply_async(concat_clean_up_history_file,
                                      (list_history_files, output_file))
                     # Reset history file list
-                    dict_ens_list_history_files['ens{}'.format(i+1)] = []
+                    dict_ens_list_history_files['ens{}'.format(ens_list[i])] = []
                 # --- Finish multiprocessing --- #
                 pool.close()
                 pool.join()
@@ -1470,6 +1542,42 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
             os.remove(f)
         time2 = timeit.default_timer()
         print('Time of concatenating perturbation: {}'.format(time2-time1))
+
+        # --- Bias correction --- #
+        if bias_correct:
+            time1 = timeit.default_timer()
+            print('\tConcatenating debugging results - perturbation...')
+            list_da = []
+            list_file_to_delete = []
+            times = da_meas[da_meas_time_var].values
+            for time in times:
+                t = pd.to_datetime(time)
+                # Load data
+                fname = '{}/delta.{}_{:05d}.nc'.format(
+                            debug_bc_dir, t.strftime('%Y%m%d'),
+                            t.hour*3600+t.second)
+                da = xr.open_dataset(fname)['delta_soil_moisture']
+                # Put data in array
+                list_da.append(da)
+                # Add individual file to list to delete
+                list_file_to_delete.append(fname)
+            # Concat all times
+            da_concat = xr.concat(list_da, dim='time')
+            da_concat['time'] = da_meas[da_meas_time_var].values
+            # Write to file
+            ds_concat = xr.Dataset({'delta_soil_moisture': da_concat})
+            ds_concat.to_netcdf(
+                os.path.join(
+                    debug_bc_dir,
+                    'delta.concat.{}_{}.nc'.format(
+                            pd.to_datetime(times[0]).year,
+                            pd.to_datetime(times[-1]).year)),
+                format='NETCDF4_CLASSIC')
+            # Delete individule files
+            for f in list_file_to_delete:
+                os.remove(f)
+            time2 = timeit.default_timer()
+            print('Time of concatenating bias correction: {}'.format(time2-time1))
 
         # --- Update increment --- #
         time1 = timeit.default_timer()
