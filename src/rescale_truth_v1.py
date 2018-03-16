@@ -327,3 +327,43 @@ ds_simulated.to_netcdf(
             end_time.strftime('%Y%m%d'))),
     format='NETCDF4_CLASSIC')
 
+
+# =========================================================== #
+# Concatenate new truth states (cellAvg)
+# =========================================================== #
+# --- Concatenate truth states (SM and SWE only, cellAvg) --- #
+print('Concatenating new truth states (cellAvg)...')
+list_da_sm_cellAvg = []
+list_da_swe_cellAvg = []
+times = []
+for state_time, state_nc in dict_rescaled_state_nc.items():
+    print(state_time)
+    # Load state file, extract soil moisture & SWE only
+    ds = xr.open_dataset(state_nc)
+    da_sm = ds['STATE_SOIL_MOISTURE']
+    da_swe = ds['STATE_SNOW_WATER_EQUIVALENT']
+    # Aggregate to cellAvg
+    da_sm_cellAvg = (da_sm * da_tile_frac)\
+        .sum(dim='veg_class').sum(dim='snow_band')  # [nlayer, lat, lon]
+    da_swe_cellAvg = (da_swe * da_tile_frac)\
+        .sum(dim='veg_class').sum(dim='snow_band')  # [lat, lon]
+    # Append to lists
+    times.append(state_time)
+    list_da_sm_cellAvg.append(da_sm_cellAvg)
+    list_da_swe_cellAvg.append(da_swe_cellAvg)
+# --- Concatenate SM and SWE states --- #
+da_sm_cellAvg_alltimes = xr.concat(list_da_sm_cellAvg, dim='time')
+da_sm_cellAvg_alltimes['time'] = times
+da_swe_cellAvg_alltimes = xr.concat(list_da_swe_cellAvg, dim='time')
+da_swe_cellAvg_alltimes['time'] = times
+# --- Save to file --- #
+ds_cellAvg_alltimes = xr.Dataset({
+    'SOIL_MOISTURE': da_sm_cellAvg_alltimes,
+    'SWE': da_swe_cellAvg_alltimes})
+ds_cellAvg_alltimes.to_netcdf(os.path.join(
+    truth_rescaled_subdirs['states'],
+    'truth_state_cellAvg.{}_{}.nc'.format(
+        pd.to_datetime(da_meas['time'].values[0]).strftime('%Y%m%d'),
+        pd.to_datetime(da_meas['time'].values[-1]).strftime('%Y%m%d'))))
+
+
