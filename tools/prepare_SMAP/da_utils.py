@@ -482,12 +482,12 @@ def remap_con(reuse_weight, da_source, final_weight_nc, da_target_domain,
     # Track metadata
     varname = da_source.name
     extra_dims = da_source.dims[0:-2]
+    extra_coords = [da_source.coords[dim].values for dim in extra_dims]
     da_remapped = xr.DataArray(
         array_remapped,
         dims=extra_dims + ('lat', 'lon'),
+        coords=extra_coords + [target_lats, target_lons],
         name=varname)
-    da_remapped.coords['lon'] = target_lons
-    da_remapped.coords['lat'] = target_lats
     # If weight for a target cell is negative, it means that the target cell
     # does not overlap with any valid source cell. Thus set the remapped value to NAN
     nan_weights = (weight_array.sum(axis=1).reshape([len(target_lats), len(target_lons)]) < 0)
