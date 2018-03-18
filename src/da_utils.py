@@ -1546,9 +1546,9 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         print('Time of concatenating perturbation: {}'.format(time2-time1))
 
         # --- Bias correction --- #
-        if bias_correct:
+        if bias_correct and debug:
             time1 = timeit.default_timer()
-            print('\tConcatenating debugging results - perturbation...')
+            print('\tConcatenating debugging results - delta...')
             list_da = []
             list_file_to_delete = []
             times = da_meas[da_meas_time_var].values
