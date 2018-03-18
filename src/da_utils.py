@@ -966,7 +966,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                     dict_linear_model_param=dict_linear_model_param,
                     nproc=nproc)
         # Clean up log dir
-#        shutil.rmtree(out_log_dir)
+        shutil.rmtree(out_log_dir)
         # Put output history file paths into dictionary
         for i in range(N):
             dict_ens_list_history_files['ens{}'.format(i+1)].append(os.path.join(
@@ -1232,6 +1232,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
             # If bias correction, identify the updated reference state
             if bias_correct:
                 updated_states_avg_nc = os.path.join(out_updated_state_dir, 'state.ensref.nc')
+            else:
+                updated_states_avg_nc = None
             # If debug and bias correction, identify output dir
             debug_bc_dir = os.path.join(output_temp_dir, 'bias_correct')
         # - Load dict_ens_list_history_files
@@ -1273,8 +1275,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                 array_data_tiles,
                 dims=['N', 'veg_class', 'snow_band', 'nlayer', 'lat', 'lon'],
                 coords=[range(N), veg_class, snow_band,
-                        nlayer, da_update_increm['lat'],
-                        da_update_increm['lon']])
+                        nlayer, da_perturbation['lat'],
+                        da_perturbation['lon']])
             da_data_cellAvg = (da_data_tiles * da_tile_frac).sum(dim='veg_class').sum(dim='snow_band')
             # Save to file
             ds_perturbation = xr.Dataset({'soil_moisture_perturbation':
