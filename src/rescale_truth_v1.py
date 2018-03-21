@@ -149,7 +149,7 @@ print('\tExtracting openloop soil moistures...')
 da_openloop_sm = ds_openloop_hist['OUT_SOIL_MOIST']
 # Adjust history time to be timestep-end
 times = pd.to_datetime(da_openloop_sm['time'].values)
-times = times - pd.DateOffset(hours=24/cfg['VIC']['model_steps_per_day'])
+times = times + pd.DateOffset(hours=24/cfg['VIC']['model_steps_per_day'])
 da_openloop_sm['time'] = times
 # Select out measurement time points
 da_openloop_sm = da_openloop_sm.sel(time=da_meas['time'])  # [time, nlayer, lat, lon]
