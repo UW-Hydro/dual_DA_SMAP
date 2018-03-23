@@ -175,14 +175,24 @@ da_vic_sm = ds_vic_hist['OUT_SOIL_MOIST'].sel(nlayer=0).copy(deep=True)
 da_vic_sm['time'] = vic_sm_times
 
 # --- Remap VIC surface SM data to SMAP grid cell resolution --- #
-da_vic_remapped, weight_array = remap_con(
-    reuse_weight=False,
-    da_source=da_vic_sm,
-    final_weight_nc=os.path.join(output_subdir_tmp, 'vic_to_smap_weights.nc'),
-    da_source_domain=da_vic_domain,
-    da_target_domain=da_smap_domain,
-    tmp_weight_nc=os.path.join(output_subdir_tmp, 'vic_to_smap_weights.tmp.nc'),
-    process_method=None)
+if cfg['RESCALE']['reuse_weight']:
+    da_vic_remapped, weight_array = remap_con(
+        reuse_weight=True,
+        da_source=da_vic_sm,
+        final_weight_nc=cfg['RESCALE']['weight_nc'],
+        da_source_domain=da_vic_domain,
+        da_target_domain=da_smap_domain,
+        tmp_weight_nc=os.path.join(output_subdir_tmp, 'vic_to_smap_weights.tmp.nc'),
+        process_method=None)
+else:
+    da_vic_remapped, weight_array = remap_con(
+        reuse_weight=False,
+        da_source=da_vic_sm,
+        final_weight_nc=os.path.join(output_subdir_tmp, 'vic_to_smap_weights.nc'),
+        da_source_domain=da_vic_domain,
+        da_target_domain=da_smap_domain,
+        tmp_weight_nc=os.path.join(output_subdir_tmp, 'vic_to_smap_weights.tmp.nc'),
+        process_method=None)
 
 # --- Rescale SMAP data (for AM and PM seperately) --- #
 da_smap_rescaled = rescale_SMAP_domain(da_smap, da_vic_remapped,
