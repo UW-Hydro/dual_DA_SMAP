@@ -131,15 +131,9 @@ R = np.array([[cfg['EnKF']['R']]])
 
 # --- Calculate state perturbation covariance matrix --- #
 # Calculate perturvation magnitude [nlayer, lat, lon]
-if not linear_model:
-    history_path = os.path.join(cfg['CONTROL']['root_dir'],
-                                    cfg['EnKF']['vic_history_path'])
-else:
-    history_path = os.path.join(cfg['CONTROL']['root_dir'],
-                                    cfg['LINEAR_MODEL']['history_path'])
-da_scale = calculate_sm_noise_to_add_magnitude(
-                vic_history_path=history_path,
-                sigma_percent=cfg['EnKF']['state_perturb_sigma_percent'])
+da_scale = xr.open_dataset(os.path.join(
+    cfg['CONTROL']['root_dir'], cfg['EnKF']['state_perturb_nc']))\
+    [cfg['EnKF']['scale_varname']]
 # Extract veg_class and snow_band information from a state file
 if not linear_model:
     init_state_nc = os.path.join(cfg['CONTROL']['root_dir'],
