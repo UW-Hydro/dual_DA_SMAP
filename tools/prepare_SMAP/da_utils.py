@@ -631,6 +631,7 @@ def rescale_ts(ts_input, ts_reference, method):
                  "moment_2nd_season" - matching mean and standard deviation; mean is
                      sampled using  31-day window of year; standard deviation is kept
                      constant temporally (following SMART paper 2011)
+                 "cdf" - cdf matching. Will return None for ts_std_input and ts_std_reference
 
     Returns
     ----------
@@ -679,6 +680,20 @@ def rescale_ts(ts_input, ts_reference, method):
         ts_std_input = pd.Series(list_std_input, index=ts_input.index)
         # Rescale input ts
         ts_rescaled = ts_mean_reference + (ts_input - ts_mean_input) / ts_std_input * ts_std_reference
+
+    elif method == "cdf":
+        dict_window_data_input = extract_seasonal_window_data(ts_input)
+        dict_window_data_reference = extract_seasonal_window_data(ts_reference)
+        array_rescaled = np.array(
+            [scipy.stats.mstats.mquantiles(
+                dict_window_data_reference[(t.month, t.day)],
+                calculate_ecdf_percentile(ts_input[t], dict_window_data_input[(t.month, t.day)]),
+                alphap=0, betap=0)
+             if ~np.isnan(ts_input[t]) else np.nan
+             for t in ts_input.index ])
+        ts_rescaled = pd.Series(array_rescaled, ts_input.index)
+        ts_std_input = None
+        ts_std_reference = None
 
     return ts_rescaled, ts_std_input, ts_std_reference
 
