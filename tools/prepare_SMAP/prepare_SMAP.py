@@ -48,6 +48,7 @@ output_subdir_tmp = setup_output_dirs(output_dir, mkdirs=['tmp'])['tmp']
 # ============================================================ #
 # Determine SMAP domain needed based on VIC domain
 # ============================================================ #
+print('Determing SMAP domain...')
 # --- Load VIC domain --- #
 ds_vic_domain = xr.open_dataset(cfg['DOMAIN']['vic_domain_nc'])
 da_vic_domain = ds_vic_domain[cfg['DOMAIN']['mask_name']]
@@ -102,59 +103,71 @@ fig.savefig(os.path.join(output_subdir_plots, 'smap_domain_check.png'),
 
 
 # ============================================================ #
-# Load SMAP data
+# Load and process SMAP data
 # ============================================================ #
+print('Loading and processing SMAP data...')
 # --- Load data --- #
 print('Extracting SMAP data')
-da_smap = extract_smap_multiple_days(
-    os.path.join(cfg['INPUT']['smap_dir'], 'SMAP_L3_SM_P_{}_*.h5'),
-    start_date.strftime('%Y%m%d'), end_date.strftime('%Y%m%d'),
-    da_smap_domain=da_smap_domain)
+# If SMAP data is already processed before, directly load
+if cfg['INPUT']['smap_exist'] is True:
+    # --- Load processed SMAP data --- #
+    da_smap = xr.open_dataset(cfg['INPUT']['smap_unscaled_nc'])['soil_moisture']
+    # --- Extract AM and PM time points --- #
+    shift_hours = int(cfg['TIME']['smap_shift_hours'])
+    # AM
+    am_hour = (6 + shift_hours) if (6 + shift_hours) < 24 else (6 + shift_hours - 24)
+    smap_times_am_ind = np.asarray([pd.to_datetime(t).hour==am_hour
+                                    for t in da_smap['time'].values])
+    smap_times_am = da_smap['time'].values[smap_times_am_ind]
+    # PM
+    pm_hour = (18 + shift_hours) if (18 + shift_hours) < 24 else (18 + shift_hours - 24)
+    smap_times_pm_ind = np.asarray([pd.to_datetime(t).hour==pm_hour
+                                    for t in da_smap['time'].values])
+    smap_times_pm = da_smap['time'].values[smap_times_pm_ind]
 
-
-# ============================================================ #
-# Convert SMAP time to VIC-forcing-data time zone
-# ============================================================ #
-# --- Shift SMAP data to the VIC-forcing-data time zone --- #
-# Shift SMAP time
-shift_hours = int(cfg['TIME']['smap_shift_hours'])
-smap_times_shifted = \
-    [pd.to_datetime(t) + pd.DateOffset(seconds=3600*shift_hours)
-     for t in da_smap['time'].values]
-da_smap['time'] = smap_times_shifted
-
-# --- Exclude SMAP data points after shifting that are outside of the processing time period --- #
-da_smap = da_smap.sel(
-    time=slice(start_date.strftime('%Y%m%d')+'-00',
-               end_date.strftime('%Y%m%d')+'-23'))
-
-# --- Get a list of SMAP AM & PM time points after shifting --- #
-# AM
-am_hour = (6 + shift_hours) if (6 + shift_hours) < 24 else (6 + shift_hours - 24)
-smap_times_am_ind = np.asarray([pd.to_datetime(t).hour==am_hour
-                                for t in da_smap['time'].values])
-smap_times_am = da_smap['time'].values[smap_times_am_ind]
-# PM
-pm_hour = (18 + shift_hours) if (18 + shift_hours) < 24 else (18 + shift_hours - 24)
-smap_times_pm_ind = np.asarray([pd.to_datetime(t).hour==pm_hour
-                                for t in da_smap['time'].values])
-smap_times_pm = da_smap['time'].values[smap_times_pm_ind]
-
-
-# ============================================================ #
-# Save processed SMAP data to file
-# ============================================================ #
-ds_smap = xr.Dataset({'soil_moisture': da_smap})
-ds_smap.to_netcdf(
-    os.path.join(output_subdir_data_unscaled,
-                 'soil_moisture_unscaled.{}_{}.nc'.format(
-                     start_date.strftime('%Y%m%d'),
-                     end_date.strftime('%Y%m%d'))))
+# If SMAP data not processed, before, load and process
+else:
+    # --- Load SMAP data --- #
+    da_smap = extract_smap_multiple_days(
+        os.path.join(cfg['INPUT']['smap_dir'], 'SMAP_L3_SM_P_{}_*.h5'),
+        start_date.strftime('%Y%m%d'), end_date.strftime('%Y%m%d'),
+        da_smap_domain=da_smap_domain)
+    # --- Convert SMAP time to VIC-forcing-data time zone --- #
+    # --- Shift SMAP data to the VIC-forcing-data time zone --- #
+    # Shift SMAP time
+    shift_hours = int(cfg['TIME']['smap_shift_hours'])
+    smap_times_shifted = \
+        [pd.to_datetime(t) + pd.DateOffset(seconds=3600*shift_hours)
+         for t in da_smap['time'].values]
+    da_smap['time'] = smap_times_shifted
+    # --- Exclude SMAP data points after shifting that are outside of the processing time period --- #
+    da_smap = da_smap.sel(
+        time=slice(start_date.strftime('%Y%m%d')+'-00',
+                   end_date.strftime('%Y%m%d')+'-23'))
+    # --- Get a list of SMAP AM & PM time points after shifting --- #
+    # AM
+    am_hour = (6 + shift_hours) if (6 + shift_hours) < 24 else (6 + shift_hours - 24)
+    smap_times_am_ind = np.asarray([pd.to_datetime(t).hour==am_hour
+                                    for t in da_smap['time'].values])
+    smap_times_am = da_smap['time'].values[smap_times_am_ind]
+    # PM
+    pm_hour = (18 + shift_hours) if (18 + shift_hours) < 24 else (18 + shift_hours - 24)
+    smap_times_pm_ind = np.asarray([pd.to_datetime(t).hour==pm_hour
+                                    for t in da_smap['time'].values])
+    smap_times_pm = da_smap['time'].values[smap_times_pm_ind]
+    # --- Save processed SMAP data to file --- #
+    ds_smap = xr.Dataset({'soil_moisture': da_smap})
+    ds_smap.to_netcdf(
+        os.path.join(output_subdir_data_unscaled,
+                     'soil_moisture_unscaled.{}_{}.nc'.format(
+                        start_date.strftime('%Y%m%d'),
+                        end_date.strftime('%Y%m%d'))))
 
 
 # ============================================================ #
 # Rescale SMAP to the VIC regime
 # ============================================================ #
+print('Rescaling SMAP...')
 # --- Load reference VIC history file --- #
 ds_vic_hist = xr.open_dataset(cfg['RESCALE']['vic_history_nc'])
 
@@ -195,8 +208,18 @@ else:
         process_method=None)
 
 # --- Rescale SMAP data (for AM and PM seperately) --- #
-da_smap_rescaled = rescale_SMAP_domain(da_smap, da_vic_remapped,
+# Load unscaled measurement error domain and convert to [time, lat, lon]
+da_meas_error_unscaled_domain = xr.open_dataset(
+    cfg['INPUT']['meas_error_unscaled_nc'])[cfg['INPUT']['meas_error_unscaled_varname']]
+da_meas_error_unscaled = xr.DataArray(
+    np.zeros([len(da_smap['time']), len(da_meas_error_unscaled_domain['lat']), len(da_meas_error_unscaled_domain['lon'])]),
+    coords=[da_smap['time'], da_meas_error_unscaled_domain['lat'], da_meas_error_unscaled_domain['lon']],
+    dims=['time', 'lat', 'lon'])
+da_meas_error_unscaled[:] = da_meas_error_unscaled_domain
+# Rescale
+da_smap_rescaled, da_meas_error_rescaled = rescale_SMAP_domain(da_smap, da_vic_remapped,
                     smap_times_am, smap_times_pm,
+                    da_meas_error_unscaled=da_meas_error_unscaled,
                     method=cfg['RESCALE']['rescale_method'])
 
 # --- Save rescaled SMAP data to file --- #
@@ -209,6 +232,16 @@ ds_smap_rescaled.to_netcdf(
                      end_date.strftime('%Y%m%d'))),
     format='NETCDF4_CLASSIC')
 
+# --- Save rescaled measurement error to file --- #
+da_meas_error_rescaled.attrs['unit'] = 'mm'
+ds_meas_error_rescaled = xr.Dataset({'soil_moisture_error': da_meas_error_rescaled})
+ds_meas_error_rescaled.to_netcdf(
+    os.path.join(output_subdir_data_scaled,
+                 'soil_moisture_error_scaled.{}.{}_{}.nc'.format(
+                     cfg['RESCALE']['rescale_method'],
+                     start_date.strftime('%Y%m%d'),
+                     end_date.strftime('%Y%m%d'))),
+    format='NETCDF4_CLASSIC')
 
 # ============================================================ #
 # Perhaps plot some check plots

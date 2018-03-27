@@ -499,6 +499,7 @@ def remap_con(reuse_weight, da_source, final_weight_nc, da_target_domain,
 
 
 def rescale_SMAP_domain(da_smap, da_reference, smap_times_am, smap_times_pm,
+                        da_meas_error_unscaled=None,
                         method='moment_2nd'):
     ''' Rescale SMAP data to be in the same regime of a reference field.
         Rescale each grid cell separately.
@@ -516,6 +517,10 @@ def rescale_SMAP_domain(da_smap, da_reference, smap_times_am, smap_times_pm,
         Time points of SMAP AM
     smap_times_pm: <numpy.ndarray>
         Time points of SMAP PM
+    da_meas_error_unscaled: <xr.DataArray>
+        Unscaled domain of SMAP measurement error. Will be rescaled the same way as da_smap
+        Dimension: [time, lat, lon]
+        Default: None
     method: <str>
         Options: "moment_2nd" - matching mean and standard deviation
     
@@ -523,6 +528,8 @@ def rescale_SMAP_domain(da_smap, da_reference, smap_times_am, smap_times_pm,
     ----------
     da_smap_rescaled: <xr.DataArray>
         Rescaled SMAP data
+    da_meas_error_rescaled: <xr.DataArray>
+        Rescaled measurement error
     '''
     
     # --- Extract AM and PM data from da_reference
@@ -535,17 +542,24 @@ def rescale_SMAP_domain(da_smap, da_reference, smap_times_am, smap_times_pm,
     ncells = len(da_smap['lat']) * len(da_smap['lon'])
     # Rescale SMAP AM
     da_smap_AM = da_smap.sel(time=smap_times_am)
-    da_smap_AM_rescaled = rescale_domain(da_smap_AM, da_reference_AMtimes, method=method)
+    da_meas_error_AM = da_meas_error_unscaled.sel(time=smap_times_am)
+    da_smap_AM_rescaled, da_meas_error_AM_rescaled = rescale_domain(
+        da_smap_AM, da_reference_AMtimes,
+        da_meas_error_unscaled=da_meas_error_AM, method=method)
     # Rescale SMAP PM
     da_smap_PM = da_smap.sel(time=smap_times_pm)
-    da_smap_PM_rescaled = rescale_domain(da_smap_PM, da_reference_PMtimes, method=method)
+    da_meas_error_PM = da_meas_error_unscaled.sel(time=smap_times_pm)
+    da_smap_PM_rescaled, da_meas_error_PM_rescaled = rescale_domain(
+        da_smap_PM, da_reference_PMtimes,
+        da_meas_error_unscaled=da_meas_error_PM, method=method)
     # Put AM and PM back together
     da_smap_rescaled = xr.concat([da_smap_AM_rescaled, da_smap_PM_rescaled], dim='time').sortby('time')
-    
-    return da_smap_rescaled
+    da_meas_error_rescaled = xr.concat([da_meas_error_AM_rescaled, da_meas_error_PM_rescaled], dim='time').sortby('time')
+
+    return da_smap_rescaled, da_meas_error_rescaled
 
 
-def rescale_domain(da_input, da_reference, method):
+def rescale_domain(da_input, da_reference, da_meas_error_unscaled, method):
     ''' Rescales an input domain of time series to be in the same regime of a reference domain.
     Currently ignores all NANs in da_reference.
     
@@ -555,6 +569,9 @@ def rescale_domain(da_input, da_reference, method):
         Input data. Dimension: [time, lat, lon]
     da_reference: <xr.DataArray>
         Refererence data. Dimension: [time, lat, lon]. Can be different length from da_input.
+    da_meas_error_unscaled: <xr.DataArray>
+        Unscaled domain of SMAP measurement error. Will be rescaled the same way as da_smap
+        Default: None
     method: <str>
         Options: "moment_2nd" - matching mean and standard deviation
     
@@ -562,25 +579,41 @@ def rescale_domain(da_input, da_reference, method):
     ----------
     da_rescaled: <xr.DataArray>
         Rescaled data
+    da_meas_error_scaled: <xr.DataArray.
+        Rescaled measurement error
     '''
     
     # Rescale input data for each grid cell
     ncells = len(da_input['lat']) * len(da_input['lon'])
     da_input_flat = da_input.values.reshape([-1, ncells]) # [time, lat*lon]
     da_reference_flat = da_reference.values.reshape([-1, ncells])  # [time, lat*lon]
-    data_rescaled_flat = np.asarray(
+    list_data_rescaled_flat = np.asarray(
         [rescale_ts(pd.Series(da_input_flat[:, i], index=da_input['time'].values),
                     pd.Series(da_reference_flat[:, i], index=da_reference['time'].values),
                     method=method)
          for i in range(ncells)])  # [lat*lon, time]
+    # Extract flattened scaled data, std_input and std_reference
+    data_rescaled_flat = np.asarray([item[0] for item in list_data_rescaled_flat])
+    std_input_rescaled_flat = np.asarray([item[1] for item in list_data_rescaled_flat])
+    std_reference_rescaled_flat = np.asarray([item[2] for item in list_data_rescaled_flat])
+    # Reshape
     data_rescaled = data_rescaled_flat.reshape(
         [len(da_input['lat']), len(da_input['lon']), -1])  # [lat, lon, time]
     data_rescaled = np.rollaxis(data_rescaled, 2, 0)  # [time, lat, lon]
+    std_input_rescaled = std_input_rescaled_flat.reshape(
+        [len(da_input['lat']), len(da_input['lon']), -1])  # [lat, lon, time]
+    std_input_rescaled = np.rollaxis(std_input_rescaled, 2, 0)  # [time, lat, lon]
+    std_reference_rescaled = std_reference_rescaled_flat.reshape(
+        [len(da_input['lat']), len(da_input['lon']), -1])  # [lat, lon, time]
+    std_reference_rescaled = np.rollaxis(std_reference_rescaled, 2, 0)  # [time, lat, lon]
     # Put back into da
     da_rescaled = da_input.copy()
     da_rescaled[:] = data_rescaled
+    # Rescale measurement error
+    da_meas_error_scaled = da_meas_error_unscaled.copy()
+    da_meas_error_scaled[:] = da_meas_error_unscaled / std_input_rescaled * std_reference_rescaled
     
-    return da_rescaled
+    return da_rescaled, da_meas_error_scaled
 
 
 def rescale_ts(ts_input, ts_reference, method):
@@ -603,6 +636,10 @@ def rescale_ts(ts_input, ts_reference, method):
     ----------
     ts_rescaled: <pd.Series>
         Rescaled time series
+    ts_std_input: <pd.Series>
+        Input time series standard deviation
+    ts_std_reference
+        Reference time series standard deviation
     '''
 
     if method == "moment_2nd":
@@ -611,13 +648,19 @@ def rescale_ts(ts_input, ts_reference, method):
         mean_input = np.nanmean(ts_input)
         std_input = np.nanstd(ts_input, ddof=0)
         ts_rescaled = mean_reference + (ts_input - mean_input) / std_input * std_reference
+        # Construct time series of ts_std_input and ts_std_reference to return
+        ts_std_input = pd.Series(np.ones(len(ts_input))*std_input, index=ts_input.index)
+        ts_std_reference = pd.Series(np.ones(len(ts_reference))*std_reference, index=ts_reference.index)
+        
     elif method == "moment_2nd_season":
         std_reference = np.nanstd(ts_reference, ddof=0)
         std_input = np.nanstd(ts_input, ddof=0)
         # Calculate window-mean for both reference and input series
         # Dict key: (month, day); value: mean value from the ts
-        dict_window_mean_reference = calculate_seasonal_window_mean(ts_reference)
-        dict_window_mean_input = calculate_seasonal_window_mean(ts_input)
+        dict_window_mean_reference, dict_window_std_reference = \
+            calculate_seasonal_window_mean_std(ts_reference)
+        dict_window_mean_input, dict_window_std_input = \
+            calculate_seasonal_window_mean_std(ts_input)
         # Construct time series of "mean_reference" and "mean_input"
         # (mean_reference ts is constructed at the input data timestep)
         list_mean_reference = [dict_window_mean_reference[(t.month, t.day)]
@@ -626,14 +669,22 @@ def rescale_ts(ts_input, ts_reference, method):
         list_mean_input = [dict_window_mean_input[(t.month, t.day)]
                                for t in ts_input.index]
         ts_mean_input = pd.Series(list_mean_input, index=ts_input.index)
+        # Construct time series of "std_reference" and "std_input"
+        # (std_reference ts is constructed at the input data timestep)
+        list_std_reference = [dict_window_std_reference[(t.month, t.day)]
+                               for t in ts_input.index]
+        ts_std_reference = pd.Series(list_std_reference, index=ts_input.index)
+        list_std_input = [dict_window_std_input[(t.month, t.day)]
+                               for t in ts_input.index]
+        ts_std_input = pd.Series(list_std_input, index=ts_input.index)
         # Rescale input ts
-        ts_rescaled = ts_mean_reference + (ts_input - ts_mean_input) / std_input * std_reference
+        ts_rescaled = ts_mean_reference + (ts_input - ts_mean_input) / ts_std_input * ts_std_reference
 
-    return ts_rescaled
+    return ts_rescaled, ts_std_input, ts_std_reference
 
 
-def calculate_seasonal_window_mean(ts):
-    ''' Calculates seasonal window mean values of a time series.
+def calculate_seasonal_window_mean_std(ts):
+    ''' Calculates seasonal window mean and std values of a time series.
         (mean value of 31-day-window of all years)
     
     Parameters
@@ -646,6 +697,9 @@ def calculate_seasonal_window_mean(ts):
     dict_window_mean: <dict>
         Dict of window-mean values for the ts
         key: (month, day); value: mean value from the ts
+    dict_window_std: <dict>
+        Dict of window-std values for the ts
+        key: (month, day); value: std value from the ts
     '''
     
     # Extract all indices for each (month, day) of a full year
@@ -656,8 +710,9 @@ def calculate_seasonal_window_mean(ts):
     values = list_dayofyear_index
     dict_dayofyear_index = dict(zip(keys, values))
     
-    # Calculate window-mean value for each (month, day)
+    # Calculate window mean and std values for each (month, day)
     dict_window_mean = {}  # key: (month, day); value: mean value from the ts
+    dict_window_std = {}  # key: (month, day); value: std value from the ts
     for d in d_fullyear:
         # Identify (month, day)s in a 31-day window centered around the current day
         d_window = pd.date_range(d.date() - pd.DateOffset(days=15),
@@ -666,8 +721,10 @@ def calculate_seasonal_window_mean(ts):
         # Extract all data points in the window of all years
         ts_window = pd.concat([ts.loc[dict_dayofyear_index[d]]
                                for d in dayofyear_window])
-        # Calculate window mean value
+        # Calculate window mean and std values
         mean_ts = ts_window.mean()
+        std_ts = ts_window.std()
         dict_window_mean[(d.month, d.day)] = mean_ts
+        dict_window_std[(d.month, d.day)] = std_ts
     
-    return dict_window_mean
+    return dict_window_mean, dict_window_std
