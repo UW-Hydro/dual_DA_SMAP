@@ -104,7 +104,7 @@ for var, da in dict_da.items():
     if var == 'prec_orig' or var == 'prec_for_tuning_lambda' or\
     var == 'prec_true':
         # Sum daily preciptation
-        da_daily = da.groupby('time.date').sum(dim='time')
+        da_daily = da.resample(time='1D').sum(dim='time')
         # Put into dict
         dict_da_daily[var] = da_daily
 
@@ -117,13 +117,13 @@ for var in ['sm_ascend', 'sm_descend']:
     if var in dict_da.keys():
         # Average to daily soil moisture
         da = dict_da[var]
-        da_daily = da.groupby('time.date').mean(dim='time')
+        da_daily = da.resample(time='1D').mean(dim='time')
         # Put into dict
         # NOTE: (assume the "daily-mean" SM represents the SM at 00:00 on the date)
         # (since SMART assumes the SM observation on the corresponding day with rainfall
         # to be at the end of the day, we need to shift the SM date forward by one day)
-        da_daily = da_daily.shift(date=-1)
-        da_sm.loc[da_daily['date'], :, :] = da_daily[:]
+        da_daily = da_daily.shift(time=-1)
+        da_sm.loc[da_daily['time'], :, :] = da_daily[:]
         dict_da_daily[var] = da_sm
 
     # If missing, put in NAN
@@ -143,7 +143,7 @@ da_mask = ds_domain['mask']
 # Convert data to dimension [npixel_active, nday]
 dict_array_active = da_3D_to_2D_for_SMART(dict_da_daily,
                                           da_mask,
-                                          time_varname='date')
+                                          time_varname='time')
 
 # ============================================================ #
 # Make soil moisture uncertainty data
