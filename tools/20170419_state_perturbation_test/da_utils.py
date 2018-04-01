@@ -331,3 +331,47 @@ def find_global_param_value(gp, param_name, second_param=False):
                 return line_list[1]
             else:
                 return line_list[1], line_list[2]
+
+
+def modify_sm_states(state_orig_nc, sm_pert, da_max_moist, out_state_nc):
+    ''' Modify a prescibed amount of SM states for a single VIC state file.
+        Perturbation amount can differ for each layer, but is the same (in mm)
+        for the whole domain
+
+    Parameters
+    ----------
+    state_orig_nc: <str>
+        Original VIC state nc
+    sm_pert: <list>
+        A list of perturbation amount (in mm) for each layer
+    da_max_moist: <xr.DataArray>
+        Maximum soil moisture for each tile [nlyaer, lat, lon]
+    out_state_nc: <str>
+        Output state nc
+    '''
+
+    # Load original state file
+    ds_state_orig = xr.open_dataset(state_orig_nc)
+    # Add perturbation
+    ds_state_perturbed = ds_state_orig.copy()
+    for l in range(len(sm_pert)):
+        ds_state_perturbed['STATE_SOIL_MOISTURE'][:, :, l, :, :] += sm_pert[l]
+        # Limit perturbation to be between zero and upper bound
+        for lat in da_max_moist['lat'].values:
+            for lon in da_max_moist['lon'].values:
+                sm = ds_state_perturbed['STATE_SOIL_MOISTURE']\
+                        .loc[:, :, l, lat, lon].values
+                # Set negative to zero
+                sm[sm<0] = 0
+                # Set above-maximum to maximum
+                max_moist = da_max_moist.sel(lat=lat, lon=lon, nlayer=l).values
+                sm[sm>max_moist] = max_moist
+                # Put back into state ds
+                ds_state_perturbed['STATE_SOIL_MOISTURE']\
+                    .loc[:, :, l, lat, lon] = sm
+    # Save perturbed states to file
+    ds_state_perturbed.to_netcdf(out_state_nc, format='NETCDF4_CLASSIC')
+
+
+
+
