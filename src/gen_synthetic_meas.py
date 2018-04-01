@@ -170,11 +170,9 @@ list_history_paths.append(os.path.join(truth_subdirs['history'],
 # (2) Loop over until each measurement point and run VIC
 # --- Calculate state perturbation covariance matrix --- #
 # Calculate perturvation magnitude [nlayer, lat, lon]
-da_scale = calculate_sm_noise_to_add_magnitude(
-    vic_history_path=os.path.join(
-        cfg['CONTROL']['root_dir'],
-        cfg['FORCINGS_STATES_PERTURB']['vic_history_path']),
-    sigma_percent=cfg['FORCINGS_STATES_PERTURB']['state_perturb_sigma_percent'])
+da_scale = xr.open_dataset(os.path.join(
+    cfg['CONTROL']['root_dir'], cfg['FORCINGS_STATES_PERTURB']['state_perturb_nc']))\
+    [cfg['FORCINGS_STATES_PERTURB']['scale_varname']]
 # Extract veg_class and snow_band information from a state file
 state_time = meas_times[0]
 state_filename = os.path.join(truth_subdirs['states'],
