@@ -601,11 +601,9 @@ def rescale_domain(da_input, da_reference, da_meas_error_unscaled, method):
         [len(da_input['lat']), len(da_input['lon']), -1])  # [lat, lon, time]
     data_rescaled = np.rollaxis(data_rescaled, 2, 0)  # [time, lat, lon]
     std_input_rescaled = std_input_rescaled_flat.reshape(
-        [len(da_input['lat']), len(da_input['lon']), -1])  # [lat, lon, time]
-    std_input_rescaled = np.rollaxis(std_input_rescaled, 2, 0)  # [time, lat, lon]
+        [len(da_input['lat']), len(da_input['lon'])])  # [lat, lon]
     std_reference_rescaled = std_reference_rescaled_flat.reshape(
-        [len(da_input['lat']), len(da_input['lon']), -1])  # [lat, lon, time]
-    std_reference_rescaled = np.rollaxis(std_reference_rescaled, 2, 0)  # [time, lat, lon]
+        [len(da_input['lat']), len(da_input['lon'])])  # [lat, lon]
     # Put back into da
     da_rescaled = da_input.copy()
     da_rescaled[:] = data_rescaled
@@ -637,10 +635,10 @@ def rescale_ts(ts_input, ts_reference, method):
     ----------
     ts_rescaled: <pd.Series>
         Rescaled time series
-    ts_std_input: <pd.Series>
-        Input time series standard deviation
-    ts_std_reference
-        Reference time series standard deviation
+    std_input: <float>
+        Input standard deviation
+    std_reference: <float>
+        Reference standard deviation
     '''
 
     if method == "moment_2nd":
@@ -658,10 +656,8 @@ def rescale_ts(ts_input, ts_reference, method):
         std_input = np.nanstd(ts_input, ddof=0)
         # Calculate window-mean for both reference and input series
         # Dict key: (month, day); value: mean value from the ts
-        dict_window_mean_reference, dict_window_std_reference = \
-            calculate_seasonal_window_mean_std(ts_reference)
-        dict_window_mean_input, dict_window_std_input = \
-            calculate_seasonal_window_mean_std(ts_input)
+        dict_window_mean_reference = calculate_seasonal_window_mean(ts_reference)
+        dict_window_mean_input = calculate_seasonal_window_mean(ts_input)
         # Construct time series of "mean_reference" and "mean_input"
         # (mean_reference ts is constructed at the input data timestep)
         list_mean_reference = [dict_window_mean_reference[(t.month, t.day)]
@@ -670,16 +666,8 @@ def rescale_ts(ts_input, ts_reference, method):
         list_mean_input = [dict_window_mean_input[(t.month, t.day)]
                                for t in ts_input.index]
         ts_mean_input = pd.Series(list_mean_input, index=ts_input.index)
-        # Construct time series of "std_reference" and "std_input"
-        # (std_reference ts is constructed at the input data timestep)
-        list_std_reference = [dict_window_std_reference[(t.month, t.day)]
-                               for t in ts_input.index]
-        ts_std_reference = pd.Series(list_std_reference, index=ts_input.index)
-        list_std_input = [dict_window_std_input[(t.month, t.day)]
-                               for t in ts_input.index]
-        ts_std_input = pd.Series(list_std_input, index=ts_input.index)
         # Rescale input ts
-        ts_rescaled = ts_mean_reference + (ts_input - ts_mean_input) / ts_std_input * ts_std_reference
+        ts_rescaled = ts_mean_reference + (ts_input - ts_mean_input) / std_input * std_reference
 
     elif method == "cdf":
         dict_window_data_input = extract_seasonal_window_data(ts_input)
@@ -695,28 +683,25 @@ def rescale_ts(ts_input, ts_reference, method):
         ts_std_input = None
         ts_std_reference = None
 
-    return ts_rescaled, ts_std_input, ts_std_reference
+    return ts_rescaled, std_input, std_reference
 
 
-def calculate_seasonal_window_mean_std(ts):
-    ''' Calculates seasonal window mean and std values of a time series.
+def calculate_seasonal_window_mean(ts):
+    ''' Calculates seasonal window mean values of a time series.
         (mean value of 31-day-window of all years)
-    
+
     Parameters
     ----------
     ts: <pd.Series>
         Time series to calculate
-    
+
     Returns
     ----------
     dict_window_mean: <dict>
         Dict of window-mean values for the ts
         key: (month, day); value: mean value from the ts
-    dict_window_std: <dict>
-        Dict of window-std values for the ts
-        key: (month, day); value: std value from the ts
     '''
-    
+
     # Extract all indices for each (month, day) of a full year
     d_fullyear = pd.date_range('20160101', '20161231')
     dayofyear_fullyear = [(d.month, d.day) for d in d_fullyear]
@@ -724,10 +709,9 @@ def calculate_seasonal_window_mean_std(ts):
     keys = dayofyear_fullyear
     values = list_dayofyear_index
     dict_dayofyear_index = dict(zip(keys, values))
-    
-    # Calculate window mean and std values for each (month, day)
+
+    # Calculate window-mean value for each (month, day)
     dict_window_mean = {}  # key: (month, day); value: mean value from the ts
-    dict_window_std = {}  # key: (month, day); value: std value from the ts
     for d in d_fullyear:
         # Identify (month, day)s in a 31-day window centered around the current day
         d_window = pd.date_range(d.date() - pd.DateOffset(days=15),
@@ -736,10 +720,60 @@ def calculate_seasonal_window_mean_std(ts):
         # Extract all data points in the window of all years
         ts_window = pd.concat([ts.loc[dict_dayofyear_index[d]]
                                for d in dayofyear_window])
-        # Calculate window mean and std values
+        # Calculate window mean value
         mean_ts = ts_window.mean()
-        std_ts = ts_window.std()
         dict_window_mean[(d.month, d.day)] = mean_ts
-        dict_window_std[(d.month, d.day)] = std_ts
-    
-    return dict_window_mean, dict_window_std
+
+    return dict_window_mean
+
+
+def load_nc_and_concat_var_years(basepath, start_year, end_year, dict_vars):
+    ''' Loads in netCDF files end with 'YYYY.nc', and for each variable needed,
+        concat all years together and return a DataArray
+
+        Parameters
+        ----------
+        basepath: <str>
+            Basepath of all netCDF files; 'YYYY.nc' will be appended;
+            Time dimension name in the nc files must be 'time'
+        start_year: <int>
+            First year to load
+        end_year: <int>
+            Last year to load
+        dict_vars: <dict>
+            A dict of desired variables and corresponding varname in the
+            netCDF files (e.g., {'prec': 'prcp'; 'temp': 'tair'}). The keys in
+            dict_vars will be used as keys in the output dict.
+
+        Returns
+        ----------
+        dict_da: <dict>
+            A dict of concatenated xr.DataArrays.
+            Keys: desired variables (using the same keys as in input
+                  'dict_vars')
+            Elements: <xr.DataArray>
+    '''
+
+    dict_list = {}
+    for var in dict_vars.keys():
+        dict_list[var] = []
+
+    # Loop over each year
+    for year in range(start_year, end_year+1):
+        # Load data for this year
+        ds = xr.open_dataset(basepath + '{}.nc'.format(year))
+        # Extract each variable needed and put in a list
+        for var, varname in dict_vars.items():
+            da = ds[varname]
+            # Put data of this year in a list
+            dict_list[var].append(da)
+
+    # Concat all years for all variables
+    dict_da = {}
+    for var in dict_vars.keys():
+        dict_da[var] = xr.concat(dict_list[var], dim='time')
+
+    return dict_da
+
+
+
