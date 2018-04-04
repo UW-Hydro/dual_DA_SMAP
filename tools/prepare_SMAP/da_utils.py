@@ -53,7 +53,6 @@ def setup_output_dirs(out_basedir, mkdirs=['results', 'state',
     return dirs
 
 
-
 def calculate_smap_domain_from_vic_domain(da_vic_domain, da_smap_example):
     ''' Calculate the smallest SMAP domain needed to cover the entire VIC domain.
         Note: here the entire input VIC domain is going to be covered without considering
@@ -149,7 +148,7 @@ def extract_smap_static_info(filename, orbit="AM"):
     return lat, lon
 
 
-def extract_smap_sm(filename, orbit):
+def extract_smap_sm(filename, orbit, qc_retrieval_flag=False):
     ''' This function extracts soil moisture values [cm3/cm3] from a raw SMAP L3 HDF5 file.
     
     Parameters
@@ -158,6 +157,8 @@ def extract_smap_sm(filename, orbit):
         File path of a SMAP L3 HDF5 file
     orbit: <str>
         "AM" or "PM"
+    qc_retrieval_flag: <bool>
+        Whether remove retrievals with non-zero quality flag. Default: False (do not remove)
     
     Reterns
     -------
@@ -175,7 +176,13 @@ def extract_smap_sm(filename, orbit):
             missing_value = f['Soil_Moisture_Retrieval_Data_PM']['soil_moisture_pm'].attrs['_FillValue']
         # Mask missing points
         sm[sm==missing_value] = np.nan
-        # sm_masked = np.ma.masked_equal(sm, missing_value)
+        # Remove non-zero retrieval quality flag, if specified
+        if qc_retrieval_flag:
+            if orbit == "AM":
+                flags = f['Soil_Moisture_Retrieval_Data_AM']['retrieval_qual_flag'].value
+            else:
+                flags = f['Soil_Moisture_Retrieval_Data_PM']['retrieval_qual_flag_pm'].value
+            sm[flags>0] = np.nan
         
     return sm
 
@@ -233,7 +240,7 @@ def extract_smap_multiple_days(filename, start_date, end_date, da_smap_domain=No
         date_str = date.strftime("%Y%m%d")  # date in YYYYMMMDD
         # --- Load AM data for this day --- #
         try:
-            sm_am = extract_smap_sm(glob.glob(filename.format(date_str))[0], "AM")
+            sm_am = extract_smap_sm(glob.glob(filename.format(date_str))[0], "AM", qc_retrieval_flag=True)
             if da_smap_domain is not None:
                 da_global[:, :] = sm_am
                 da_domain_data = da_global.sel(
@@ -248,7 +255,7 @@ def extract_smap_multiple_days(filename, start_date, end_date, da_smap_domain=No
         da.loc[time, :, :] = sm_am
         # --- Load PM data for this day --- #
         try:
-            sm_pm = extract_smap_sm(glob.glob(filename.format(date_str))[0], "PM")
+            sm_pm = extract_smap_sm(glob.glob(filename.format(date_str))[0], "PM", qc_retrieval_flag=True)
             if da_smap_domain is not None:
                 da_global[:, :] = sm_pm
                 da_domain_data = da_global.sel(

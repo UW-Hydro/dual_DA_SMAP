@@ -165,6 +165,23 @@ else:
 
 
 # ============================================================ #
+# SMAP data quality control
+# ============================================================ #
+print('Quality control...')
+if cfg['QC']['qc_method'] == 'no_winter':  # If exclude Nov - Feb data
+    for t in da_smap['time'].values:
+        if pd.to_datetime(t).month in [11, 12, 1, 2]:
+            da_smap.loc[t, :, :] = np.nan
+    ds_smap = xr.Dataset({'soil_moisture': da_smap})
+    ds_smap.to_netcdf(
+        os.path.join(output_subdir_data_unscaled,
+                     'soil_moisture_unscaled.qc_{}.{}_{}.nc'.format(
+                        cfg['QC']['qc_method'],
+                        start_date.strftime('%Y%m%d'),
+                        end_date.strftime('%Y%m%d'))))
+
+
+# ============================================================ #
 # Rescale SMAP to the VIC regime
 # ============================================================ #
 print('Rescaling SMAP...')
@@ -226,8 +243,9 @@ da_smap_rescaled, da_meas_error_rescaled = rescale_SMAP_domain(da_smap, da_vic_r
 ds_smap_rescaled = xr.Dataset({'soil_moisture': da_smap_rescaled})
 ds_smap_rescaled.to_netcdf(
     os.path.join(output_subdir_data_scaled,
-                 'soil_moisture_scaled.{}.{}_{}.nc'.format(
+                 'soil_moisture_scaled.{}.{}{}_{}.nc'.format(
                      cfg['RESCALE']['rescale_method'],
+                     cfg['QC']['qc_method']+'.' if cfg['QC']['qc_method'] is not None else '',
                      start_date.strftime('%Y%m%d'),
                      end_date.strftime('%Y%m%d'))),
     format='NETCDF4_CLASSIC')
@@ -237,8 +255,9 @@ da_meas_error_rescaled.attrs['unit'] = 'mm'
 ds_meas_error_rescaled = xr.Dataset({'soil_moisture_error': da_meas_error_rescaled})
 ds_meas_error_rescaled.to_netcdf(
     os.path.join(output_subdir_data_scaled,
-                 'soil_moisture_error_scaled.{}.{}_{}.nc'.format(
+                 'soil_moisture_error_scaled.{}.{}{}_{}.nc'.format(
                      cfg['RESCALE']['rescale_method'],
+                     cfg['QC']['qc_method']+'.' if cfg['QC']['qc_method'] is not None else '',
                      start_date.strftime('%Y%m%d'),
                      end_date.strftime('%Y%m%d'))),
     format='NETCDF4_CLASSIC')
