@@ -240,7 +240,7 @@ def extract_smap_multiple_days(filename, start_date, end_date, da_smap_domain=No
         date_str = date.strftime("%Y%m%d")  # date in YYYYMMMDD
         # --- Load AM data for this day --- #
         try:
-            sm_am = extract_smap_sm(glob.glob(filename.format(date_str))[0], "AM", qc_retrieval_flag=True)
+            sm_am = extract_smap_sm(glob.glob(filename.format(date_str))[0], "AM", qc_retrieval_flag=False)
             if da_smap_domain is not None:
                 da_global[:, :] = sm_am
                 da_domain_data = da_global.sel(
@@ -255,7 +255,7 @@ def extract_smap_multiple_days(filename, start_date, end_date, da_smap_domain=No
         da.loc[time, :, :] = sm_am
         # --- Load PM data for this day --- #
         try:
-            sm_pm = extract_smap_sm(glob.glob(filename.format(date_str))[0], "PM", qc_retrieval_flag=True)
+            sm_pm = extract_smap_sm(glob.glob(filename.format(date_str))[0], "PM", qc_retrieval_flag=False)
             if da_smap_domain is not None:
                 da_global[:, :] = sm_pm
                 da_domain_data = da_global.sel(
@@ -506,13 +506,13 @@ def remap_con(reuse_weight, da_source, final_weight_nc, da_target_domain,
 
 
 def rescale_SMAP_domain(da_smap, da_reference, smap_times_am, smap_times_pm,
-                        da_meas_error_unscaled=None,
+                        da_meas_error_unscaled,
                         method='moment_2nd'):
     ''' Rescale SMAP data to be in the same regime of a reference field.
         Rescale each grid cell separately.
         AM and PM will be rescaled separately.
         Currently ignores all NANs in da_reference.
-    
+
     Parameters
     ----------
     da_smap: <xr.DataArray>
@@ -525,71 +525,72 @@ def rescale_SMAP_domain(da_smap, da_reference, smap_times_am, smap_times_pm,
     smap_times_pm: <numpy.ndarray>
         Time points of SMAP PM
     da_meas_error_unscaled: <xr.DataArray>
-        Unscaled domain of SMAP measurement error. Will be rescaled the same way as da_smap
-        Dimension: [time, lat, lon]
-        Default: None
+        Unscaled SMAP measurement error. Dimension: [lat, lon]
     method: <str>
         Options: "moment_2nd" - matching mean and standard deviation
-    
+
     Returns
     ----------
     da_smap_rescaled: <xr.DataArray>
         Rescaled SMAP data
-    da_meas_error_rescaled: <xr.DataArray>
-        Rescaled measurement error
+    da_meas_error_scaled: <xr.DataArray>
+        Rescaled SMAP measurement error. Dimension: [lat, lon]
     '''
-    
+
     # --- Extract AM and PM data from da_reference
     # Extract SMAP AM time points
     da_reference_AMtimes = da_reference.sel(time=smap_times_am)
     # Extract SMAP PM time points
     da_reference_PMtimes = da_reference.sel(time=smap_times_pm)
-    
+
     # --- Rescale SMAP data (for AM and PM seperately) --- #
     ncells = len(da_smap['lat']) * len(da_smap['lon'])
     # Rescale SMAP AM
     da_smap_AM = da_smap.sel(time=smap_times_am)
-    da_meas_error_AM = da_meas_error_unscaled.sel(time=smap_times_am)
-    da_smap_AM_rescaled, da_meas_error_AM_rescaled = rescale_domain(
-        da_smap_AM, da_reference_AMtimes,
-        da_meas_error_unscaled=da_meas_error_AM, method=method)
+    da_smap_AM_rescaled = rescale_domain(
+        da_smap_AM, da_reference_AMtimes, method=method)
     # Rescale SMAP PM
     da_smap_PM = da_smap.sel(time=smap_times_pm)
-    da_meas_error_PM = da_meas_error_unscaled.sel(time=smap_times_pm)
-    da_smap_PM_rescaled, da_meas_error_PM_rescaled = rescale_domain(
-        da_smap_PM, da_reference_PMtimes,
-        da_meas_error_unscaled=da_meas_error_PM, method=method)
+    da_smap_PM_rescaled = rescale_domain(
+        da_smap_PM, da_reference_PMtimes, method=method)
     # Put AM and PM back together
     da_smap_rescaled = xr.concat([da_smap_AM_rescaled, da_smap_PM_rescaled], dim='time').sortby('time')
-    da_meas_error_rescaled = xr.concat([da_meas_error_AM_rescaled, da_meas_error_PM_rescaled], dim='time').sortby('time')
+    
+    # --- Rescale SMAP error (using the entire SMAP period, AM and PM together) --- #
+    # Select reference data points where SMAP is not missing
+    da_reference_smaptimes = da_reference.sel(time=da_smap['time'])
+    reference_smaptimes = da_reference_smaptimes.values
+    reference_smaptimes[np.isnan(da_smap.values)] = np.nan
+    da_reference_smaptimes[:] = reference_smaptimes
+    # Calculate std
+    da_std_input = da_smap.std(dim='time', ddof=0)
+    da_std_reference = da_reference_smaptimes.std(dim='time', ddof=0)
+    # Rescale measurement error
+    da_meas_error_rescaled = da_meas_error_unscaled.copy()
+    da_meas_error_rescaled[:] = da_meas_error_unscaled / da_std_input * da_std_reference
 
     return da_smap_rescaled, da_meas_error_rescaled
 
 
-def rescale_domain(da_input, da_reference, da_meas_error_unscaled, method):
+def rescale_domain(da_input, da_reference, method):
     ''' Rescales an input domain of time series to be in the same regime of a reference domain.
     Currently ignores all NANs in da_reference.
-    
+
     Parameters
     ----------
     da_input: <xr.DataArray>
         Input data. Dimension: [time, lat, lon]
     da_reference: <xr.DataArray>
         Refererence data. Dimension: [time, lat, lon]. Can be different length from da_input.
-    da_meas_error_unscaled: <xr.DataArray>
-        Unscaled domain of SMAP measurement error. Will be rescaled the same way as da_smap
-        Default: None
     method: <str>
         Options: "moment_2nd" - matching mean and standard deviation
-    
+
     Returns
     ----------
     da_rescaled: <xr.DataArray>
         Rescaled data
-    da_meas_error_scaled: <xr.DataArray.
-        Rescaled measurement error
     '''
-    
+
     # Rescale input data for each grid cell
     ncells = len(da_input['lat']) * len(da_input['lon'])
     da_input_flat = da_input.values.reshape([-1, ncells]) # [time, lat*lon]
@@ -614,11 +615,8 @@ def rescale_domain(da_input, da_reference, da_meas_error_unscaled, method):
     # Put back into da
     da_rescaled = da_input.copy()
     da_rescaled[:] = data_rescaled
-    # Rescale measurement error
-    da_meas_error_scaled = da_meas_error_unscaled.copy()
-    da_meas_error_scaled[:] = da_meas_error_unscaled / std_input_rescaled * std_reference_rescaled
-    
-    return da_rescaled, da_meas_error_scaled
+
+    return da_rescaled
 
 
 def rescale_ts(ts_input, ts_reference, method):
@@ -648,6 +646,9 @@ def rescale_ts(ts_input, ts_reference, method):
         Reference standard deviation
     '''
 
+    # Use consistent time points in the reference data vs. in the input data
+    ts_reference[np.isnan(ts_input)] = np.nan
+    
     if method == "moment_2nd":
         mean_reference = np.nanmean(ts_reference)
         std_reference = np.nanstd(ts_reference, ddof=0)
@@ -657,7 +658,7 @@ def rescale_ts(ts_input, ts_reference, method):
         # Construct time series of ts_std_input and ts_std_reference to return
         ts_std_input = pd.Series(np.ones(len(ts_input))*std_input, index=ts_input.index)
         ts_std_reference = pd.Series(np.ones(len(ts_reference))*std_reference, index=ts_reference.index)
-        
+
     elif method == "moment_2nd_season":
         std_reference = np.nanstd(ts_reference, ddof=0)
         std_input = np.nanstd(ts_input, ddof=0)

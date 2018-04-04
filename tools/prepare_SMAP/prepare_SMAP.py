@@ -226,17 +226,12 @@ else:
 
 # --- Rescale SMAP data (for AM and PM seperately) --- #
 # Load unscaled measurement error domain and convert to [time, lat, lon]
-da_meas_error_unscaled_domain = xr.open_dataset(
+da_meas_error_unscaled = xr.open_dataset(
     cfg['INPUT']['meas_error_unscaled_nc'])[cfg['INPUT']['meas_error_unscaled_varname']]
-da_meas_error_unscaled = xr.DataArray(
-    np.zeros([len(da_smap['time']), len(da_meas_error_unscaled_domain['lat']), len(da_meas_error_unscaled_domain['lon'])]),
-    coords=[da_smap['time'], da_meas_error_unscaled_domain['lat'], da_meas_error_unscaled_domain['lon']],
-    dims=['time', 'lat', 'lon'])
-da_meas_error_unscaled[:] = da_meas_error_unscaled_domain
 # Rescale
 da_smap_rescaled, da_meas_error_rescaled = rescale_SMAP_domain(da_smap, da_vic_remapped,
                     smap_times_am, smap_times_pm,
-                    da_meas_error_unscaled=da_meas_error_unscaled,
+                    da_meas_error_unscaled,
                     method=cfg['RESCALE']['rescale_method'])
 
 # --- Save rescaled SMAP data to file --- #
