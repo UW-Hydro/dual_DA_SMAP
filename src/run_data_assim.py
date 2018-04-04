@@ -16,6 +16,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import pickle
+import numbers
 
 from tonic.models.vic.vic import VIC
 from tonic.io import read_config, read_configobj
@@ -126,8 +127,21 @@ data = da_meas.values.reshape((len(time), len(lat), len(lon), 1))
 da_meas = xr.DataArray(data, coords=[time, lat, lon, [0]],
                        dims=['time', 'lat', 'lon', 'm'])
 
-# --- Prepare measurement error covariance matrix R [m*m] --- #
-R = np.array([[cfg['EnKF']['R']]])
+# --- Prepare measurement error covariance matrix R [lat, lon, m, m] --- #
+# If input is a numerical number, assign spatial constant R values
+if isinstance(cfg['EnKF']['R'], numbers.Number):
+    R = np.empty([len(da_meas['lat']), len(da_meas['lon']), 1, 1])
+    R[:] = cfg['EnKF']['R']
+# If input is an xr.Dataset
+else:
+    if cfg['EnKF']['R_vartype'] == 'R':
+        R = xr.open_dataset(os.path.join(cfg['CONTROL']['root_dir'], cfg['EnKF']['R']))\
+            [cfg['EnKF']['R_varname']].values
+    elif cfg['EnKF']['R_vartype'] == 'std':
+        R = np.square(xr.open_dataset(
+            os.path.join(cfg['CONTROL']['root_dir'], cfg['EnKF']['R']))\
+            [cfg['EnKF']['R_varname']].values)
+    R = R.reshape([len(da_meas['lat']), len(da_meas['lon']), 1, 1])
 
 # --- Calculate state perturbation covariance matrix --- #
 # Calculate perturvation magnitude [nlayer, lat, lon]

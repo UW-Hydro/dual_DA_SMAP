@@ -239,6 +239,7 @@ class States(object):
                                     seed=None):
         ''' This function updates soil moisture states for the whole field
             NOTE: this method does not change self
+            NOTE: this function assume m = 1
         
         Parameters
         ----------
@@ -250,7 +251,7 @@ class States(object):
         da_y_est: <xr.DataArray>
             Estimated measurement from before-updated states (y = Hx);
             Dimension: [lat, lon, m]
-        R: <float> (for m = 1)
+        R: <np.array> [lat, lon, m, m]
             Measurement error covariance matrix (measurement error ~ N(0, R))
         da_max_moist_n: <xarray.DataArray>
             Maximum soil moisture for the whole domain and each tile
@@ -290,13 +291,14 @@ class States(object):
         # Determine the total number of loops
         nloop = len(lat_coord) * len(lon_coord)
         # Generate random measurement perturbation
+        R_flat = R.reshape([nloop])
         if seed is None:
-            v = np.random.multivariate_normal(
-                    np.zeros(m), R,size=nloop).reshape([nloop, m, 1])  # [nloop, m, 1]
+            v = np.random.normal(
+                    0, R_flat, size=nloop).reshape([nloop, m, 1])  # [nloop, m, 1]
         else:
             rng = np.random.RandomState(seed)
-            v = rng.multivariate_normal(
-                    np.zeros(m), R,size=nloop).reshape([nloop, m, 1])  # [nloop, m, 1]
+            v = rng.normal(
+                    0, R_flat, size=nloop).reshape([nloop, m, 1])  # [nloop, m, 1]
         # Convert xr.DataArray's to np.array's and straighten lat and lon into nloop
         K = da_K.values.reshape([nloop, n, m])  # [nloop, n, m]
         y_meas = da_y_meas.values.reshape([nloop, m, 1])  # [nloop, m, 1]
@@ -723,7 +725,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         [unit: mm]. Soil moistures above maximum after perturbation will
         be reset to maximum value.
         Dimension: [lat, lon, n]
-    R: <np.array>  [m*m]
+    R: <np.array>  [lat, lon, m, m]
         Measurement error covariance matrix
     da_meas: <xr.DataArray> [time, lat, lon]
         DataArray of measurements (currently, must be only 1 variable of measurement);
@@ -1115,7 +1117,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                                     dims=['lat', 'lon', 'm'])
             # Normalize innovation
             da_Pyy = da_y_est.var(dim='N', ddof=1)  # [lat, lon, m]
-            innov_norm = innov / np.sqrt(da_Pyy.values + R)  # [lat, lon, m]
+            innov_norm = innov / np.sqrt(da_Pyy.values + R[:, :, :, 0])  # [lat, lon, m]
             da_innov_norm = xr.DataArray(innov_norm,
                                          coords=[da_y_est_ensMean['lat'],
                                                  da_y_est_ensMean['lon'],
@@ -2459,7 +2461,7 @@ def calculate_gain_K_whole_field(da_x, da_y_est, R):
         Estimated measurement of all ensemble members;
         As returned from get_soil_moisture_and_estimated_meas_all_ensemble;
         Dimension: [lat, lon, m, N]
-    R: <np.array> [m*m]
+    R: <np.array> [lat, lon, m, m]
         Measurement error covariance matrix
         
     Returns
@@ -2495,9 +2497,10 @@ def calculate_gain_K_whole_field(da_x, da_y_est, R):
     # Convert da_x and da_y_est to np.array and straighten lat and lon into nloop
     x = da_x.values.reshape([nloop, len(n_coord), len(N_coord)])  # [nloop, n, N]
     y_est = da_y_est.values.reshape([nloop, len(m_coord), len(N_coord)])  # [nloop, m, N]
+    R_flat = R.reshape([nloop, 1, 1])
     # Calculate gain K for the whole field
     K = np.array(list(map(
-                lambda i: calculate_gain_K(x[i, :, :], y_est[i, :, :], R),
+                lambda i: calculate_gain_K(x[i, :, :], y_est[i, :, :], R_flat[i, :, :]),
                 range(nloop))))  # [nloop, n, m]
     # Reshape K
     K = K.reshape([len(lat_coord), len(lon_coord), len(n_coord),
@@ -2523,7 +2526,7 @@ def update_states(da_y_est, da_K, da_meas, R, da_sm_to_update,
         Dimension: [lat, lon, n, m], where [n, m] is the Kalman gain K
     da_meas: <xr.DataArray> [lat, lon, m]
         Measurements at current time
-    R: <float> (for m = 1)
+    R: <np.array> [lat, lon, m, m]
         Measurement error covariance matrix (measurement error ~ N(0, R))
     da_sm_to_update: <xr.DataArray>
         Soil moisture to be updated, in the structure of VIC state file
@@ -2599,7 +2602,7 @@ def update_states_ensemble(y_est, K, da_meas, R, list_da_sm_to_update,
             (n_stacked can be different for each meas cell)
     da_meas: <xr.DataArray> [lat, lon, m]
         Measurements at current time
-    R: <float> (for m = 1)
+    R: <np.array> [lat, lon, m, m]
         Measurement error covariance matrix (measurement error ~ N(0, R))
     list_da_sm_to_update:
         A list of soil moisture states to update, in the order of
@@ -4090,7 +4093,7 @@ def calculate_gain_K_whole_field_mismatched_grid(da_x, da_y_est, R,
         Estimated measurement of all ensemble members;
         As returned from get_soil_moisture_and_estimated_meas_all_ensemble;
         Dimension: [lat, lon, m, N]
-    R: <np.array> [m*m]
+    R: <np.array> [lat, lon, m, m]
         Measurement error covariance matrix
     list_source_ind2D_weight_all: <list>
         Typically returned by extract_mismatched_grid_weight_info().
@@ -4152,7 +4155,8 @@ def calculate_gain_K_whole_field_mismatched_grid(da_x, da_y_est, R,
     # A list of K for each meas grid cell
     # Each element of the list is a K matrix of dim [n_stacked, m]
     # (n_stacked can be different for each meas cell)
-    list_K = [calculate_gain_K(x=list_x_stacked[i], y_est=y_est_remapped[i, :, :], R=R)
+    R_flat = R.reshape([n_target, 1, 1])
+    list_K = [calculate_gain_K(x=list_x_stacked[i], y_est=y_est_remapped[i, :, :], R=R_flat[i, :, :])
               for i in range(n_target)]
     
     return list_K, y_est_remapped
@@ -4163,6 +4167,7 @@ def update_states_mismatched_grid(y_est_remapped, list_K, da_meas, R, da_sm_to_u
                                   adjust_negative=True, seed=None):
     ''' This function updates soil moisture states over the whole field,
     when the measurement grid mismatches the VIC grid.
+    NOTE: this function assumes m = 1
     
     Parameters
     ----------
@@ -4174,7 +4179,7 @@ def update_states_mismatched_grid(y_est_remapped, list_K, da_meas, R, da_sm_to_u
         Output from calculate_gain_K_whole_field_mismatched_grid()
     da_meas: <xr.DataArray> [lat, lon, m]
         Measurements at current time
-    R: <float> (for m = 1)
+    R: <np.array> [lat, lon, m, m]
         Measurement error covariance matrix (measurement error ~ N(0, R))
     da_sm_to_update: <xr.DataArray>
         Soil moisture to be updated, in the structure of VIC state file
@@ -4216,13 +4221,14 @@ def update_states_mismatched_grid(y_est_remapped, list_K, da_meas, R, da_sm_to_u
     
     # --- For each meas cell, calculate delta = K * (y_meas + v - y_est) --- #
     # Generate random measurement perturbation
+    R_flat = R.reshape([n_target])
     if seed is None:
-        v = np.random.multivariate_normal(
-                np.zeros(m), R, size=n_target).reshape([n_target, m, 1])  # [n_target, m, 1]
+        v = np.random.normal(
+                0, R_flat, size=n_target).reshape([n_target, m, 1])  # [n_target, m, 1]
     else:
         rng = np.random.RandomState(seed)
-        v = rng.multivariate_normal(
-                np.zeros(m), R, size=n_target).reshape([n_target, m, 1])  # [n_target, m, 1]
+        v = rng.normal(
+                0, R_flat, size=n_target).reshape([n_target, m, 1])  # [n_target, m, 1]
     # Flatten the measurement data to 1D
     meas_time_flat = da_meas.values.reshape(
         [len(da_meas['lat'])*len(da_meas['lon']), m, 1])  # [n_target, m, 1]
