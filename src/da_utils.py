@@ -294,11 +294,11 @@ class States(object):
         R_flat = R.reshape([nloop])
         if seed is None:
             v = np.random.normal(
-                    0, R_flat, size=nloop).reshape([nloop, m, 1])  # [nloop, m, 1]
+                    0, np.sqrt(R_flat), size=nloop).reshape([nloop, m, 1])  # [nloop, m, 1]
         else:
             rng = np.random.RandomState(seed)
             v = rng.normal(
-                    0, R_flat, size=nloop).reshape([nloop, m, 1])  # [nloop, m, 1]
+                    0, np.sqrt(R_flat), size=nloop).reshape([nloop, m, 1])  # [nloop, m, 1]
         # Convert xr.DataArray's to np.array's and straighten lat and lon into nloop
         K = da_K.values.reshape([nloop, n, m])  # [nloop, n, m]
         y_meas = da_y_meas.values.reshape([nloop, m, 1])  # [nloop, m, 1]
@@ -727,7 +727,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         Dimension: [lat, lon, n]
     R: <np.array>  [lat, lon, m, m]
         Measurement error covariance matrix
-    da_meas: <xr.DataArray> [time, lat, lon]
+    da_meas: <xr.DataArray> [time, lat, lon, m]
         DataArray of measurements (currently, must be only 1 variable of measurement);
         Measurements should already be truncated (if needed) so that they are all within the
         EnKF run period
@@ -4224,11 +4224,11 @@ def update_states_mismatched_grid(y_est_remapped, list_K, da_meas, R, da_sm_to_u
     R_flat = R.reshape([n_target])
     if seed is None:
         v = np.random.normal(
-                0, R_flat, size=n_target).reshape([n_target, m, 1])  # [n_target, m, 1]
+                0, np.sqrt(R_flat), size=n_target).reshape([n_target, m, 1])  # [n_target, m, 1]
     else:
         rng = np.random.RandomState(seed)
         v = rng.normal(
-                0, R_flat, size=n_target).reshape([n_target, m, 1])  # [n_target, m, 1]
+                0, np.sqrt(R_flat), size=n_target).reshape([n_target, m, 1])  # [n_target, m, 1]
     # Flatten the measurement data to 1D
     meas_time_flat = da_meas.values.reshape(
         [len(da_meas['lat'])*len(da_meas['lon']), m, 1])  # [n_target, m, 1]
