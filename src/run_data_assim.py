@@ -181,6 +181,12 @@ if cfg['GRID_MISMATCH']['mismatched_grid']:
 else:
     weight_nc = None
 
+# --- Get diagnosis flas from cfg, if specified --- #
+if 'DIAGNOSE' in cfg:
+    dict_diagnose = cfg['DIAGNOSE']
+else:
+    dict_diagnose = None
+
 # -------------------------------------------------------- #
 # --- Run EnKF --- #
 # -------------------------------------------------------- #
@@ -221,7 +227,8 @@ if not linear_model:
          nproc=nproc,
          debug=debug,
          output_temp_dir=dirs['temp'],
-         restart=restart)
+         restart=restart,
+         dict_diagnose=dict_diagnose)
 else:
     dict_ens_list_history_files = EnKF_VIC(
          N=cfg['EnKF']['N'],

@@ -695,7 +695,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
              weight_nc=None,
              nproc=1,
              mpi_proc=None, mpi_exe='mpiexec', debug=False, output_temp_dir=None,
-             restart=None,
+             restart=None, dict_diagnose=None,
              linear_model=False, linear_model_prec_varname=None,
              dict_linear_model_param=None):
     ''' This function runs ensemble kalman filter (EnKF) on VIC (image driver)
@@ -777,6 +777,10 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         debug = True
     restart: None or <str>
         Restart time; None for starting from scratch (i.e., not restarting)
+        Default: None
+    dict_diagnose: None or <dict>
+        Input diagnose flags. Options:
+            - {'zero_update': True/False} - whether to turn off update; default is False (i.e., with update)
         Default: None
     linear_model: <bool>
         Whether to run a linear model instead of VIC for propagation.
@@ -1073,11 +1077,20 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                                     nproc=nproc)
             if mismatched_grid is False:  # if no mismatch
                 da_K = calculate_gain_K_whole_field(da_x, da_y_est, R)
+                # if zero_update
+                if dict_diagnose is not None and 'zero_update' in dict_diagnose and \
+                dict_diagnose['zero_update'] is True:
+                    da_K[:] = 0
             else:  # if mismatched grid
                 list_K, y_est_remapped = calculate_gain_K_whole_field_mismatched_grid(
                     da_x, da_y_est, R,
                     list_source_ind2D_weight_all,
                     weight_nc, da_meas)
+                # if zero_update
+                if dict_diagnose is not None and 'zero_update' in dict_diagnose and \
+                dict_diagnose['zero_update'] is True:
+                    for i in range(len(list_K)):
+                        list_K[i][:] = 0
             if debug:
                 if mismatched_grid is False:  # if no mismatch
                     ds_K = xr.Dataset({'K': da_K})
