@@ -797,4 +797,136 @@ def load_nc_and_concat_var_years(basepath, start_year, end_year, dict_vars):
     return dict_da
 
 
+def calculate_ecdf_quantile(percentile, data):
+    ''' Calculates quantile value based on ECDF (using Weibull plotting position)
+    of an array of data.
+    
+    Parameters
+    ----------
+    percentile: <float>
+        Percentile
+    data: <np.array>
+        Empirical data points
+    
+    Return
+    ----------
+    ecdf_quantile: <float>
+        Quantile value
+    '''
+    
+    data_sorted = sorted(data)
 
+
+def calculate_ecdf_percentile(value, data):
+    ''' Calculates ECDF percentile using Weibull plotting position.
+        "value" must be in "data"
+    
+    Parameters
+    ----------
+    value: <float>
+        A value whose ECDF quantile is to be calculated
+    data: <np.array>
+        Empirical data points
+    
+    Return
+    ----------
+    ecdf_percentile: <float>
+        Percentile from the ECDF
+    '''
+    
+    data_sorted = sorted(data)
+    if value not in data:
+        raise ValueError("value must be in data!")
+    ind, = np.where(data_sorted == value)
+    ecdf_percentile = (int(ind) + 1) / (len(data_sorted) + 1)
+    
+    return ecdf_percentile
+
+
+def extract_seasonal_window_data(ts):
+    ''' Extracts seasonal window data of a time series.
+        (mean value of 31-day-window of all years)
+
+    Parameters
+    ----------
+    ts: <pd.Series>
+        Time series to calculate
+
+    Returns
+    ----------
+    dict_window_data: <dict>
+        Dict of window values for the ts
+        key: (month, day); value: an array of all the data in the window from all years
+    '''
+
+    # Extract all indices for each (month, day) of a full year
+    d_fullyear = pd.date_range('20160101', '20161231')
+    dayofyear_fullyear = [(d.month, d.day) for d in d_fullyear]
+    list_dayofyear_index = [(ts.index.month==d[0]) & (ts.index.day==d[1]) for d in dayofyear_fullyear]
+    keys = dayofyear_fullyear
+    values = list_dayofyear_index
+    dict_dayofyear_index = dict(zip(keys, values))
+
+    # Calculate window mean and std values for each (month, day)
+    dict_window_data = {}  # key: (month, day); value: mean value from the ts
+    for d in d_fullyear:
+        # Identify (month, day)s in a 31-day window centered around the current day
+        d_window = pd.date_range(d.date() - pd.DateOffset(days=15),
+                                 d.date() + pd.DateOffset(days=15))
+        dayofyear_window = [(d.month, d.day) for d in d_window]
+        # Extract all data points in the window of all years
+        ts_window = pd.concat([ts.loc[dict_dayofyear_index[d]]
+                               for d in dayofyear_window])
+        # Put all data points in the final dict (drop NA)
+        data = ts_window.values
+        data = data[~np.isnan(data)]
+        dict_window_data[(d.month, d.day)] = data
+
+    return dict_window_data
+
+
+def calculate_seasonal_window_mean_std(ts):
+    ''' Calculates seasonal window mean and std values of a time series.
+        (mean value of 31-day-window of all years)
+
+    Parameters
+    ----------
+    ts: <pd.Series>
+        Time series to calculate
+
+    Returns
+    ----------
+    dict_window_mean: <dict>
+        Dict of window-mean values for the ts
+        key: (month, day); value: mean value from the ts
+    dict_window_std: <dict>
+        Dict of window-std values for the ts
+        key: (month, day); value: std value from the ts
+    '''
+
+    # Extract all indices for each (month, day) of a full year
+    d_fullyear = pd.date_range('20160101', '20161231')
+    dayofyear_fullyear = [(d.month, d.day) for d in d_fullyear]
+    list_dayofyear_index = [(ts.index.month==d[0]) & (ts.index.day==d[1]) for d in dayofyear_fullyear]
+    keys = dayofyear_fullyear
+    values = list_dayofyear_index
+    dict_dayofyear_index = dict(zip(keys, values))
+
+    # Calculate window mean and std values for each (month, day)
+    dict_window_mean = {}  # key: (month, day); value: mean value from the ts
+    dict_window_std = {}  # key: (month, day); value: std value from the ts
+    for d in d_fullyear:
+        # Identify (month, day)s in a 31-day window centered around the current day
+        d_window = pd.date_range(d.date() - pd.DateOffset(days=15),
+                                 d.date() + pd.DateOffset(days=15))
+        dayofyear_window = [(d.month, d.day) for d in d_window]
+        # Extract all data points in the window of all years
+        ts_window = pd.concat([ts.loc[dict_dayofyear_index[d]]
+                               for d in dayofyear_window])
+        # Calculate window mean and std values
+        mean_ts = ts_window.mean()
+        std_ts = ts_window.std()
+        dict_window_mean[(d.month, d.day)] = mean_ts
+        dict_window_std[(d.month, d.day)] = std_ts
+
+    return dict_window_mean, dict_window_std
