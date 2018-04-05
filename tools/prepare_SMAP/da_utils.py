@@ -148,7 +148,7 @@ def extract_smap_static_info(filename, orbit="AM"):
     return lat, lon
 
 
-def extract_smap_sm(filename, orbit, qc_retrieval_flag=False):
+def extract_smap_sm(filename, orbit):
     ''' This function extracts soil moisture values [cm3/cm3] from a raw SMAP L3 HDF5 file.
     
     Parameters
@@ -157,8 +157,6 @@ def extract_smap_sm(filename, orbit, qc_retrieval_flag=False):
         File path of a SMAP L3 HDF5 file
     orbit: <str>
         "AM" or "PM"
-    qc_retrieval_flag: <bool>
-        Whether remove retrievals with non-zero quality flag. Default: False (do not remove)
     
     Reterns
     -------
@@ -171,20 +169,15 @@ def extract_smap_sm(filename, orbit, qc_retrieval_flag=False):
         if orbit == "AM":
             sm = f['Soil_Moisture_Retrieval_Data_AM']['soil_moisture'].value
             missing_value = f['Soil_Moisture_Retrieval_Data_AM']['soil_moisture'].attrs['_FillValue']
+            retireval_qual_flag = f['Soil_Moisture_Retrieval_Data_AM']['retrieval_qual_flag'].value
         else:
             sm = f['Soil_Moisture_Retrieval_Data_PM']['soil_moisture_pm'].value
             missing_value = f['Soil_Moisture_Retrieval_Data_PM']['soil_moisture_pm'].attrs['_FillValue']
+            retireval_qual_flag = f['Soil_Moisture_Retrieval_Data_PM']['retrieval_qual_flag_pm'].value
         # Mask missing points
         sm[sm==missing_value] = np.nan
-        # Remove non-zero retrieval quality flag, if specified
-        if qc_retrieval_flag:
-            if orbit == "AM":
-                flags = f['Soil_Moisture_Retrieval_Data_AM']['retrieval_qual_flag'].value
-            else:
-                flags = f['Soil_Moisture_Retrieval_Data_PM']['retrieval_qual_flag_pm'].value
-            sm[flags>0] = np.nan
         
-    return sm
+    return sm, retireval_qual_flag
 
 
 def extract_smap_multiple_days(filename, start_date, end_date, da_smap_domain=None):
@@ -228,6 +221,7 @@ def extract_smap_multiple_days(filename, start_date, end_date, da_smap_domain=No
                           coords=[times, da_smap_domain['lat'], da_smap_domain['lon']],
                           dims=['time', 'lat', 'lon'])
     da[:] = np.nan
+    da_flag = da.copy(deep=True)
 
     # Load data for each day
     if da_smap_domain is not None:
@@ -240,36 +234,55 @@ def extract_smap_multiple_days(filename, start_date, end_date, da_smap_domain=No
         date_str = date.strftime("%Y%m%d")  # date in YYYYMMMDD
         # --- Load AM data for this day --- #
         try:
-            sm_am = extract_smap_sm(glob.glob(filename.format(date_str))[0], "AM", qc_retrieval_flag=False)
+            sm_am, retireval_qual_flag_am = extract_smap_sm(glob.glob(filename.format(date_str))[0], "AM")
+            # Clip domain
             if da_smap_domain is not None:
+                # Retrieval data
                 da_global[:, :] = sm_am
                 da_domain_data = da_global.sel(
                     lat=slice(domain_lat_range[0]+0.05, domain_lat_range[1]-0.05),
                     lon=slice(domain_lon_range[0]-0.05, domain_lon_range[1]+0.05))
                 sm_am = da_domain_data.values
+                # Retrieval flag
+                da_global[:, :] = retireval_qual_flag_am
+                da_domain_data = da_global.sel(
+                    lat=slice(domain_lat_range[0]+0.05, domain_lat_range[1]-0.05),
+                    lon=slice(domain_lon_range[0]-0.05, domain_lon_range[1]+0.05))
+                retireval_qual_flag_am = da_domain_data.values
+                
         except:
             print("Warning: cannot load AM data for {}. Assign missing value for this time.".format(date_str))
             continue
         # Put in the final da
         time = date + pd.DateOffset(hours=6)
         da.loc[time, :, :] = sm_am
+        da_flag.loc[time, :, :] = retireval_qual_flag_am
         # --- Load PM data for this day --- #
         try:
-            sm_pm = extract_smap_sm(glob.glob(filename.format(date_str))[0], "PM", qc_retrieval_flag=False)
+            sm_pm, retrieval_qual_flag_pm = extract_smap_sm(glob.glob(filename.format(date_str))[0], "PM")
+            # Clip domain
             if da_smap_domain is not None:
+                # Retrieval data
                 da_global[:, :] = sm_pm
                 da_domain_data = da_global.sel(
                     lat=slice(domain_lat_range[0]+0.05, domain_lat_range[1]-0.05),
                     lon=slice(domain_lon_range[0]-0.05, domain_lon_range[1]+0.05))
                 sm_pm = da_domain_data.values
+                # Retrieval flag
+                da_global[:, :] = retrieval_qual_flag_pm
+                da_domain_data = da_global.sel(
+                    lat=slice(domain_lat_range[0]+0.05, domain_lat_range[1]-0.05),
+                    lon=slice(domain_lon_range[0]-0.05, domain_lon_range[1]+0.05))
+                retrieval_qual_flag_pm = da_domain_data.values
         except:
             print("Warning: cannot load PM data for {}. Assign missing value for this time.".format(date_str))
             continue
         # Put in da
         time = date + pd.DateOffset(hours=18)
         da.loc[time, :, :] = sm_pm
+        da_flag.loc[time, :, :] = retrieval_qual_flag_pm
 
-    return da
+    return da, da_flag
 
 
 def edges_from_centers(centers):

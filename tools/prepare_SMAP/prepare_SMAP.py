@@ -53,7 +53,7 @@ print('Determing SMAP domain...')
 ds_vic_domain = xr.open_dataset(cfg['DOMAIN']['vic_domain_nc'])
 da_vic_domain = ds_vic_domain[cfg['DOMAIN']['mask_name']]
 # --- Load one example SMAP file --- #
-da_smap_example = extract_smap_multiple_days(
+da_smap_example, da_flag_example = extract_smap_multiple_days(
     os.path.join(cfg['INPUT']['smap_dir'], 'SMAP_L3_SM_P_{}_*.h5'),
     start_date.strftime('%Y%m%d'), start_date.strftime('%Y%m%d'))
 # --- Calculate SMAP domain needed --- #
@@ -128,7 +128,7 @@ if cfg['INPUT']['smap_exist'] is True:
 # If SMAP data not processed, before, load and process
 else:
     # --- Load SMAP data --- #
-    da_smap = extract_smap_multiple_days(
+    da_smap, da_flag = extract_smap_multiple_days(
         os.path.join(cfg['INPUT']['smap_dir'], 'SMAP_L3_SM_P_{}_*.h5'),
         start_date.strftime('%Y%m%d'), end_date.strftime('%Y%m%d'),
         da_smap_domain=da_smap_domain)
@@ -140,8 +140,12 @@ else:
         [pd.to_datetime(t) + pd.DateOffset(seconds=3600*shift_hours)
          for t in da_smap['time'].values]
     da_smap['time'] = smap_times_shifted
+    da_flag['time'] = smap_times_shifted
     # --- Exclude SMAP data points after shifting that are outside of the processing time period --- #
     da_smap = da_smap.sel(
+        time=slice(start_date.strftime('%Y%m%d')+'-00',
+                   end_date.strftime('%Y%m%d')+'-23'))
+    da_flag = da_flag.sel(
         time=slice(start_date.strftime('%Y%m%d')+'-00',
                    end_date.strftime('%Y%m%d')+'-23'))
     # --- Get a list of SMAP AM & PM time points after shifting --- #
@@ -156,7 +160,8 @@ else:
                                     for t in da_smap['time'].values])
     smap_times_pm = da_smap['time'].values[smap_times_pm_ind]
     # --- Save processed SMAP data to file --- #
-    ds_smap = xr.Dataset({'soil_moisture': da_smap})
+    ds_smap = xr.Dataset({'soil_moisture': da_smap,
+                          'retrieval_qual_flag': da_flag})
     ds_smap.to_netcdf(
         os.path.join(output_subdir_data_unscaled,
                      'soil_moisture_unscaled.{}_{}.nc'.format(
