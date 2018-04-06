@@ -100,6 +100,19 @@ else:
     linear_model = False
     adjust_negative = True
 
+# --- Get diagnosis flags from cfg, if specified --- #
+if 'DIAGNOSE' in cfg:
+    dict_diagnose = cfg['DIAGNOSE']
+else:
+    dict_diagnose = None
+# Check whether to exclude SM3 from state vector
+if dict_diagnose is not None and 'no_sm3' in dict_diagnose and \
+dict_diagnose['no_sm3'] is True:
+    no_sm3 = True
+else:
+    no_sm3 = False
+
+
 # =========================================================== #
 # Simulate "truth" - run VIC with perturbed forcings and
 # states
@@ -229,7 +242,8 @@ for t in range(len(meas_times)):
             out_states_nc=perturbed_state_nc,
             da_max_moist_n=da_max_moist_n,
             adjust_negative=adjust_negative,
-            seed=None)
+            seed=None,
+            no_sm3=no_sm3)
     # Clean up original state file
     os.remove(orig_state_nc)
 

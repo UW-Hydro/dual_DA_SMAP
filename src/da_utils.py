@@ -828,6 +828,13 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
             da_vic_domain, da_meas, weight_nc)
     else:
         list_source_ind2D_weight_all = None
+
+    # Check whether to exclude SM3 from state vector
+    if dict_diagnose is not None and 'no_sm3' in dict_diagnose and \
+    dict_diagnose['no_sm3'] is True:
+        no_sm3 = True
+    else:
+        no_sm3 = False
     
     # Check whether the run period is consistent with VIC setup
     pass
@@ -874,7 +881,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                                                    'state.ens{}.nc'.format(i+1)),
                         da_max_moist_n=da_max_moist_n,
                         adjust_negative=adjust_negative,
-                        seed=seed)
+                        seed=seed,
+                        no_sm3=no_sm3)
                 # Save soil moisture perturbation
                 if debug:
                     ds_perturbation = xr.Dataset({'STATE_SOIL_MOISTURE':
@@ -893,7 +901,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                     perturb_soil_moisture_states_class_input,
                     (class_states, L, scale_n_nloop,
                      os.path.join(init_state_dir, 'state.ens{}.nc'.format(i+1)),
-                     da_max_moist_n, adjust_negative, seed))
+                     da_max_moist_n, adjust_negative, seed, no_sm3))
             # --- Finish multiprocessing --- #
             pool.close()
             pool.join()
@@ -993,7 +1001,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         state_time = vic_run_end_time + pd.DateOffset(hours=24/vic_model_steps_per_day)
         if bias_correct:
             list_da_sm_prop, da_delta = bias_correct_propagated_states(
-                N, state_time, out_state_dir)  # Length of list: N+1
+                N, state_time, out_state_dir, no_sm3)  # Length of list: N+1
             if debug:
                 debug_bc_dir = setup_output_dirs(
                             output_temp_dir,
@@ -1171,7 +1179,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                     mismatched_grid=mismatched_grid,
                     list_source_ind2D_weight_all=list_source_ind2D_weight_all,
                     adjust_negative=adjust_negative,
-                    nproc=nproc)
+                    nproc=nproc,
+                    no_sm3=no_sm3)
             if debug:
                 # --- Save update increment to netCDF file --- #
                 # Aggregated to cellAvg
@@ -1274,7 +1283,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                     out_states_dir=pert_state_dir,
                     da_max_moist_n=da_max_moist_n,
                     adjust_negative=adjust_negative,
-                    nproc=nproc)
+                    nproc=nproc,
+                    no_sm3=no_sm3)
         if debug:
             # Aggregate to cellAvg
             da_perturbation = xr.concat(list_da_perturbation, dim='N')
@@ -1385,7 +1395,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         state_time = next_time + pd.DateOffset(hours=24/vic_model_steps_per_day)
         if bias_correct:
             list_da_sm_prop, da_delta = bias_correct_propagated_states(
-                N, state_time, out_state_dir)
+                N, state_time, out_state_dir, no_sm3)
             if debug:
                 # Aggregate to cellAvg
                 veg_class = da_tile_frac['veg_class']
@@ -2526,7 +2536,7 @@ def calculate_gain_K_whole_field(da_x, da_y_est, R):
 
 def update_states(da_y_est, da_K, da_meas, R, da_sm_to_update,
                   da_max_moist_n,
-                  adjust_negative=True, seed=None):
+                  adjust_negative=True, seed=None, no_sm3=False):
     ''' Update the EnKF states for the whole field.
     
     Parameters
@@ -2558,6 +2568,9 @@ def update_states(da_y_est, da_K, da_meas, R, da_sm_to_update,
         in this function and will not affect the upper-level code.
         None for not re-assign seed in this function, but using the global seed)
         Default: None
+    no_sm3: <bool>
+        Whether to EXCLUDE SM3 from kalman filter state vector (i.e., no perturbation or update)
+        Default: False (i.e., default is to include SM3)
     
     Returns
     ----------
@@ -2585,13 +2598,20 @@ def update_states(da_y_est, da_K, da_meas, R, da_sm_to_update,
     da_updated = class_states.convert_new_EnKFstates_sm_to_VICstates(
         da_x_updated)['STATE_SOIL_MOISTURE']
 
+    # If exclude SM3 from state vector, reset SM3 to before-update states
+    if no_sm3 is True:
+        da_updated[:, :, 2, :, :] = \
+            class_states.ds['STATE_SOIL_MOISTURE'][:, :, 2, :, :]
+        n = len(da_update_increm['n'])
+        da_update_increm[:, :, int(n/3*2):] = 0
+
     return da_updated, da_update_increm
 
 
 def update_states_ensemble(y_est, K, da_meas, R, list_da_sm_to_update,
                            da_max_moist_n,
                            mismatched_grid=False, list_source_ind2D_weight_all=None,
-                           adjust_negative=True, nproc=1):
+                           adjust_negative=True, nproc=1, no_sm3=False):
     ''' Update the EnKF states for the whole field for each ensemble member.
 
     Parameters
@@ -2642,6 +2662,9 @@ def update_states_ensemble(y_est, K, da_meas, R, list_da_sm_to_update,
     nproc: <int>
         Number of processors to use for parallel ensemble
         Default: 1
+    no_sm3: <bool>
+        Whether to EXCLUDE SM3 from kalman filter state vector (i.e., no perturbation or update)
+        Default: False (i.e., default is to include SM3)
 
     Returns
     ----------
@@ -2676,12 +2699,13 @@ def update_states_ensemble(y_est, K, da_meas, R, list_da_sm_to_update,
                             y_est.loc[:, :, :, i], K, da_meas, R,
                             da_sm_to_update,
                             da_max_moist_n,
-                            adjust_negative, seed)
+                            adjust_negative, seed,
+                            no_sm3)
             else:  # if there is mismatch
                 da_updated, da_update_increm = update_states_mismatched_grid(
                     y_est[:, :, i], K, da_meas, R, da_sm_to_update,
                     da_max_moist_n, list_source_ind2D_weight_all,
-                    adjust_negative, seed)
+                    adjust_negative, seed, no_sm3)
             # Put results to list
             list_da_updated.append(da_updated)
             list_da_update_increm.append(da_update_increm)
@@ -2701,13 +2725,13 @@ def update_states_ensemble(y_est, K, da_meas, R, list_da_sm_to_update,
                                 update_states,
                                 (y_est.loc[:, :, :, i], K, da_meas, R,
                                 da_sm_to_update, da_max_moist_n,
-                                adjust_negative, seed))
+                                adjust_negative, seed, no_sm3))
             else:  # if there is mismatch
                 results[i] = pool.apply_async(
                     update_states_mismatched_grid,
                         (y_est[:, :, i], K, da_meas, R, da_sm_to_update,
                          da_max_moist_n, list_source_ind2D_weight_all,
-                         adjust_negative, seed))
+                         adjust_negative, seed, no_sm3))
         # --- Finish multiprocessing --- #
         pool.close()
         pool.join()
@@ -2805,7 +2829,7 @@ def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir,
                                           out_states_dir,
                                           da_max_moist_n,
                                           adjust_negative=True,
-                                          nproc=1):
+                                          nproc=1, no_sm3=False):
     ''' Perturb all soil_moisture states for each ensemble member
     
     Parameters
@@ -2840,6 +2864,10 @@ def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir,
     nproc: <int>
         Number of processors to use for parallel ensemble
         Default: 1
+    no_sm3: <bool>
+        Whether to EXCLUDE SM3 from kalman filter state vector
+        (i.e., no perturbation or update)
+        Default: False (i.e., default is to include SM3)
 
     Return
     ----------
@@ -2866,7 +2894,7 @@ def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir,
             da_perturbation = perturb_soil_moisture_states(
                                          states_to_perturb_nc, L, scale_n_nloop,
                                          out_states_nc, da_max_moist_n,
-                                         adjust_negative, seed)
+                                         adjust_negative, seed, no_sm3)
             list_da_perturbation.append(da_perturbation)
     # --- If nproc > 1, use multiprocessing --- #
     elif nproc > 1:
@@ -2885,7 +2913,7 @@ def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir,
                     perturb_soil_moisture_states,
                     (states_to_perturb_nc, L, scale_n_nloop,
                      out_states_nc, da_max_moist_n,
-                     adjust_negative, seed))
+                     adjust_negative, seed, no_sm3))
         # --- Finish multiprocessing --- #
         pool.close()
         pool.join()
@@ -3206,7 +3234,8 @@ def propagate_ensemble_linear_model(N, start_time, end_time, lat_coord,
 
 def perturb_soil_moisture_states(states_to_perturb_nc, L, scale_n_nloop,
                                  out_states_nc, da_max_moist_n,
-                                 adjust_negative=True, seed=None):
+                                 adjust_negative=True, seed=None,
+                                 no_sm3=False):
     ''' Perturb all soil_moisture states
 
     Parameters
@@ -3239,6 +3268,10 @@ def perturb_soil_moisture_states(states_to_perturb_nc, L, scale_n_nloop,
         in this function and will not affect the upper-level code.
         None for not re-assign seed in this function, but using the global seed)
         Default: None
+    no_sm3: <bool>
+        Whether to EXCLUDE SM3 from kalman filter state vector
+        (i.e., no perturbation or update)
+        Default: False (i.e., default is to include SM3)
 
     Returns
     ----------
@@ -3260,6 +3293,10 @@ def perturb_soil_moisture_states(states_to_perturb_nc, L, scale_n_nloop,
     ds_perturbed = class_states.perturb_soil_moisture_Gaussian(
                             L, scale_n_nloop, da_max_moist_n,
                             adjust_negative, seed)
+    # If exclude SM3 from state vector, reset SM3 to before-perturbed states
+    if no_sm3 is True:
+        ds_perturbed['STATE_SOIL_MOISTURE'][:, :, 2, :, :] = \
+            class_states.ds['STATE_SOIL_MOISTURE'][:, :, 2, :, :]
 
     # --- Save perturbed state file --- #
     ds_perturbed.to_netcdf(out_states_nc,
@@ -3273,7 +3310,7 @@ def perturb_soil_moisture_states(states_to_perturb_nc, L, scale_n_nloop,
 
 def perturb_soil_moisture_states_class_input(class_states, L, scale_n_nloop,
                                  out_states_nc, da_max_moist_n,
-                                 adjust_negative=True, seed=None):
+                                 adjust_negative=True, seed=None, no_sm3=False):
     ''' Perturb all soil_moisture states (same as funciton
         perturb_soil_moisture_states except here inputing class_states
         instead of an netCDF path for states to perturb)
@@ -3308,6 +3345,9 @@ def perturb_soil_moisture_states_class_input(class_states, L, scale_n_nloop,
         in this function and will not affect the upper-level code.
         None for not re-assign seed in this function, but using the global seed)
         Default: None
+    no_sm3: <bool>
+        Whether to EXCLUDE SM3 from kalman filter state vector (i.e., no perturbation or update)
+        Default: False (i.e., default is to include SM3)
 
     Returns
     ----------
@@ -3326,6 +3366,10 @@ def perturb_soil_moisture_states_class_input(class_states, L, scale_n_nloop,
     ds_perturbed = class_states.perturb_soil_moisture_Gaussian(
                             L, scale_n_nloop, da_max_moist_n,
                             adjust_negative, seed)
+    # If exclude SM3 from state vector, reset SM3 to before-perturbed states
+    if no_sm3 is True:
+        ds_perturbed['STATE_SOIL_MOISTURE'][:, :, 2, :, :] = \
+            class_states.ds['STATE_SOIL_MOISTURE'][:, :, 2, :, :]
 
     # --- Save perturbed state file --- #
     to_netcdf_state_file_compress(ds_perturbed, out_states_nc)
@@ -4177,7 +4221,7 @@ def calculate_gain_K_whole_field_mismatched_grid(da_x, da_y_est, R,
 
 def update_states_mismatched_grid(y_est_remapped, list_K, da_meas, R, da_sm_to_update,
                                   da_max_moist_n, list_source_ind2D_weight_all,
-                                  adjust_negative=True, seed=None):
+                                  adjust_negative=True, seed=None, no_sm3=False):
     ''' This function updates soil moisture states over the whole field,
     when the measurement grid mismatches the VIC grid.
     NOTE: this function assumes m = 1
@@ -4217,6 +4261,10 @@ def update_states_mismatched_grid(y_est_remapped, list_K, da_meas, R, da_sm_to_u
         in this function and will not affect the upper-level code.
         None for not re-assign seed in this function, but using the global seed)
         Default: None
+    no_sm3: <bool>
+        Whether to EXCLUDE SM3 from kalman filter state vector
+        (i.e., no perturbation or update)
+        Default: False (i.e., default is to include SM3)
 
     Returns
     ----------
@@ -4306,7 +4354,14 @@ def update_states_mismatched_grid(y_est_remapped, list_K, da_meas, R, da_sm_to_u
     # --- Convert updated states to VIC states format --- #
     da_updated = class_states.convert_new_EnKFstates_sm_to_VICstates(
         da_x_updated)['STATE_SOIL_MOISTURE']
-    
+
+    # --- If exclude SM3 from state vector, reset SM3 to before-update states --- #
+    if no_sm3 is True:
+        da_updated[:, :, 2, :, :] = \
+            class_states.ds['STATE_SOIL_MOISTURE'][:, :, 2, :, :]
+        n = len(da_update_increm['n'])
+        da_update_increm[:, :, int(n/3*2):] = 0
+
     return da_updated, da_update_increm
 
 
@@ -4520,7 +4575,7 @@ def edges_from_centers(centers):
     return edges
 
 
-def bias_correct_propagated_states(N, state_time, prop_before_bc_state_dir):
+def bias_correct_propagated_states(N, state_time, prop_before_bc_state_dir, no_sm3=False):
     ''' Bias-correct propagated states following Ryu et al. (2009); only
         bias-correct soil moistures of all layers (but not other state
         variables)
@@ -4535,6 +4590,10 @@ def bias_correct_propagated_states(N, state_time, prop_before_bc_state_dir):
         Directory of propagated state files for each ensemble member before
         bias correction. State file names are "state.ens<i>.YYYYMMDD_SSSSS.nc",
         where <i> is 1, 2, ..., N, or avg (for reference state)
+    no_sm3: <bool>
+        Whether to EXCLUDE SM3 from kalman filter state vector
+        (i.e., no perturbation, update or bias correction)
+        Default: False (i.e., default is to include SM3)
 
     Returns
     ----------
@@ -4570,6 +4629,11 @@ def bias_correct_propagated_states(N, state_time, prop_before_bc_state_dir):
     da_mean = sum(list_da) / N
     da_delta = da_mean - ds_ref['STATE_SOIL_MOISTURE']
 
+    # --- If exclude SM3 from state vector, reset da_delta to zero --- #
+    # !!! NOTE: THIS PART HAS NOT BEEN TESTED !!!
+    if no_sm3 is True:
+        da_delta[:, :, 2, :, :] = 0
+        
     # --- Bias-correct each ensemble state --- #
     list_da_sm_bc = []
     for i in range(N):
