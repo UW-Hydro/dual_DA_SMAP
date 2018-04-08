@@ -242,13 +242,13 @@ def extract_smap_multiple_days(filename, start_date, end_date, da_smap_domain=No
                 da_domain_data = da_global.sel(
                     lat=slice(domain_lat_range[0]+0.05, domain_lat_range[1]-0.05),
                     lon=slice(domain_lon_range[0]-0.05, domain_lon_range[1]+0.05))
-                sm_am = da_domain_data.values
+                sm_am = da_domain_data.values.copy()
                 # Retrieval flag
                 da_global[:, :] = retireval_qual_flag_am
                 da_domain_data = da_global.sel(
                     lat=slice(domain_lat_range[0]+0.05, domain_lat_range[1]-0.05),
                     lon=slice(domain_lon_range[0]-0.05, domain_lon_range[1]+0.05))
-                retireval_qual_flag_am = da_domain_data.values
+                retireval_qual_flag_am = da_domain_data.values.copy()
                 
         except:
             print("Warning: cannot load AM data for {}. Assign missing value for this time.".format(date_str))
@@ -267,13 +267,13 @@ def extract_smap_multiple_days(filename, start_date, end_date, da_smap_domain=No
                 da_domain_data = da_global.sel(
                     lat=slice(domain_lat_range[0]+0.05, domain_lat_range[1]-0.05),
                     lon=slice(domain_lon_range[0]-0.05, domain_lon_range[1]+0.05))
-                sm_pm = da_domain_data.values
+                sm_pm = da_domain_data.values.copy()
                 # Retrieval flag
                 da_global[:, :] = retrieval_qual_flag_pm
                 da_domain_data = da_global.sel(
                     lat=slice(domain_lat_range[0]+0.05, domain_lat_range[1]-0.05),
                     lon=slice(domain_lon_range[0]-0.05, domain_lon_range[1]+0.05))
-                retrieval_qual_flag_pm = da_domain_data.values
+                retrieval_qual_flag_pm = da_domain_data.values.copy()
         except:
             print("Warning: cannot load PM data for {}. Assign missing value for this time.".format(date_str))
             continue
@@ -581,6 +581,14 @@ def rescale_SMAP_domain(da_smap, da_reference, smap_times_am, smap_times_pm,
     # Rescale measurement error
     da_meas_error_rescaled = da_meas_error_unscaled.copy()
     da_meas_error_rescaled[:] = da_meas_error_unscaled / da_std_input * da_std_reference
+
+    # --- Exclude locations with near-constant SMAP measurements --- #
+    # Extract indices of such locations
+    ind = np.where(da_std_input.values<0.01)
+    # Exclude SMAP data itself & error
+    for i in range((da_std_input.values<0.01).sum()):
+        da_smap_rescaled[:, ind[0][i], ind[1][i]] = np.nan
+        da_meas_error_rescaled[ind[0][i], ind[1][i]] = np.nan
 
     return da_smap_rescaled, da_meas_error_rescaled
 
