@@ -177,8 +177,7 @@ if cfg['QC']['qc_method'] == 'no_winter':  # If exclude Nov - Feb data
     for t in da_smap['time'].values:
         if pd.to_datetime(t).month in [11, 12, 1, 2]:
             da_smap.loc[t, :, :] = np.nan
-    ds_smap = xr.Dataset({'soil_moisture': da_smapm,
-                          'retrieval_qual_flag': da_flag})
+    ds_smap = xr.Dataset({'soil_moisture': da_smap})
     ds_smap.to_netcdf(
         os.path.join(output_subdir_data_unscaled,
                      'soil_moisture_unscaled.qc_{}.{}_{}.nc'.format(
