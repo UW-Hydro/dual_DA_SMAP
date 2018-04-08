@@ -235,7 +235,8 @@ else:
 da_meas_error_unscaled = xr.open_dataset(
     cfg['INPUT']['meas_error_unscaled_nc'])[cfg['INPUT']['meas_error_unscaled_varname']]
 # Rescale
-da_smap_rescaled, da_meas_error_rescaled = rescale_SMAP_domain(da_smap, da_vic_remapped,
+da_smap_rescaled, da_meas_error_rescaled, da_std_ratio = rescale_SMAP_domain(
+                    da_smap, da_vic_remapped,
                     smap_times_am, smap_times_pm,
                     da_meas_error_unscaled,
                     method=cfg['RESCALE']['rescale_method'])
@@ -262,6 +263,19 @@ ds_meas_error_rescaled.to_netcdf(
                      start_date.strftime('%Y%m%d'),
                      end_date.strftime('%Y%m%d'))),
     format='NETCDF4_CLASSIC')
+
+# --- Save VIC-to-SMAP std. ratio to file --- #
+da_std_ratio.attrs['description'] = 'long-term ratio of standard deviation (VIC to SMAP) used for rescaling measurement error'
+ds_std_ratio = xr.Dataset({'std_ratio_vic_to_smap': da_std_ratio})
+ds_std_ratio.to_netcdf(
+    os.path.join(output_subdir_data_scaled,
+                 'std_ratio.{}.{}{}_{}.nc'.format(
+                     cfg['RESCALE']['rescale_method'],
+                     cfg['QC']['qc_method']+'.' if cfg['QC']['qc_method'] is not None else '',
+                     start_date.strftime('%Y%m%d'),
+                     end_date.strftime('%Y%m%d'))),
+    format='NETCDF4_CLASSIC')
+
 
 # ============================================================ #
 # Perhaps plot some check plots

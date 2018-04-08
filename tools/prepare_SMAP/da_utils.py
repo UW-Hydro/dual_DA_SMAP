@@ -548,6 +548,8 @@ def rescale_SMAP_domain(da_smap, da_reference, smap_times_am, smap_times_pm,
         Rescaled SMAP data
     da_meas_error_scaled: <xr.DataArray>
         Rescaled SMAP measurement error. Dimension: [lat, lon]
+    da_std_ratio: <xr.DataArray>
+        Long-term VIC-to-SMAP std. ratio
     '''
 
     # --- Extract AM and PM data from da_reference
@@ -581,6 +583,8 @@ def rescale_SMAP_domain(da_smap, da_reference, smap_times_am, smap_times_pm,
     # Rescale measurement error
     da_meas_error_rescaled = da_meas_error_unscaled.copy()
     da_meas_error_rescaled[:] = da_meas_error_unscaled / da_std_input * da_std_reference
+    # Save std ratio
+    da_std_ratio = da_std_reference / da_std_input
 
     # --- Exclude locations with near-constant SMAP measurements --- #
     # Extract indices of such locations
@@ -590,7 +594,7 @@ def rescale_SMAP_domain(da_smap, da_reference, smap_times_am, smap_times_pm,
         da_smap_rescaled[:, ind[0][i], ind[1][i]] = np.nan
         da_meas_error_rescaled[ind[0][i], ind[1][i]] = np.nan
 
-    return da_smap_rescaled, da_meas_error_rescaled
+    return da_smap_rescaled, da_meas_error_rescaled, da_std_ratio
 
 
 def rescale_domain(da_input, da_reference, method):
