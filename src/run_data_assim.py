@@ -51,6 +51,13 @@ debug = (sys.argv[4].lower() == 'true')
 # "None" for starting from scratch
 restart = None if sys.argv[5].lower()=='none' else str(sys.argv[5])
 
+# Whether set a different maximum number of processors
+# when running VIC in parallel
+if len(sys.argv) == 7:
+    nproc_vic = int(sys.argv[6])
+else:
+    nproc_vic = None
+
 
 # ============================================================ #
 # Set random generation seed
@@ -225,6 +232,7 @@ if not linear_model:
          mismatched_grid=cfg['GRID_MISMATCH']['mismatched_grid'],
          weight_nc=weight_nc,
          nproc=nproc,
+         nproc_vic=nproc_vic,
          debug=debug,
          output_temp_dir=dirs['temp'],
          restart=restart,
