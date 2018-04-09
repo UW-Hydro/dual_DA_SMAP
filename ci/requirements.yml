@@ -1,0 +1,25 @@
+name: da2
+channels:
+  - conda-forge
+  - anaconda
+  - nesii/label/dev-esmf
+dependencies:
+  - python=3.5
+  - numpy
+  - scipy
+  - pandas
+  - configobj
+  - xarray
+  - matplotlib
+  - seaborn
+  - bokeh
+  - cartopy
+  - h5py
+  - jupyter
+  - hdf5=1.8
+  - netCDF4
+# Manually install the following packages:
+#  - pip:
+#    - git+https://github.com/UW-Hydro/tonic.git (data_assim branch from yixinmao)
+#    - xesmf (first: conda install -c nesii/label/dev-esmf -c conda-forge esmpy)
+#    - pip install properscoring
