@@ -1,9 +1,8 @@
 
-''' This script perturbs original forcing and generate and ensemble of forcing
-    data
+''' This script perturbs original forcing and generate and one ensemble member
 
     Usage:
-        $ python gen_ensemble_forcing.py config_file
+        $ python gen_ensemble_forcing.py <config_file> <ens>
 '''
 
 import sys
@@ -18,7 +17,7 @@ import matplotlib.pyplot as plt
 
 from tonic.models.vic.vic import VIC
 from tonic.io import read_config, read_configobj
-from da_utils import Forcings, perturb_forcings_ensemble
+from da_utils import Forcings, perturb_forcings
 
 
 # ============================================================ #
@@ -27,11 +26,17 @@ from da_utils import Forcings, perturb_forcings_ensemble
 # Read config file
 cfg = read_configobj(sys.argv[1])
 
+# Ensemble member index; must be an integer
+ens = int(sys.argv[2])
+
 
 # ============================================================ #
 # Set random generation seed
+# Here the seed is modified from the base seed specified in the
+# cfg file by the ensemble index, so that each ensemble member
+# will have a different random seed realization
 # ============================================================ #
-np.random.seed(cfg['CONTROL']['seed'])
+np.random.seed(cfg['CONTROL']['seed'] + ens)
 
 
 # ============================================================ #
@@ -46,7 +51,6 @@ orig_forcing_basedir = os.path.join(
                             cfg['FORCING']['orig_forcing_nc_basepath'])
 output_basedir = os.path.join(cfg['CONTROL']['root_dir'],
                               cfg['OUTPUT']['output_basedir'])
-N = cfg['ENSEMBLE']['N']
 
 # --- Process forcing names in the input forcing netCDF file --- #
 # Construct forcing variable name dictionary
@@ -67,10 +71,10 @@ ds_all_years = xr.concat(list_ds, 'time')
 
 # Perturb and generate forcing ensemble
 class_forcings_orig = Forcings(ds_all_years)
-perturb_forcings_ensemble(N, orig_forcing=class_forcings_orig,
-                          dict_varnames=dict_varnames,
-                          prec_std=cfg['FORCING']['prec_std'],
-                          prec_phi=cfg['FORCING']['phi'],
-                          out_forcing_basedir=output_basedir)
+perturb_forcings(ens, orig_forcing=class_forcings_orig,
+                 dict_varnames=dict_varnames,
+                 prec_std=cfg['FORCING']['prec_std'],
+                 prec_phi=cfg['FORCING']['phi'],
+                 out_forcing_basedir=output_basedir)
 
 

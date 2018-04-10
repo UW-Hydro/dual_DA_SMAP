@@ -2755,14 +2755,14 @@ def update_states_ensemble(y_est, K, da_meas, R, list_da_sm_to_update,
     return list_da_updated, da_update_increm
 
 
-def perturb_forcings_ensemble(N, orig_forcing, dict_varnames, prec_std,
-                              prec_phi, out_forcing_basedir):
-    ''' Perturb forcings for all ensemble members
+def perturb_forcings(ens, orig_forcing, dict_varnames, prec_std,
+                     prec_phi, out_forcing_basedir):
+    ''' Perturb forcings for a single ensemble member
 
     Parameters
     ----------
-    N: <int>
-        Number of ensemble members
+    ens: <int>
+        Ensemble index; will be used in output directory name
     orig_forcing: <class 'Forcings'>
         Original (unperturbed) VIC forcings
     dict_varnames: <dict>
@@ -2782,23 +2782,21 @@ def perturb_forcings_ensemble(N, orig_forcing, dict_varnames, prec_std,
     os
     '''
     
-    # Loop over each ensemble member
-    for i in range(N):
-        # Setup subdir
-        subdir = setup_output_dirs(
-                    out_forcing_basedir,
-                    mkdirs=['ens_{}'.format(i+1)])['ens_{}'.format(i+1)]
+    # Setup subdir
+    subdir = setup_output_dirs(
+                out_forcing_basedir,
+                mkdirs=['ens_{}'.format(ens)])['ens_{}'.format(ens)]
 
-        # Perturb PREC
-        ds_perturbed = orig_forcing.perturb_prec_lognormal(
-                                            varname=dict_varnames['PREC'],
-                                            std=prec_std,
-                                            phi=prec_phi)
-        # Save to nc file
-        for year, ds in ds_perturbed.groupby('time.year'):
-            to_netcdf_forcing_file_compress(
-                    ds, os.path.join(subdir,
-                    'force.{}.nc'.format(year)))
+    # Perturb PREC
+    ds_perturbed = orig_forcing.perturb_prec_lognormal(
+                                        varname=dict_varnames['PREC'],
+                                        std=prec_std,
+                                        phi=prec_phi)
+    # Save to nc file
+    for year, ds in ds_perturbed.groupby('time.year'):
+        to_netcdf_forcing_file_compress(
+                ds, os.path.join(subdir,
+                'force.{}.nc'.format(year)))
 
 
 def replace_global_values(gp, replace):
