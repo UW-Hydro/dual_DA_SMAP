@@ -8,12 +8,13 @@ import sys
 import os
 import numpy as np
 import xarray as xr
-import matplotlib
-matplotlib.use('Agg')
+#import matplotlib
+#matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import pandas as pd
 import shutil
 import timeit
+import numbers
 
 from tonic.models.vic.vic import VIC
 from tonic.io import read_configobj
@@ -369,9 +370,24 @@ print('Generate synthetic measurements...')
 da_sm1_true = da_state_cellAvg.sel(nlayer=0)
 
 # --- Add noise --- #
-# Generate the standard deviation of noise to be added for each grid cell
+# If input is a numerical number, assign spatial constant R values
+if isinstance(cfg['SYNTHETIC_MEAS']['R'], numbers.Number):
+    sigma = np.empty([len(da_sm1_true['lat']), len(da_sm1_true['lon'])])
+    sigma[:] = np.sqrt(cfg['SYNTHETIC_MEAS']['R'])
+# If input is an xr.Dataset
+else:
+    if cfg['SYNTHETIC_MEAS']['R_vartype'] == 'R':
+        sigma = np.sqrt(xr.open_dataset(
+                    os.path.join(cfg['CONTROL']['root_dir'], cfg['SYNTHETIC_MEAS']['R']))\
+                    [cfg['SYNTHETIC_MEAS']['R_varname']].values)
+    elif cfg['SYNTHETIC_MEAS']['R_vartype'] == 'std':
+        sigma = xr.open_dataset(
+            os.path.join(cfg['CONTROL']['root_dir'], cfg['SYNTHETIC_MEAS']['R']))\
+            [cfg['SYNTHETIC_MEAS']['R_varname']].values
+# Put into a da
 da_sigma = da_sm1_true[0, :, :].copy(deep=True)
-da_sigma[:] = cfg['SYNTHETIC_MEAS']['sigma']
+da_sigma[:] = sigma
+# Generate the standard deviation of noise to be added for each grid cell
 # Add noise
 VarToPerturb_sm1 = VarToPerturb(da_sm1_true) # create class
 da_sm1_perturbed = VarToPerturb_sm1.add_gaussian_white_noise(
