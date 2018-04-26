@@ -51,10 +51,17 @@ debug = (sys.argv[4].lower() == 'true')
 # "None" for starting from scratch
 restart = None if sys.argv[5].lower()=='none' else str(sys.argv[5])
 
-# Whether set a different maximum number of processors
-# when running VIC in parallel
+# (Optional) Whether to save cell-avg updated states only to save space
+# Use this option if no postprocessing runs will be done
 if len(sys.argv) == 7:
-    nproc_vic = int(sys.argv[6])
+    save_cellAvg_state_only = (sys.argv[6].lower() == 'true')
+else:
+    save_cellAvg_state_only = False
+
+# (Optional) Whether set a different maximum number of processors
+# when running VIC in parallel
+if len(sys.argv) == 8:
+    nproc_vic = int(sys.argv[7])
 else:
     nproc_vic = None
 
@@ -234,6 +241,7 @@ if not linear_model:
          nproc=nproc,
          nproc_vic=nproc_vic,
          debug=debug,
+         save_cellAvg_state_only=save_cellAvg_state_only,
          output_temp_dir=dirs['temp'],
          restart=restart,
          dict_diagnose=dict_diagnose)

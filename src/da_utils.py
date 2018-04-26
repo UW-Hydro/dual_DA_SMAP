@@ -695,7 +695,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
              weight_nc=None,
              nproc=1,
              nproc_vic=None,
-             mpi_proc=None, mpi_exe='mpiexec', debug=False, output_temp_dir=None,
+             mpi_proc=None, mpi_exe='mpiexec', debug=False, save_cellAvg_state_only=False,
+             output_temp_dir=None,
              restart=None, dict_diagnose=None,
              linear_model=False, linear_model_prec_varname=None,
              dict_linear_model_param=None):
@@ -777,6 +778,9 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         Path for MPI exe
     debug: <bool>
         True: output temp files for diagnostics; False: do not output temp files
+    save_cellAvg_state_only: <bool>
+        True: save cell-avg updated states only and delete full VIC states to save space
+        Default: False
     output_temp_dir: <str>
         Directory for temp files (for dignostic purpose); only used when
         debug = True
@@ -1065,6 +1069,9 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         # If restart, skip the time steps before the restart time
         if restart is not None and current_time < restart_time:
             continue
+        # Determine the last update time
+        if t > 0:
+            last_time = pd.to_datetime(da_meas[da_meas_time_var].values[t-1])
         # Determine next time
         if t == len(da_meas[da_meas_time_var])-1:  # if this is the last measurement time
             next_time = end_time
@@ -1247,6 +1254,18 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                     current_time.strftime("%Y%m%d-%H-%M-%S")))
             with open(filename, 'wb') as f:
                 pickle.dump(dict_ens_list_history_files, f)
+            
+            # (1.6) If save cell-avg updated states only, then calculate cell-avg updated states
+            # of the LAST update and delete the full update states
+            if save_cellAvg_state_only and t > 0:
+                updated_states_to_cleanup_dirname = 'updated.{}_{:05d}'.format(
+                    last_time.strftime('%Y%m%d'), last_time.hour*3600+current_time.second)
+                updated_states_to_cleanup_dir = setup_output_dirs(
+                    output_vic_state_root_dir,
+                    mkdirs=[updated_states_to_cleanup_dirname])[updated_states_to_cleanup_dirname]
+                cleanup_updated_states_ensemble(
+                    N, updated_states_to_cleanup_dir, da_tile_frac,
+                    bias_correct=bias_correct, nproc=nproc)
 
         # (2) Perturb states
         time1 = timeit.default_timer()
@@ -1502,6 +1521,18 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
             time2 = timeit.default_timer()
             print('\t\tTime of deleting history directories: {}'.format(time2-time1))
 
+    # --- If save_cellAvg_state_only, clean up updated states for the last updating time point --- #
+    if save_cellAvg_state_only:
+        last_time = pd.to_datetime(da_meas[da_meas_time_var].values[-1])
+        updated_states_to_cleanup_dirname = 'updated.{}_{:05d}'.format(
+            last_time.strftime('%Y%m%d'), last_time.hour*3600+current_time.second)
+        updated_states_to_cleanup_dir = setup_output_dirs(
+            output_vic_state_root_dir,
+            mkdirs=[updated_states_to_cleanup_dirname])[updated_states_to_cleanup_dirname]
+        cleanup_updated_states_ensemble(
+            N, updated_states_to_cleanup_dir, da_tile_frac,
+            bias_correct=bias_correct, nproc=nproc)
+
     # --- Concat and clean up normalized innovation results --- #
     debug_innov_dir
     time1 = timeit.default_timer()
@@ -1735,6 +1766,28 @@ def to_netcdf_state_file_compress(ds_state, out_nc):
         # create encoding dict
         dict_encode[var] = {'zlib': True,
                             'complevel': 1}
+    ds_state.to_netcdf(out_nc,
+                       format='NETCDF4',
+                       encoding=dict_encode)
+
+
+def to_netcdf_cellAvg_state_file_compress(ds_state, out_nc):
+    ''' This function saves a celAvg state ds to netCDF, with
+        compression.
+
+    Parameters
+    ----------
+    ds_state: <xr.Dataset>
+        State dataset to save
+    out_nc: <str>
+        Path of output netCDF file
+    '''
+
+    dict_encode = {}
+    for var in ds_state.data_vars:
+        if var == 'SOIL_MOISTURE' or var == 'SWE':
+            dict_encode[var] = {'zlib': True,
+                                'complevel': 1}
     ds_state.to_netcdf(out_nc,
                        format='NETCDF4',
                        encoding=dict_encode)
@@ -4790,3 +4843,96 @@ def save_updated_states(state_nc_before_update, da_sm_updated, out_vic_state_nc)
     ds['STATE_SOIL_MOISTURE'] = da_sm_updated
     # Save to netCDF file
     to_netcdf_state_file_compress(ds, out_vic_state_nc)
+
+
+def cleanup_updated_states_ensemble(
+        N, state_dir_to_cleanup, da_tile_frac, bias_correct=False, nproc=1):
+    ''' Clean up updated states ensemble: calculate and save cellAvg SM and SWE states only,
+        and delete the original full state files
+
+    Parameters
+    ----------
+    N: <int>
+        Ensemble size
+    state_dir_to_cleanup: <str>
+        Directory of VIC updated states
+        State file names are: state.ens<i>.nc,
+    da_tile_frac: <xr.DataArray>
+        Fraction of each veg/snowband in each grid cell for the whole domain
+        Dimension: [veg_class, snow_band, lat, lon]
+    bias_correct: <bool>
+        Whether bias correct.
+    nproc: <int>
+        Number of processors to use for parallel ensemble
+        Default: 1
+
+    Require
+    ----------
+    numpy
+    '''
+
+    # --- If nproc == 1, do a regular ensemble loop --- #
+    if nproc == 1:
+        if bias_correct:
+            n_ens = N + 1
+            ens = list(range(1, N+1)) + ['ref']
+        else:
+            n_ens = N
+            ens = list(range(1, N+1))
+        for i in range(n_ens):
+            updated_state_nc = os.path.join(state_dir_to_cleanup, 'state.ens{}.nc'.format(ens[i]))
+            out_cellAvg_state_nc = os.path.join(state_dir_to_cleanup, 'state_cellAvg.ens{}.nc'.format(ens[i]))
+            cleanup_updated_states(updated_state_nc, out_cellAvg_state_nc, da_tile_frac)
+    # --- If nproc > 1, use multiprocessing --- #
+    elif nproc > 1:
+        # --- Set up multiprocessing --- #
+        pool = mp.Pool(processes=nproc)
+        if bias_correct:
+            n_ens = N + 1
+            ens = list(range(1, N+1)) + ['ref']
+        else:
+            n_ens = N
+            ens = list(range(1, N+1))
+        for i in range(n_ens):
+            updated_state_nc = os.path.join(state_dir_to_cleanup, 'state.ens{}.nc'.format(ens[i]))
+            out_cellAvg_state_nc = os.path.join(state_dir_to_cleanup, 'state_cellAvg.ens{}.nc'.format(ens[i]))
+            pool.apply_async(cleanup_updated_states,
+                             (updated_state_nc,
+                              out_cellAvg_state_nc,
+                              da_tile_frac))
+        pool.close()
+        pool.join()
+
+
+def cleanup_updated_states(updated_state_nc, out_cellAvg_state_nc, da_tile_frac):
+    ''' Replace soil moisture states from the before-update states with
+        updated soil moistures and save to nc files, for a single file
+
+    Parameters
+    ----------
+    updated_state_nc: <str>
+        nc file for original updated states
+    out_cellAvg_state_nc: <str>
+        Output cellAvg-state-only nc file path
+    da_tile_frac: <xr.DataArray>
+        Fraction of each veg/snowband in each grid cell for the whole domain
+        Dimension: [veg_class, snow_band, lat, lon]
+    '''
+
+    # Load original state file
+    ds = xr.open_dataset(updated_state_nc)
+    # Calculate cellAvg SM and SWE states
+    da_sm = ds['STATE_SOIL_MOISTURE']
+    da_swe = ds['STATE_SNOW_WATER_EQUIVALENT']
+    da_sm_cellAvg = (da_sm * da_tile_frac).sum(
+        dim='veg_class').sum(dim='snow_band')  # [time, nlayer, lat, lon]
+    da_swe_cellAvg = (da_swe * da_tile_frac).sum(
+        dim='veg_class').sum(dim='snow_band')  # [time, lat, lon]
+    ds_state_cellAvg = xr.Dataset({'SOIL_MOISTURE': da_sm_cellAvg,
+                                   'SWE': da_swe_cellAvg})
+    # Save to netCDF file
+    to_netcdf_cellAvg_state_file_compress(ds_state_cellAvg, out_cellAvg_state_nc)
+    # Delete original state file
+    os.remove(updated_state_nc)
+
+
