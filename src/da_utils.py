@@ -841,9 +841,19 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
     # Check whether to exclude SM3 from state vector
     if dict_diagnose is not None and 'no_sm3' in dict_diagnose and \
     dict_diagnose['no_sm3'] is True:
-        no_sm3 = True
+        no_sm3_update = True
+        no_sm3_perturb = True
+        no_sm3_bc = True
+    # Check whether to exclude SM3 from update only, but with perturbation and BC
+    elif dict_diagnose is not None and 'no_sm3_update_only' in dict_diagnose and \
+    dict_diagnose['no_sm3_update_only'] is True:
+        no_sm3_update = True
+        no_sm3_perturb = False
+        no_sm3_bc = False
     else:
-        no_sm3 = False
+        no_sm3_update = False
+        no_sm3_perturb = False
+        no_sm3_bc = False
     
     # Check whether the run period is consistent with VIC setup
     pass
@@ -891,7 +901,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                         da_max_moist_n=da_max_moist_n,
                         adjust_negative=adjust_negative,
                         seed=seed,
-                        no_sm3=no_sm3)
+                        no_sm3=no_sm3_perturb)
                 # Save soil moisture perturbation
                 if debug:
                     ds_perturbation = xr.Dataset({'STATE_SOIL_MOISTURE':
@@ -910,7 +920,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                     perturb_soil_moisture_states_class_input,
                     (class_states, L, scale_n_nloop,
                      os.path.join(init_state_dir, 'state.ens{}.nc'.format(i+1)),
-                     da_max_moist_n, adjust_negative, seed, no_sm3))
+                     da_max_moist_n, adjust_negative, seed, no_sm3_perturb))
             # --- Finish multiprocessing --- #
             pool.close()
             pool.join()
@@ -1010,7 +1020,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         state_time = vic_run_end_time + pd.DateOffset(hours=24/vic_model_steps_per_day)
         if bias_correct:
             list_da_sm_prop, da_delta = bias_correct_propagated_states(
-                N, state_time, out_state_dir, no_sm3)  # Length of list: N+1
+                N, state_time, out_state_dir, no_sm3_bc)  # Length of list: N+1
             if debug:
                 debug_bc_dir = setup_output_dirs(
                             output_temp_dir,
@@ -1192,7 +1202,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                     list_source_ind2D_weight_all=list_source_ind2D_weight_all,
                     adjust_negative=adjust_negative,
                     nproc=nproc,
-                    no_sm3=no_sm3)
+                    no_sm3=no_sm3_update)
             if debug:
                 # --- Save update increment to netCDF file --- #
                 # Aggregated to cellAvg
@@ -1308,7 +1318,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                     da_max_moist_n=da_max_moist_n,
                     adjust_negative=adjust_negative,
                     nproc=nproc,
-                    no_sm3=no_sm3)
+                    no_sm3=no_sm3_perturb)
         if debug:
             # Aggregate to cellAvg
             da_perturbation = xr.concat(list_da_perturbation, dim='N')
@@ -1419,7 +1429,7 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         state_time = next_time + pd.DateOffset(hours=24/vic_model_steps_per_day)
         if bias_correct:
             list_da_sm_prop, da_delta = bias_correct_propagated_states(
-                N, state_time, out_state_dir, no_sm3)
+                N, state_time, out_state_dir, no_sm3_bc)
             if debug:
                 # Aggregate to cellAvg
                 veg_class = da_tile_frac['veg_class']
