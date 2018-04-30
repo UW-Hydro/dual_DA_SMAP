@@ -47,6 +47,7 @@ def concat_updated_states(i, EnKF_result_basedir, meas_times,
 
     # --- Load states at measurement times --- #
     list_ds = []
+    list_state_nc = []
     for t in meas_times:
         state_nc = os.path.join(
             EnKF_result_basedir,
@@ -55,6 +56,7 @@ def concat_updated_states(i, EnKF_result_basedir, meas_times,
                 t.strftime('%Y%m%d'),
                 t.hour*3600+t.second),
             'state_cellAvg.ens{}.nc'.format(i+1))
+        list_state_nc.append(state_nc)
         ds_state = xr.open_dataset(state_nc)
         list_ds.append(ds_state)
     # --- Concatenate states of all time together --- #
@@ -69,6 +71,9 @@ def concat_updated_states(i, EnKF_result_basedir, meas_times,
             i+1))
     to_netcdf_state_file_compress(
         ds_state_all_times, out_nc)
+    # --- Clean up original state files --- #
+    for state_nc in list_state_nc:
+        os.remove(state_nc)
 
 
 # ========================================================== #
