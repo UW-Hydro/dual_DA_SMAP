@@ -175,7 +175,8 @@ nveg = len(ds_state['veg_class'])
 nsnow = len(ds_state['snow_band'])
 n = nlayer * nveg * nsnow
 # Calculate Cholesky L
-L = calculate_cholesky_L(n, cfg['EnKF']['state_perturb_corrcoef'])
+L = calculate_cholesky_L(n, cfg['EnKF']['state_perturb_corrcoef_tile'],
+                         cfg['EnKF']['state_perturb_corrcoef_layer'], nlayer)
 # Calculate scale for state perturbation
 scale_n_nloop = calculate_scale_n_whole_field(
                     da_scale, nveg, nsnow)  # [nloop, n]

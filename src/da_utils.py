@@ -377,15 +377,19 @@ def calculate_sm_noise_to_add_magnitude(vic_history_path, sigma_percent):
     return da_scale
 
 
-def calculate_cholesky_L(n, corrcoef):
+def calculate_cholesky_L(n, corrcoef_tile, corrcoef_layer, nlayer):
     ''' Calculates covariance matrix for sm state perturbation for one grid cell.
 
     Parameters
     ----------
     n: <int>
         Total number of EnKF states
-    corrcoef: <float>
-        Correlation coefficient across different tiles and soil layers
+    corrcoef_tile: <float>
+        Correlation coefficient across different tiles
+    corrcoef_tile: <float>
+        Vertical correlation coefficient across different layers
+    nlayer: <int>
+        Number of layers
 
     Returns
     ----------
@@ -399,8 +403,12 @@ def calculate_cholesky_L(n, corrcoef):
     '''
 
     # Calculate P as an correlation coefficient matrix
-    P = np.identity(n)
-    P[P==0] = corrcoef  # [n, n]
+    ntile = int(n / nlayer)
+    P = np.identity(n)  # [n, n]
+    P[P==0] = corrcoef_layer
+    for i in range(nlayer):
+        P[(i*ntile):((i+1)*ntile), (i*ntile):((i+1)*ntile)] = corrcoef_tile
+    np.fill_diagonal(P, 1)
 
     # Calculate L (Cholesky decomposition: P = L * L.T)
     L = la.cholesky(P).T  # [n, n]
