@@ -16,6 +16,7 @@ import cartopy.io.shapereader as shpreader
 import xesmf as xe
 from scipy.sparse import coo_matrix
 import xesmf as xe
+import properscoring as ps
 
 from tonic.io import read_configobj
 import timeit
@@ -774,3 +775,273 @@ def process_weight_file(orig_weight_nc, output_weight_nc, n_source, n_target,
                                      coords={'n_s': (['n_s'], range(len(data)))})
     ds_weight_corrected.to_netcdf(output_weight_nc, format='NETCDF4_CLASSIC')
     return weight_array
+
+
+def calculate_crps(out_nc, ds_truth, ds_model, var, depth_sm=None):
+    ''' A wrap funciton that calculates CRPS for all domain and save to file; if
+        result file already existed, then simply read in the file.
+
+    Parameters
+    ----------
+    out_nc: <str>
+        RMSE result output netCDF file
+    ds_truth: <xr.Dataset>
+        Truth states/history
+    ds_model: <xr.Dataset>
+        Model states/history whose RMSE is to be assessed (wrt. truth states);
+        This should be ensemble model results, with "N" as the ensemble dimension
+    var: <str>
+        Variable, options:
+            sm1; sm2; sm3
+        NOTE: sm's and swe are from states; runoff's are from history file
+    depth_sm: <xr.DataArray>
+        Thickness of soil moisture
+        Only required if state_var is soil moisture
+        
+    Returns
+    ----------
+    da_crps: <xr.DataArray>
+        CRPS for the whole domain; dimension: [lat, lon]
+    '''
+
+    if not os.path.isfile(out_nc):  # if RMSE is not already calculated
+        # --- Extract variables --- #
+        if var == 'sm1':
+            da_truth = ds_truth['SOIL_MOISTURE'].sel(nlayer=0) / depth_sm
+            da_model = ds_model['SOIL_MOISTURE'].sel(nlayer=0) / depth_sm
+        elif var == 'sm2':
+            da_truth = ds_truth['SOIL_MOISTURE'].sel(nlayer=1) / depth_sm
+            da_model = ds_model['SOIL_MOISTURE'].sel(nlayer=1) / depth_sm
+        elif var == 'sm3':
+            da_truth = ds_truth['SOIL_MOISTURE'].sel(nlayer=2) / depth_sm
+            da_model = ds_model['SOIL_MOISTURE'].sel(nlayer=2) / depth_sm
+        # --- Calculate CRPS for the whole domain --- #
+        crps_domain = np.asarray(
+            [crps(da_truth.sel(lat=lat, lon=lon).values,
+                  da_model.sel(lat=lat, lon=lon).transpose('time', 'N').values)
+             for lat in da_truth['lat'].values
+             for lon in da_truth['lon'].values])
+        # --- Reshape results --- #
+        crps_domain = crps_domain.reshape([len(da_truth['lat']), len(da_truth['lon'])])
+        # --- Put results into da's --- #
+        da_crps = xr.DataArray(
+            crps_domain, coords=[da_truth['lat'], da_truth['lon']],
+            dims=['lat', 'lon'])
+        # Save RMSE to netCDF file
+        ds_crps = xr.Dataset(
+            {'crps': da_crps})
+        ds_crps.to_netcdf(out_nc, format='NETCDF4_CLASSIC')
+    else:  # if RMSE is already calculated
+        da_crps = xr.open_dataset(out_nc)['crps']
+    
+    return da_crps
+
+
+def calculate_bias_ensemble_norm_var(out_nc, ds_truth, ds_model, var, depth_sm=None):
+    ''' A wrap funciton that calculates variance of ensemble-normalized bias for all domain
+    and save to file; if result file already existed, then simply read in the file.
+
+    Parameters
+    ----------
+    out_nc: <str>
+        RMSE result output netCDF file
+    ds_truth: <xr.Dataset>
+        Truth states/history
+    ds_model: <xr.Dataset>
+        Model states/history whose RMSE is to be assessed (wrt. truth states);
+        This should be ensemble model results, with "N" as the ensemble dimension
+    var: <str>
+        Variable, options:
+            sm1; sm2; sm3
+        NOTE: sm's and swe are from states; runoff's are from history file
+    depth_sm: <xr.DataArray>
+        Thickness of soil moisture
+        Only required if state_var is soil moisture
+        
+    Returns
+    ----------
+    da_bias_norm_var: <xr.DataArray>
+        Variance of ensemble-normalized bias for the whole domain; dimension: [lat, lon]
+    '''
+
+    if not os.path.isfile(out_nc):  # if RMSE is not already calculated
+        # --- Extract variables --- #
+        if var == 'sm1':
+            da_truth = ds_truth['SOIL_MOISTURE'].sel(nlayer=0) / depth_sm
+            da_model = ds_model['SOIL_MOISTURE'].sel(nlayer=0) / depth_sm
+        elif var == 'sm2':
+            da_truth = ds_truth['SOIL_MOISTURE'].sel(nlayer=1) / depth_sm
+            da_model = ds_model['SOIL_MOISTURE'].sel(nlayer=1) / depth_sm
+        elif var == 'sm3':
+            da_truth = ds_truth['SOIL_MOISTURE'].sel(nlayer=2) / depth_sm
+            da_model = ds_model['SOIL_MOISTURE'].sel(nlayer=2) / depth_sm
+        # --- Calculate bias_norm for the whole domain --- #
+        bias_norm_var_domain = np.asarray(
+            [bias_ensemble_norm_var(
+                da_truth.sel(lat=lat, lon=lon).values,
+                da_model.sel(lat=lat, lon=lon).transpose('time', 'N').values)
+             for lat in da_truth['lat'].values
+             for lon in da_truth['lon'].values])
+        # --- Reshape results --- #
+        bias_norm_var_domain = bias_norm_var_domain.reshape(
+            [len(da_truth['lat']), len(da_truth['lon'])])
+        # --- Put results into da's --- #
+        da_bias_norm_var = xr.DataArray(
+            bias_norm_var_domain, coords=[da_truth['lat'], da_truth['lon']],
+            dims=['lat', 'lon'])
+        # Save RMSE to netCDF file
+        ds_bias_norm_var = xr.Dataset(
+            {'bias_norm_var': da_bias_norm_var})
+        ds_bias_norm_var.to_netcdf(out_nc, format='NETCDF4_CLASSIC')
+    else:  # if RMSE is already calculated
+        da_bias_norm_var = xr.open_dataset(out_nc)['bias_norm_var']
+    
+    return da_bias_norm_var
+
+
+def calculate_nensk(out_nc, ds_truth, ds_model, var, depth_sm=None):
+    ''' A wrap funciton that calculates NENSK for all domain
+    and save to file; if result file already existed, then simply read in the file.
+
+    Parameters
+    ----------
+    out_nc: <str>
+        RMSE result output netCDF file
+    ds_truth: <xr.Dataset>
+        Truth states/history
+    ds_model: <xr.Dataset>
+        Model states/history whose RMSE is to be assessed (wrt. truth states);
+        This should be ensemble model results, with "N" as the ensemble dimension
+    var: <str>
+        Variable, options:
+            sm1; sm2; sm3
+        NOTE: sm's and swe are from states; runoff's are from history file
+    depth_sm: <xr.DataArray>
+        Thickness of soil moisture
+        Only required if state_var is soil moisture
+        
+    Returns
+    ----------
+    da_bias_norm_var: <xr.DataArray>
+        Variance of ensemble-normalized bias for the whole domain; dimension: [lat, lon]
+    '''
+
+    if not os.path.isfile(out_nc):  # if RMSE is not already calculated
+        # --- Extract variables --- #
+        if var == 'sm1':
+            da_truth = ds_truth['SOIL_MOISTURE'].sel(nlayer=0) / depth_sm
+            da_model = ds_model['SOIL_MOISTURE'].sel(nlayer=0) / depth_sm
+        elif var == 'sm2':
+            da_truth = ds_truth['SOIL_MOISTURE'].sel(nlayer=1) / depth_sm
+            da_model = ds_model['SOIL_MOISTURE'].sel(nlayer=1) / depth_sm
+        elif var == 'sm3':
+            da_truth = ds_truth['SOIL_MOISTURE'].sel(nlayer=2) / depth_sm
+            da_model = ds_model['SOIL_MOISTURE'].sel(nlayer=2) / depth_sm
+        # --- Calculate nensk for the whole domain --- #
+        nensk_domain = np.asarray(
+            [nensk(
+                da_truth.sel(lat=lat, lon=lon).values,
+                da_model.sel(lat=lat, lon=lon).transpose('time', 'N').values)
+             for lat in da_truth['lat'].values
+             for lon in da_truth['lon'].values])
+        # --- Reshape results --- #
+        nensk_domain = nensk_domain.reshape(
+            [len(da_truth['lat']), len(da_truth['lon'])])
+        # --- Put results into da's --- #
+        da_nensk = xr.DataArray(
+            nensk_domain, coords=[da_truth['lat'], da_truth['lon']],
+            dims=['lat', 'lon'])
+        # Save RMSE to netCDF file
+        ds_nensk = xr.Dataset(
+            {'nensk': da_nensk})
+        ds_nensk.to_netcdf(out_nc, format='NETCDF4_CLASSIC')
+    else:  # if RMSE is already calculated
+        da_nensk = xr.open_dataset(out_nc)['nensk']
+    
+    return da_nensk
+
+
+def crps(truth, ensemble):
+    ''' Calculate mean CRPS of an ensemble time series
+    Parameters
+    ----------
+    truth: <np.array>
+        A 1-D array of truth time series
+        Dimension: [n]
+    ensemble: <np.array>
+        A 2-D array of ensemble time series
+        Dimension: [n, N], where N is ensemble size; n is time series length
+        
+    Returns
+    ----------
+    crps: <float>
+        Time-series-mean CRPS
+        
+    Require
+    ----------
+    import properscoring as ps
+    '''
+    
+    array_crps = np.asarray([ps.crps_ensemble(truth[t], ensemble[t, :]) for t in range(len(truth))])
+    crps = array_crps.mean()
+    
+    return crps
+
+
+def bias_ensemble_norm_var(truth, ensemble):
+    ''' Calculate variance of normalized bias of an ensemble time series.
+    Specifically, at each time step t, mean bias is normalized by ensemble spread:
+            bias_norm(t) = mean_bias / std(ensemble)
+    Then average over all time steps:
+            bias_norm = mean(bias_norm(t))
+            
+    Parameters
+    ----------
+    truth: <np.array>
+        A 1-D array of truth time series
+        Dimension: [n]
+    ensemble: <np.array>
+        A 2-D array of ensemble time series
+        Dimension: [n, N], where N is ensemble size; n is time series length
+        
+    Returns
+    ----------
+    bias_ensemble_norm_var: <float>
+        Time-series-mean ensemble-normalized bias
+    '''
+    
+    mean_bias = ensemble.mean(axis=1) - truth  # [n]
+    std_ensemble = ensemble.std(axis=1)  # [n]
+    bias_ensemble_norm_var = (mean_bias / std_ensemble).var()
+    
+    return bias_ensemble_norm_var
+
+
+def nensk(truth, ensemble):
+    ''' Calculate the ratio of temporal-mean ensemble skill to temporal-mean ensemble spread:
+            nensk = <ensk> / <ensp>
+    where <ensk> is temporal average of: ensk(t) = (ensmean - truth)^2
+          <ensp> is temperal average of: ensp(t) = mean((ens_i - ensmean)^2) = var(ens_i)
+            
+    Parameters
+    ----------
+    truth: <np.array>
+        A 1-D array of truth time series
+        Dimension: [n]
+    ensemble: <np.array>
+        A 2-D array of ensemble time series
+        Dimension: [n, N], where N is ensemble size; n is time series length
+        
+    Returns
+    ----------
+    nensk: <float>
+        Normalized ensemble skill
+    '''
+    
+    ensk = np.square((ensemble.mean(axis=1) - truth))  # [n]
+    ensp = ensemble.var(axis=1)  # [n]
+    nensk = np.mean(ensk) / np.mean(ensp)
+    
+    return nensk
+
+
