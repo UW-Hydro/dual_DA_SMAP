@@ -55,20 +55,19 @@ def calculate_crps(out_nc, ds_truth, ds_model, var, depth_sm=None, nproc=1):
         elif var == 'runoff_daily_log':
             da_truth = np.log(ds_truth['OUT_RUNOFF'].resample(
                 '1D', dim='time', how='sum') + 1)
-            da_model = np.log(ds_model['OUT_RUNOFF'].resample(
-                '1D', dim='time', how='sum') + 1)
+            da_model = np.log(ds_model['OUT_RUNOFF'] + 1)
         elif var == 'baseflow_daily_log':
             da_truth = np.log(ds_truth['OUT_BASEFLOW'].resample(
                 '1D', dim='time', how='sum') + 1)
-            da_model = np.log(ds_model['OUT_BASEFLOW'].resample(
-                '1D', dim='time', how='sum') + 1)
+            da_model = np.log(ds_model['OUT_BASEFLOW'] + 1)
         elif var == 'totrunoff_daily_log':
             da_truth = np.log(
                 ds_truth['OUT_RUNOFF'].resample('1D', dim='time', how='sum') + \
                 ds_truth['OUT_BASEFLOW'].resample('1D', dim='time', how='sum') +1)
             da_model = np.log(
-                ds_model['OUT_RUNOFF'].resample('1D', dim='time', how='sum') + \
-                ds_model['OUT_BASEFLOW'].resample('1D', dim='time', how='sum') + 1)
+                ds_model['OUT_RUNOFF'] + \
+                ds_model['OUT_BASEFLOW'] + 1)
+
         # --- Calculate CRPS for the whole domain --- #
         results = {}
         pool = mp.Pool(processes=nproc)
