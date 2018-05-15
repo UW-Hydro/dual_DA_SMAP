@@ -1,8 +1,8 @@
 function [increment_sum,increment_sum_hold,sum_rain,sum_rain_sp,sum_rain_sp_hold,sum_rain_indep,increment_sum_ens, innovation1, innovation1_not_norm, rain_perturbed_sum_ens] =...
     analysis(window_size,ist,filter_flag,transform_flag,API_model_flag,NUMEN,Q_fixed,P_inflation_fixed,...
-    logn_var_constant,bb,rain_observed,rain_observed_hold,rain_indep,rain_true,sm_observed,...
+    logn_var_constant,bb,rain_observed,rain_observed_hold,rain_indep,rain_true,sep_sm_orbit,sma_observed,smd_observed,...
     ta_observed,ta_observed_climatology,PET_observed,PET_observed_climatology,EVI_observed,...
-    API_mean,R_DQX, API_range, slope_parameter_API)
+    API_mean,R_DQX, API_range, slope_parameter_API, time_step)
 
 lag = 0.00; %Only used if API is varying seasonally
 %API_estimate_flag = 0;
@@ -16,24 +16,15 @@ if (filter_flag ~= 1 || filter_flag ~=5)
     ones(1:NUMEN)=1;
 end
 
-if (filter_flag == 5 || filter_flag == 6) 
-    update_days = find(sm_observed>=0);
-end
-
 API_filter_f(1:ist)=0;
 RTS_API(1:ist)=0;
-R_API(1:ist)=0;
-API_model(1:ist)=0;
-API_COEFF(1:ist)=API_mean;
 API_COEFF_EF(1:ist)=0;
 API_filter(1:ist)=0;
-sm_observed_trans(1:ist)=0;
 increment(1:ist)=0;
 increment_ens(1:ist, 1:NUMEN) = 0;
 rain_perturbed_ens(1:ist, 1:NUMEN) = 0;
 innovation1(1:ist)=0;
 innovation1_not_norm(1:ist)=0;
-API_COEFF_HOLD(1:ist)=0;
 
 P(1:ist)=0;
 Pf(1:ist)=0;
@@ -47,20 +38,8 @@ sum_rain_indep(1:floor(ist/window_size)) = 0;
 increment_sum(1:floor(ist/window_size)) = 0;
 increment_sum_ens(1:floor(ist/window_size), 1:NUMEN)=0;
 rain_perturbed_sum_ens(1:floor(ist/window_size), 1:NUMEN)=0;
-API_DOY(1:365)=0;
-API2_DOY(1:365)=0;
-mean_API(1:365)=0;
-API2_DOY(1:365)=0;
-mean_sm_observed(1:365)=0;
-sm2_observed_DOY(1:365)=0;
-var_sm_observed(1:365)=0;
-sm_observed_DOY(1:365)=0;
-sm2_observed_DOY(1:365)=0;
-count_DOY_sm(1:365)=0;
-count_DOY_API(1:365)=0;
-var_API(1:365)=0;
-%DOY(1:365)=0;
 
+% ----- Rescale sm observations ----- %
 %total_mean_TA = mean(ta_observed_climatology(ta_observed_climatology > -100));%Global average high temperature
 %total_mean_PET = mean(PET_observed_climatology(PET_observed_climatology > -100));%Global average high temperature
 total_mean_TA = 288;%long term global average TA over land
@@ -74,82 +53,66 @@ if (API_model_flag == 3 || API_model_flag == 5) %make sure you don't encounter -
     end
 end
 
-% sum for climatologies
-DOY(1) = 365*((1+31)*0.002739726 - floor((1+31)*0.002739726));
-for k=2:ist
-    DOY(k) = 365*((k+31)*0.002739726 - floor((k+31)*0.002739726));
-    if (rain_observed(k) < 0);rain_observed(k) = 0;end
-    
-    % Calculate API coefficient gamma (Yixin)
-    API_COEFF_HOLD(k) = API_mean + API_range*cos(2*pi*(DOY(k)-lag)/365);
-    if (API_model_flag == 0); API_COEFF(k) = API_mean; end;
-    if (API_model_flag == 1); API_COEFF(k) = API_mean + API_range*cos(2*pi*(DOY(k)-lag)/365); end;
-    if (API_model_flag == 2 || API_model_flag == 4); API_COEFF(k) = API_mean - slope_parameter_API*(ta_observed_climatology(round(DOY(k))) - total_mean_TA); end;
-    if (API_model_flag == 3 || API_model_flag == 5); API_COEFF(k) = API_mean - slope_parameter_API*(PET_observed_climatology(round(DOY(k))) - total_mean_PET); end;
-    if (API_model_flag == 4)
-        API_COEFF(k) = API_mean - 0.01*(ta_observed_climatology(round(DOY(k))) - total_mean_TA);%HARDWIRE
-        API_COEFF(k) = API_COEFF(k) - slope_parameter_API*(ta_observed(k) - ta_observed_climatology(round(DOY(k))));
-    end;
-    if (API_model_flag == 5)
-        API_COEFF(k) = API_mean - 0.01*(ta_observed_climatology(round(DOY(k))) - total_mean_TA);%HARDWIRE
-        API_COEFF(k) = API_COEFF(k) - slope_parameter_API*(PET_observed(k) - PET_observed_climatology(round(DOY(k))));
-    end;
-    if (API_COEFF(k) > 1);API_COEFF(k) = 1;end;
-    if (API_COEFF(k) < 0);API_COEFF(k) = 0;end;
-    
-    % Run API model for one time step with no Kalman filter update (Yixin)
-    API_model(k) = sign(API_model(k-1))*(API_COEFF(k)-1)*abs(API_model(k-1))^bb + API_model(k-1) + rain_observed(k);
-%     if (filter_flag == 2 || filter_flag == 4 || filter_flag ==6 ) % currently only for ensemble methods
-%         Implicit_test = sign(API_model(k))*(API_COEFF(k)-1)*abs(API_model(k))^bb + API_model(k-1) + rain_observed(k);
-%         if (abs(API_model(k) - Implicit_test) >= 5);
-%             API_model(k) = API_short(API_model(k-1),API_COEFF(k),bb,24) + rain_observed(k);
-%         end;
-%     end;
-    
-    if (sm_observed(k) >= 0)
-        sm_observed_DOY(round(DOY(k))) = sm_observed_DOY(round(DOY(k))) + sm_observed(k);
-        sm2_observed_DOY(round(DOY(k))) = sm2_observed_DOY(round(DOY(k))) + sm_observed(k)*sm_observed(k);
-        count_DOY_sm(round(DOY(k))) = count_DOY_sm(round(DOY(k))) + 1;
+% If sep_sm_orbit = 0, merge ascending and descending SM below to
+% a single product, and then rescale
+if sep_sm_orbit == 0
+    % Merge products
+    sm_observed(1:ist) = -1;
+    for k=1:ist
+        if (sma_observed(k) >= 0 && smd_observed(k) >= 0 );
+            sm_observed(k) =  0.5*(smd_observed(k) + sma_observed(k));
+        end;
+        if (sma_observed(k) < 0 && smd_observed(k) >= 0 );
+            sm_observed(k) =  smd_observed(k); end;
+        if (sma_observed(k) >= 0 && smd_observed(k) < 0 );
+            sm_observed(k) =  sma_observed(k); end;
     end
-    
-    API_DOY(round(DOY(k))) = API_DOY(round(DOY(k)))+API_model(k);
-    API2_DOY(round(DOY(k))) = API2_DOY(round(DOY(k)))+API_model(k)*API_model(k);
-    count_DOY_API(round(DOY(k))) = count_DOY_API(round(DOY(k))) + 1;
+    % Rescale
+    [sm_observed_trans, R_API, API_COEFF] = rescale(sm_observed, time_step, ...
+        transform_flag, API_model_flag, ist, rain_observed, API_mean, API_range, lag, ...
+        slope_parameter_API, ta_observed_climatology, ...
+        PET_observed_climatology, total_mean_TA, total_mean_PET, bb, ...
+        EVI_observed, R_DQX);
+% If sep_sm_orbit = 1, rescale ascending & descending sm observations
+% separately; sm_observed only serves as an indicator for update timesteps
+else
+    % Rescale ascending & descending separately
+    [sma_observed_trans, R_API_a, API_COEFF_a] = rescale(sma_observed, time_step, ...
+        transform_flag, API_model_flag, ist, rain_observed, API_mean, API_range, lag, ...
+        slope_parameter_API, ta_observed_climatology, ...
+        PET_observed_climatology, total_mean_TA, total_mean_PET, bb, ...
+        EVI_observed, R_DQX);
+    [smd_observed_trans, R_API_d, API_COEFF_d] = rescale(smd_observed, time_step, ...
+        transform_flag, API_model_flag, ist, rain_observed, API_mean, API_range, lag, ...
+        slope_parameter_API, ta_observed_climatology, ...
+        PET_observed_climatology, total_mean_TA, total_mean_PET, bb, ...
+        EVI_observed, R_DQX);
+    % Put rescaled ascending & desceinding sm together
+    sm_observed_trans(1:ist) = -1;
+    R_API(1:ist) = 0;
+    API_COEFF(1:ist) = 0;
+    sm_observed(1:ist) = -1;
+    for k=1:ist
+        if (sma_observed(k) >= 0 && smd_observed(k) >= 0 );
+            fprintf('Error: When sep_sm_orbit, ascending and descending products cannot appear on the same timestep!');
+            exit(1);
+        end;
+        if (sma_observed(k) < 0 && smd_observed(k) >= 0 );
+            sm_observed_trans(k) =  smd_observed_trans(k);
+            R_API(k) = R_API_d(k);
+            API_COEFF(k) = API_COEFF_d(k);
+            sm_observed(k) = 999;
+        end;
+        if (sma_observed(k) >= 0 && smd_observed(k) < 0 );
+            sm_observed_trans(k) =  sma_observed_trans(k);
+            R_API(k) = R_API_a(k);
+            API_COEFF(k) = API_COEFF_a(k);
+            sm_observed(k) = 999;
+        end;
+    end
 end
 
-total_sd_ratio = (sqrt(var(API_model))/sqrt(var(sm_observed((sm_observed >= 0)))));
-total_mean_sm_observed = mean(sm_observed((sm_observed >= 0)));
-total_var_sm_observed = var(sm_observed((sm_observed >= 0)));
-total_mean_API = mean(API_model);
-
-% average climatologies within 31-day moving windows
-for k=1:365
-    count_in_window_sm_observed=0;
-    count_in_window_API=0;
-    for i=k-15:k+15
-        i_prime=i;
-        if (i<1); i_prime=i+365; end;
-        if (i>365); i_prime=i-365; end;
-        if (count_DOY_sm(i_prime) > 0)
-            count_in_window_sm_observed = count_in_window_sm_observed + count_DOY_sm(i_prime);
-            mean_sm_observed(k) = mean_sm_observed(k) + sm_observed_DOY(i_prime);
-            var_sm_observed(k) = var_sm_observed(k) + sm2_observed_DOY(i_prime);
-        end
-        count_in_window_API = count_in_window_API + count_DOY_API(i_prime);
-        mean_API(k) = mean_API(k) + API_DOY(i_prime);
-        var_API(k) = var_API(k) + API2_DOY(i_prime);
-    end
-    if (count_in_window_sm_observed > 0)
-        mean_sm_observed(k)=mean_sm_observed(k)/count_in_window_sm_observed;
-        var_sm_observed(k)=(count_in_window_sm_observed/(count_in_window_sm_observed-1))*(var_sm_observed(k)/count_in_window_sm_observed - mean_sm_observed(k)*mean_sm_observed(k));
-    else
-        mean_sm_observed(k) = total_mean_sm_observed;
-        var_sm_observed(k) = total_var_sm_observed;
-    end
-    mean_API(k)=mean_API(k)/count_in_window_API;
-    var_API(k)=(count_in_window_API/(count_in_window_API-1))*(var_API(k)/count_in_window_API - mean_API(k)*mean_API(k));
-end
-
+% ----- Run filter ----- %
 % innovation whitening....this is no longer being supported.....
 %     Q = 2000; %Initital condition only - start very large
 %     no_tune_flag = 0;
@@ -170,47 +133,14 @@ logn_var = logn_var_constant;
 converge_flag = 0;
 converge_count = 0;
 
-if (transform_flag == 1)
-    RS_sort=sort(sm_observed((sm_observed >= 0)));
-    API_sort=sort(transpose(API_model((sm_observed >= 0))));
-end
-
-for k=2:ist % rescaling observations and defining R
-    
-    if (EVI_observed(1+floor(k/30.5)) > 0.00) % every month pull a new EVI
-        sqrt_R = 0.20*EVI_observed(1 + floor(k/30.5));
-    else
-        R = max(R_DQX(k)^2, 0.00); %Use quality control information to define R
-    end
-    R_API(k) = R*(total_sd_ratio)^2;
-    
-    sm_observed_trans(k) = -1;
-    if (transform_flag == 1 && sm_observed(k) >= 0); sm_observed_trans(k) = mean(API_sort((RS_sort == sm_observed(k))));end;
-    if (transform_flag == 2 && sm_observed(k) >= 0); sm_observed_trans(k) = (sm_observed(k) - mean_sm_observed(round(DOY(k)))) * total_sd_ratio + mean_API(round(DOY(k))); end;
-    if (transform_flag == 3 && sm_observed(k) >= 0); sm_observed_trans(k) = (sm_observed(k) - total_mean_sm_observed) * total_sd_ratio + total_mean_API; end;
-    
-    if (transform_flag == 4 && sm_observed(k) >= 0)
-        delta_DOY = abs(DOY - DOY(k));
-        delta_DOY(delta_DOY > 182.5) = 365 - delta_DOY(delta_DOY > 182.5);
-        sm_observed_subset = sm_observed(abs(delta_DOY) <= 45);
-        API_model_subset = API_model(abs(delta_DOY) <= 45);
-        RS_sort=sort(sm_observed_subset((sm_observed_subset >= 0)));
-        API_sort=sort(transpose(API_model_subset((sm_observed_subset) >= 0)));
-        sm_observed_trans(k) = mean(API_sort((RS_sort == sm_observed(k))));
-    end
-    
-    if (transform_flag == 5)
-        if (var_API(round(DOY(k))) > 0 && var_sm_observed(round(DOY(k))) > 0)
-            if (sm_observed(k) >= 0); sm_observed_trans(k) = (sm_observed(k) - mean_sm_observed(round(DOY(k)))) * sqrt(var_API(round(DOY(k))))/sqrt(var_sm_observed(round(DOY(k)))) + mean_API(round(DOY(k))); end;
-        else
-            if (sm_observed(k) >= 0); sm_observed_trans(k) = (sm_observed(k) - mean_sm_observed(round(DOY(k)))) * total_sd_ratio + mean_API(round(DOY(k))); end;
-        end
-    end
-end
-
 % Initialize ensemble perturbed rainfall to be observed rainfall
 for (i = 1:NUMEN)
     rain_perturbed_ens(:, i) = rain_observed;
+end
+
+% Identify update days
+if (filter_flag == 5 || filter_flag == 6) 
+    update_days = find(sm_observed_trans>=0);
 end
 
 while (converge_flag == 0)
@@ -285,7 +215,7 @@ while (converge_flag == 0)
     if (filter_flag== 2 || filter_flag == 6)
         for k=2:ist
             
-            % Propagate ensemble (Yixin)
+            % Propagate ensemble and add state perturbation (Yixin)
             API_COEFF_V(k,:) = ones*API_COEFF(k);
             mult_factor = exp(randn(1,NUMEN)*sqrt(log(logn_var + 1)) - log(logn_var + 1)/2);
             rain_perturbed_ens(k, :) = mult_factor * rain_observed(k);
@@ -325,12 +255,12 @@ while (converge_flag == 0)
                 innovation_last = innovation1(k);
                 
                 increment(k) = K(k)*(sm_observed_trans(k) - background);
-                increment_ens(k,:) = K(k)*(sm_observed_trans(k) - API_filter_EnKF(k,:));
+                increment_ens(k,:) = K(k)*(sm_observed_trans(k) + hold_perturbation - API_filter_EnKF(k,:));
                 
                 API_filter_EnKF(k,:) = hold_state + K(k)*(sm_observed_trans(k) + hold_perturbation - hold_state);
                 
                 if (filter_flag == 6)  %EnKS gap filling
-                    % find last update
+                    % find last update time step
                     temp=update_days-k;
                     temp(temp >= 0)=nan;
                     [junk,index]=max(temp);
@@ -571,4 +501,5 @@ for k=2:floor(ist/window_size)
         end
     end
 end
+
 end
