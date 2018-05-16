@@ -56,9 +56,11 @@ da_vic_domain = ds_vic_domain[cfg['DOMAIN']['mask_name']]
 da_smap_example, da_flag_example = extract_smap_multiple_days(
     os.path.join(cfg['INPUT']['smap_dir'], 'SMAP_L3_SM_P_{}_*.h5'),
     start_date.strftime('%Y%m%d'), start_date.strftime('%Y%m%d'))
-# --- Calculate SMAP domain needed --- #
+# --- Calculate SMAP domain needed and save --- #
 da_smap_domain = calculate_smap_domain_from_vic_domain(da_vic_domain, da_smap_example)
-
+ds_smap_domain = xr.Dataset({'mask': da_smap_domain})
+ds_smap_domain.to_netcdf(os.path.join(output_subdir_data_unscaled, 'domain.smap.nc'),
+                         format='NETCDF4_CLASSIC')
 # --- Plot VIC and SMAP domain to check --- #
 fig = plt.figure(figsize=(16, 8))
 ax = plt.axes(projection=ccrs.PlateCarree())
