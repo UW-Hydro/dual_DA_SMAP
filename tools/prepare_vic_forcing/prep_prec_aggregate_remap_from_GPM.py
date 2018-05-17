@@ -1,4 +1,10 @@
 
+# This script:
+#   1) aggregates 30-min GPM precipitation data to a specified timestep;
+#   2) remap it to a specified domain. The domain can be a VIC-domain, or another domain
+#   3) output the resulting precipitation data
+
+
 import sys
 import pandas as pd
 import os
@@ -101,10 +107,10 @@ for year in range(start_year, end_year+1):
 ds_vic_domain = xr.open_dataset(cfg['DOMAIN']['domain_nc'])
 da_vic_domain = ds_vic_domain[cfg['DOMAIN']['mask_name']]
 # --- Extract GPM domain --- #
-da_gpm_domain = xr.DataArray(np.ones([len(ds_force_yearly[2015]['lat']),
-                                      len(ds_force_yearly[2015]['lon'])],
+da_gpm_domain = xr.DataArray(np.ones([len(ds_force_yearly[start_year]['lat']),
+                                      len(ds_force_yearly[start_year]['lon'])],
                                      dtype=int),
-                             coords=[ds_force_yearly[2015]['lat'], ds_force_yearly[2015]['lon']],
+                             coords=[ds_force_yearly[start_year]['lat'], ds_force_yearly[start_year]['lon']],
                              dims=['lat', 'lon'])
 # --- Plot VIC and GPM domain to check --- #
 fig = plt.figure(figsize=(16, 8))
@@ -159,10 +165,18 @@ dict_gpm_remapped = {}  # key: year; item: remapped GPM
 for year in range(start_year, end_year+1):
     print('\t', year)
     if year == start_year:  # only calculate weights for the first year
+        # If specify weight file already, directly use it
+        if 'REMAP' in cfg and 'weight_nc' in cfg['REMAP']:
+            reuse_weight = True
+            final_weight_nc = cfg['REMAP']['weight_nc']
+        # Else, calculate weights
+        else:
+            reuse_weight = False
+            final_weight_nc = os.path.join(output_subdir_tmp, 'gpm_to_vic_weights.nc')
         da_gpm_remapped, weight_array = remap_con(
-            reuse_weight=False,
+            reuse_weight=reuse_weight,
             da_source=ds_force_yearly[year]['PREC'],
-            final_weight_nc=os.path.join(output_subdir_tmp, 'gpm_to_vic_weights.nc'),
+            final_weight_nc=final_weight_nc,
             da_source_domain=da_gpm_domain,
             da_target_domain=da_vic_domain,
             tmp_weight_nc=os.path.join(output_subdir_tmp, 'gpm_to_vic_weights.tmp.nc'),
@@ -171,7 +185,7 @@ for year in range(start_year, end_year+1):
         da_gpm_remapped, weight_array = remap_con(
             reuse_weight=True,
             da_source=ds_force_yearly[year]['PREC'],
-            final_weight_nc=os.path.join(output_subdir_tmp, 'gpm_to_vic_weights.nc'),
+            final_weight_nc=final_weight_nc,
             da_source_domain=da_gpm_domain,
             da_target_domain=da_vic_domain,
             tmp_weight_nc=os.path.join(output_subdir_tmp, 'gpm_to_vic_weights.tmp.nc'),
