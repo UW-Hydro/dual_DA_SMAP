@@ -236,7 +236,7 @@ else:
 da_meas_error_unscaled = xr.open_dataset(
     cfg['INPUT']['meas_error_unscaled_nc'])[cfg['INPUT']['meas_error_unscaled_varname']]
 # Rescale
-da_smap_rescaled, da_meas_error_rescaled, da_std_ratio = rescale_SMAP_domain(
+da_smap_rescaled, da_meas_error_rescaled, da_std_ratio, da_smap_bad_pixels_removed = rescale_SMAP_domain(
                     da_smap, da_vic_remapped,
                     smap_times_am, smap_times_pm,
                     da_meas_error_unscaled,
@@ -263,6 +263,16 @@ ds_meas_error_rescaled.to_netcdf(
                      cfg['QC']['qc_method']+'.' if cfg['QC']['qc_method'] is not None else '',
                      start_date.strftime('%Y%m%d'),
                      end_date.strftime('%Y%m%d'))),
+    format='NETCDF4_CLASSIC')
+
+# --- Save *unscaled* SMAP data with bad pixels removed to file --- #
+ds_smap_unrescaled_bad_pixels_removed = xr.Dataset({'soil_moisture': da_smap_bad_pixels_removed})
+ds_smap_unrescaled_bad_pixels_removed.to_netcdf(
+    os.path.join(output_subdir_data_unscaled,
+                 'soil_moisture_unscaled.qc_{}.{}_{}.bad_pixels_removed.nc'.format(
+                    cfg['QC']['qc_method'],
+                    start_date.strftime('%Y%m%d'),
+                    end_date.strftime('%Y%m%d'))),
     format='NETCDF4_CLASSIC')
 
 # --- Save VIC-to-SMAP std. ratio to file --- #

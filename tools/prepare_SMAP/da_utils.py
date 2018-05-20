@@ -587,14 +587,17 @@ def rescale_SMAP_domain(da_smap, da_reference, smap_times_am, smap_times_pm,
     da_std_ratio = da_std_reference / da_std_input
 
     # --- Exclude locations with near-constant SMAP measurements --- #
+    da_smap_bad_pixels_removed = da_smap.copy(deep=True)
     # Extract indices of such locations
     ind = np.where(da_std_input.values<0.01)
     # Exclude SMAP data itself & error
     for i in range((da_std_input.values<0.01).sum()):
         da_smap_rescaled[:, ind[0][i], ind[1][i]] = np.nan
         da_meas_error_rescaled[ind[0][i], ind[1][i]] = np.nan
+        # Also exclude these bad pixels form the unscaled SMAP field
+        da_smap_bad_pixels_removed[:, ind[0][i], ind[1][i]] = np.nan
 
-    return da_smap_rescaled, da_meas_error_rescaled, da_std_ratio
+    return da_smap_rescaled, da_meas_error_rescaled, da_std_ratio, da_smap_bad_pixels_removed
 
 
 def rescale_domain(da_input, da_reference, method):
