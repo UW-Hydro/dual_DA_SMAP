@@ -4,3 +4,6 @@
 [submodule "VIC"]
 	path = VIC
 	url = https://github.com/yixinmao/VIC.git
+[submodule "RVIC"]
+	path = RVIC
+	url = git@github.com:yixinmao/RVIC.git
