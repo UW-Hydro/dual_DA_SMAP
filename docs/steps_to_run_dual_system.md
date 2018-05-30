@@ -16,7 +16,7 @@
 
 If want to evaluate ensemble statistics, need to do a similar DA run with Kalman updating turned off (by setting it in the cfg file)
 
-    3.1. Analyze and plot state DA results
+4. Analyze and plot state DA results
     1) Concatenate states for each ensemble member (for both DA and no-update ensembles):
 
         `$ cd ./tools/plot_analyze_results/`
@@ -42,7 +42,7 @@ If want to evaluate ensemble statistics, need to do a similar DA run with Kalman
 
         `$ ./tools/plot_analyze_results/plot_DA_maps_EnKF.ipynb with <cfg_plot_EnKF>`
 
-4.  Run SMART rainfall correction
+5.  Run SMART rainfall correction
 
     `$ python hyak.prep_SMART_input.py <cfg>`
     `$ cd /SMART_output/prep_SMART`
@@ -50,7 +50,7 @@ If want to evaluate ensemble statistics, need to do a similar DA run with Kalman
     `$ cd /civil/hydro/ymao/data_assim/src`
     `$ python postprocess_SMART.py $cfg <nproc>`
 
-5.  Run post-processing
+6.  Run post-processing
 For each state and precipitation ensemble member, run:
 
     `$ python postprocess_EnKF.single_ens.py <run_da_cfg> <mpi_proc> <ens_prec> <ens_state>`
@@ -67,11 +67,11 @@ For each state and precipitation ensemble member, run:
 
 If want to evaluate ensemble statistics, need to do a similar DA run with Kalman updating turned off (by setting it in the cfg file)
 
-    2.1. Analyze and plot EnKF results (before routing)
+3. Analyze and plot EnKF results (before routing)
 
         `./tools/plot_analyze_results/plot_real_data_DA.ipynb with <cfg_EnKF_plot>`
 
-3. Route streamflow
+4. Route streamflow
     1) Generate RVIC impulse response functions (only need to run this step once for each set of gauges and RVIC parameters):
 
         `$ rvic parameters <cfg_rvic_parameters>`
@@ -80,7 +80,7 @@ If want to evaluate ensemble statistics, need to do a similar DA run with Kalman
 
         `$ rvic convolution <cfg_rvic_convolution>`
 
-    3.1. Analyze and plot streamflow results from state updating
+5. Analyze and plot streamflow results from state updating
 
         `./tools/process_evaluation_data_ArkRed/plot_routed_flow_USGS_no_update.ipynb`
         `./tools/process_evaluation_data_ArkRed/plot_routed_flow_USGS.ipynb`
