@@ -57,18 +57,18 @@ end
 % a single product, and then rescale
 if sep_sm_orbit == 0
     % Merge products
-    sm_observed(1:ist) = -1;
+    sm_observed(1:ist) = nan;
     for k=1:ist
-        if (sma_observed(k) >= 0 && smd_observed(k) >= 0 );
+        if (~isnan(sma_observed(k)) && ~isnan(smd_observed(k)) );
             sm_observed(k) =  0.5*(smd_observed(k) + sma_observed(k));
         end;
-        if (sma_observed(k) < 0 && smd_observed(k) >= 0 );
+        if (isnan(sma_observed(k)) && ~isnan(smd_observed(k)) );
             sm_observed(k) =  smd_observed(k); end;
-        if (sma_observed(k) >= 0 && smd_observed(k) < 0 );
+        if (~isnan(sma_observed(k)) && isnan(smd_observed(k)) );
             sm_observed(k) =  sma_observed(k); end;
     end
     % Rescale
-    [sm_observed_trans, R_API, API_COEFF] = rescale(sm_observed, time_step, ...
+    [sm_observed_trans, R_API, API_COEFF, API_model] = rescale(sm_observed, time_step, ...
         transform_flag, API_model_flag, ist, rain_observed, API_mean, API_range, lag, ...
         slope_parameter_API, ta_observed_climatology, ...
         PET_observed_climatology, total_mean_TA, total_mean_PET, bb, ...
@@ -77,47 +77,41 @@ if sep_sm_orbit == 0
 % separately; sm_observed only serves as an indicator for update timesteps
 else
     % Rescale ascending & descending separately
-    [sma_observed_trans, R_API_a, API_COEFF_a] = rescale(sma_observed, time_step, ...
+    [sma_observed_trans, R_API_a, API_COEFF_a, API_model] = rescale(sma_observed, time_step, ...
         transform_flag, API_model_flag, ist, rain_observed, API_mean, API_range, lag, ...
         slope_parameter_API, ta_observed_climatology, ...
         PET_observed_climatology, total_mean_TA, total_mean_PET, bb, ...
         EVI_observed, R_DQX);
-    [smd_observed_trans, R_API_d, API_COEFF_d] = rescale(smd_observed, time_step, ...
+    [smd_observed_trans, R_API_d, API_COEFF_d, API_model] = rescale(smd_observed, time_step, ...
         transform_flag, API_model_flag, ist, rain_observed, API_mean, API_range, lag, ...
         slope_parameter_API, ta_observed_climatology, ...
         PET_observed_climatology, total_mean_TA, total_mean_PET, bb, ...
         EVI_observed, R_DQX);
     % Put rescaled ascending & desceinding sm together
-    sm_observed_trans(1:ist) = -1;
+    sm_observed_trans(1:ist) = nan;
     R_API(1:ist) = 0;
-    API_COEFF(1:ist) = 0;
-    sm_observed(1:ist) = -1;
+    API_COEFF(1:ist) = API_mean;
+    sm_observed(1:ist) = nan;
     for k=1:ist
-        if (sma_observed(k) >= 0 && smd_observed(k) >= 0 );
+        if (~isnan(sma_observed(k)) && ~isnan(smd_observed(k)) );
             fprintf('Error: When sep_sm_orbit, ascending and descending products cannot appear on the same timestep!');
             exit(1);
         end;
-        if (sma_observed(k) < 0 && smd_observed(k) >= 0 );
+        if (isnan(sma_observed(k)) && ~isnan(smd_observed(k)) );
             sm_observed_trans(k) =  smd_observed_trans(k);
             R_API(k) = R_API_d(k);
             API_COEFF(k) = API_COEFF_d(k);
-            sm_observed(k) = 999;
+            sm_observed(k) = smd_observed(k);
         end;
-        if (sma_observed(k) >= 0 && smd_observed(k) < 0 );
+        if (~isnan(sma_observed(k)) && isnan(smd_observed(k)) );
             sm_observed_trans(k) =  sma_observed_trans(k);
             R_API(k) = R_API_a(k);
             API_COEFF(k) = API_COEFF_a(k);
-            sm_observed(k) = 999;
+            sm_observed(k) = sma_observed(k);
         end;
     end
 end
 
-% ----- Run filter ----- %
-% innovation whitening....this is no longer being supported.....
-%     Q = 2000; %Initital condition only - start very large
-%     no_tune_flag = 0;
-%     P_inflation = P_inflation_fixed;
-%     converge_approach = 1;
 
 Q = Q_fixed;
 P_inflation = P_inflation_fixed;
@@ -140,7 +134,7 @@ end
 
 % Identify update days
 if (filter_flag == 5 || filter_flag == 6) 
-    update_days = find(sm_observed_trans>=0);
+    update_days = find(~isnan(sm_observed_trans));
 end
 
 while (converge_flag == 0)
@@ -174,7 +168,7 @@ while (converge_flag == 0)
             % skip;
             % If filter_flag == 5 and no sm measurement at this time point,
             % go back in time until last update and update the gaps
-            if (sm_observed(k) < 0)
+            if (isnan(sm_observed(k)))
                 increment(k)=-999;
                 innovation1(k)=-999;
                 innovation1_not_norm(k)=-999;
@@ -235,7 +229,7 @@ while (converge_flag == 0)
             % skip;
             % If filter_flag == 6 and no sm measurement at this time point,
             % go back in time until last update and update the gaps
-            if (sm_observed(k) < 0)
+            if (isnan(sm_observed(k)))
                 increment(k)=-999;
                 innovation1(k)=-999;
                 innovation1_not_norm(k)=-999;
@@ -284,7 +278,7 @@ while (converge_flag == 0)
         for k=2:ist
             API_filter(k) = sign(API_filter(k-1))*(API_COEFF(k)-1)*abs(API_filter(k-1))^bb + API_filter(k-1)  + rain_observed(k);
             K(k) = 1.00;
-            if (sm_observed(k) < 0)
+            if (isnan(sm_observed(k)))
                 increment(k)=-999;
                 innovation1(k)=-999;
                 innovation1_not_norm(k)=-999;
@@ -350,7 +344,7 @@ while (converge_flag == 0)
             
             background = mean(API_filter_PART(k,:));
             P(k) = var(API_filter_PART(k,:));
-            if (sm_observed(k) < 0)
+            if (isnan(sm_observed(k)))
                 increment(k)=-999;
                 innovation1(k)=-999;
                 innovation1_not_norm(k)=-999;
@@ -396,8 +390,8 @@ while (converge_flag == 0)
     %THIS HELPS SOMETIMES
     %increment(innovation1 < -2 & innovation1 > -999) = -999;
     
-    innovation_mean = mean(innovation1((sm_observed >= 0)));
-    innovation_var = var(innovation1((sm_observed >= 0)));
+    innovation_mean = mean(innovation1((~isnan(sm_observed))));
+    innovation_var = var(innovation1((~isnan(sm_observed))));
     innovation_ac = innovation_cross_sum/count_updates;
     innovation_lag1_covar = count_updates/(count_updates - 1) * (innovation_ac - innovation_mean*innovation_mean);
     innovation_lag1_corr = (innovation_lag1_covar/innovation_var);

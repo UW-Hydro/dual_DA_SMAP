@@ -1,4 +1,4 @@
-function [sm_observed_trans, R_API, API_COEFF] = rescale(sm_observed, time_step, ...
+function [sm_observed_trans, R_API, API_COEFF, API_model] = rescale(sm_observed, time_step, ...
     transform_flag, API_model_flag, ist, rain_observed, API_mean, API_range, lag, ...
     slope_parameter_API, ta_observed_climatology, ...
     PET_observed_climatology, total_mean_TA, total_mean_PET, bb, ...
@@ -8,7 +8,7 @@ API_COEFF_HOLD(1:ist)=0;
 API_COEFF(1:ist)=API_mean;
 API_model(1:ist)=0;
 R_API(1:ist)=0;
-sm_observed_trans(1:ist)=0;
+sm_observed_trans(1:ist) = nan;
 
 API_DOY(1:365)=0;
 API2_DOY(1:365)=0;
@@ -55,7 +55,7 @@ for k=2:ist
 %         end;
 %     end;
     
-    if (sm_observed(k) >= 0)
+    if (~isnan(sm_observed(k)) )
         sm_observed_DOY(round(DOY(k))) = sm_observed_DOY(round(DOY(k))) + sm_observed(k);
         sm2_observed_DOY(round(DOY(k))) = sm2_observed_DOY(round(DOY(k))) + sm_observed(k)*sm_observed(k);
         count_DOY_sm(round(DOY(k))) = count_DOY_sm(round(DOY(k))) + 1;
@@ -69,10 +69,10 @@ end
 
 % Calculate all moment statistics using API)model values at
 % SM-obs-available timesteps only - Yixin
-total_sd_ratio = (sqrt(var(API_model(sm_observed >= 0)))/sqrt(var(sm_observed((sm_observed >= 0)))));
-total_mean_sm_observed = mean(sm_observed((sm_observed >= 0)));
-total_var_sm_observed = var(sm_observed((sm_observed >= 0)));
-total_mean_API = mean(API_model(sm_observed >= 0));
+total_sd_ratio = (sqrt(var(API_model(~isnan(sm_observed))))/sqrt(var(sm_observed((~isnan(sm_observed))))));
+total_mean_sm_observed = mean(sm_observed((~isnan(sm_observed))));
+total_var_sm_observed = var(sm_observed((~isnan(sm_observed))));
+total_mean_API = mean(API_model(~isnan(sm_observed)));
 
 % average climatologies within 31-day moving windows
 for k=1:365
@@ -104,8 +104,8 @@ end
 
 % rescaling observations and defining R
 if (transform_flag == 1)
-    RS_sort=sort(sm_observed((sm_observed >= 0)));
-    API_sort=sort(transpose(API_model((sm_observed >= 0))));
+    RS_sort=sort(sm_observed((~isnan(sm_observed))));
+    API_sort=sort(transpose(API_model((~isnan(sm_observed)))));
 end
 
 for k=2:ist
@@ -117,12 +117,11 @@ for k=2:ist
     end
     R_API(k) = R*(total_sd_ratio)^2;
     
-    sm_observed_trans(k) = -1;
-    if (transform_flag == 1 && sm_observed(k) >= 0); sm_observed_trans(k) = mean(API_sort((RS_sort == sm_observed(k))));end;
-    if (transform_flag == 2 && sm_observed(k) >= 0); sm_observed_trans(k) = (sm_observed(k) - mean_sm_observed(round(DOY(k)))) * total_sd_ratio + mean_API(round(DOY(k))); end;
-    if (transform_flag == 3 && sm_observed(k) >= 0); sm_observed_trans(k) = (sm_observed(k) - total_mean_sm_observed) * total_sd_ratio + total_mean_API; end;
+    if (transform_flag == 1 && ~isnan(sm_observed(k))); sm_observed_trans(k) = mean(API_sort((RS_sort == sm_observed(k))));end;
+    if (transform_flag == 2 && ~isnan(sm_observed(k))); sm_observed_trans(k) = (sm_observed(k) - mean_sm_observed(round(DOY(k)))) * total_sd_ratio + mean_API(round(DOY(k))); end;
+    if (transform_flag == 3 && ~isnan(sm_observed(k))); sm_observed_trans(k) = (sm_observed(k) - total_mean_sm_observed) * total_sd_ratio + total_mean_API; end;
     
-    if (transform_flag == 4 && sm_observed(k) >= 0)
+    if (transform_flag == 4 && ~isnan(sm_observed(k)))
         % Yixin: here is doing 91-day-window CDF matching
         % Get all sm_obs and API data within multi-year 91-day window 
         delta_DOY = abs(DOY - DOY(k));
@@ -130,23 +129,20 @@ for k=2:ist
         sm_observed_subset = sm_observed(abs(delta_DOY) <= 45);
         API_model_subset = API_model(abs(delta_DOY) <= 45);
         % Sort sm_obs and API (at sm_obs-available steps)
-        RS_sort=sort(sm_observed_subset((sm_observed_subset >= 0)));
-        API_sort=sort(transpose(API_model_subset((sm_observed_subset) >= 0)));
+        RS_sort=sort(sm_observed_subset((~isnan(sm_observed_subset) )));
+        API_sort=sort(transpose(API_model_subset(~isnan(sm_observed_subset) )));
         % Rescale
         sm_observed_trans(k) = mean(API_sort((RS_sort == sm_observed(k))));
     end
     
     if (transform_flag == 5)
         if (var_API(round(DOY(k))) > 0 && var_sm_observed(round(DOY(k))) > 0)
-            if (sm_observed(k) >= 0); sm_observed_trans(k) = (sm_observed(k) - mean_sm_observed(round(DOY(k)))) * sqrt(var_API(round(DOY(k))))/sqrt(var_sm_observed(round(DOY(k)))) + mean_API(round(DOY(k))); end;
+            if (~isnan(sm_observed(k))); sm_observed_trans(k) = (sm_observed(k) - mean_sm_observed(round(DOY(k)))) * sqrt(var_API(round(DOY(k))))/sqrt(var_sm_observed(round(DOY(k)))) + mean_API(round(DOY(k))); end;
         else
-            if (sm_observed(k) >= 0); sm_observed_trans(k) = (sm_observed(k) - mean_sm_observed(round(DOY(k)))) * total_sd_ratio + mean_API(round(DOY(k))); end;
+            if (~isnan(sm_observed(k))); sm_observed_trans(k) = (sm_observed(k) - mean_sm_observed(round(DOY(k)))) * total_sd_ratio + mean_API(round(DOY(k))); end;
         end
     end
 end
-
-
-
 
 
 
