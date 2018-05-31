@@ -72,7 +72,7 @@ numpixels = size_data(1);
 innovation(1:ist, 1:numpixels) = 0;
 lambda(1:numpixels) = 0;
 
-for j=1:numpixels %space loop
+for j=1:numpixels % space loop
     
     % REQUIRED INPUTS (TIME SERIES FOR EACH SPATIAL PIXEL)
     % (Missing input data is assumed to be nan)
@@ -95,14 +95,6 @@ for j=1:numpixels %space loop
     sma_observed = sm_ascend(j, 1:ist); % Soil Moisture - Ascending
     smd_observed = sm_descend(j, 1:ist); % Soil Moisture - Descending
     sm_quality = sm_error(j, 1:ist);  % Soil moisture standard error
-    
-    % Change nan missing data to negative values
-    % This is not ideal...should really change code to use nan for missing data
-    rain_observed(isnan(rain_observed)) = -1;
-    rain_indep(isnan(rain_indep)) = -1;
-    rain_true(isnan(rain_true)) = -1;
-    sma_observed(isnan(sma_observed)) = -1;
-    smd_observed(isnan(smd_observed)) = -1;
     
     % The below data sources are used to defined to make the API coefficient vary in time
     % Only used for API_model_flag >= 2
@@ -133,7 +125,7 @@ for j=1:numpixels %space loop
             analysis(window_size,ist,filter_flag,transform_flag,API_model_flag,NUMEN,Q_fixed,P_inflation,...
             logn_var,bb,rain_observed,rain_observed_hold,rain_indep,rain_true,sep_sm_orbit,sma_observed,smd_observed,...
             ta_observed,ta_observed_climatology,PET_observed,PET_observed_climatology,EVI_observed,...
-            API_mean,sm_quality, API_range, slope_parameter_API, time_step);
+            API_mean,sm_quality, API_range, slope_parameter_API, time_step);  
         
         % Correct Rainfall
         [sum_rain_corrected, sum_rain_corrected_ens, optimized_fraction] = ...
@@ -287,7 +279,12 @@ end
 
 %% 
 save([output_dir '/SMART_corrected_rainfall.mat'], 'RAIN_SMART_SMOS');  % [ntime, npixel]
-save([output_dir '/SMART_corrected_rainfall_ens.mat'], 'RAIN_SMART_SMOS_ENS');  % [ntime, n_ens, npixel]
+for i=1:NUMEN
+    RAIN_CORRECTED = [];
+    RAIN_CORRECTED.(sprintf('ens%d', i)) = RAIN_SMART_SMOS_ENS(:, i, :);
+    save([output_dir sprintf('/SMART_corrected_rainfall.ens%d.mat', i)], ...
+    'RAIN_CORRECTED');  % [ntime, npixel]
+end
 save([output_dir '/innovation.mat'], 'innovation');  % [ntime, npixel]
 save([output_dir '/lambda.mat'], 'lambda');  % [npixel]
 save([output_dir '/increment_sum.mat'], 'INCREMENT_SUM');  % [ntime, npixel]  
