@@ -31,6 +31,7 @@ p.addParamValue('Q_fixed', []);  % Q_fixed - if = 999 than whiten tune, otherwis
 p.addParamValue('P_inflation', []);
 p.addParamValue('upper_bound_API', []);  % set to 99999 if do not want to set max soil moisture
 p.addParamValue('logn_var', []);  % logn_var - variance of multiplicative ensemble perturbations...not sued if filter_flag = 1 or 3....setting to zero means all rainfall error is additive
+p.addParamValue('phi', []);  % precip perturbation autocorrelation
 p.addParamValue('slope_parameter_API', []);  % slope parameter API - not used if API_model_flag = 0
 p.addParamValue('location_flag', []);  % location flag 0) CONUS, 1) AMMA, 2) Global 3) Australia 31 4) Australia 240 5) Australia, 0.25-degree continental
 p.addParamValue('window_size', []);  % window size - number of time steps in a window
@@ -55,6 +56,7 @@ Q_fixed = str2num(p.Results.Q_fixed);
 P_inflation = str2num(p.Results.P_inflation);
 upper_bound_API = str2num(p.Results.upper_bound_API);
 logn_var = str2num(p.Results.logn_var);
+phi = str2num(p.Results.phi);
 slope_parameter_API = str2num(p.Results.slope_parameter_API);
 location_flag = str2num(p.Results.location_flag);
 window_size = str2num(p.Results.window_size);
@@ -88,7 +90,7 @@ if (Q_fixed == 999)
     exit(1);
 end
 
-%% Generate synthetic truth - tun API model with forcing and state perturbation
+%% Generate synthetic truth - run API model with forcing and state perturbation
 % --- Some initialization --- %
 prec_true = prec_orig;  % [pixel, time]
 API_true(1:numpixels, 1:ist) = 0;  % [pixel, time]
@@ -101,7 +103,7 @@ for j=1:numpixels
     sm_quality = sm_error(j, 1:ist);
     
     % Perturb rainfall for all timesteps
-    mult_factor = exp(randn(1, ist)*sqrt(log(logn_var + 1)) - log(logn_var + 1)/2);
+    mult_factor = generate_prec_lognormal_multiplier(logn_var, phi, ist);
     prec_true(j, :) = mult_factor .* rain_observed;
     
     % Run API model (with percipitation and state perturbation)

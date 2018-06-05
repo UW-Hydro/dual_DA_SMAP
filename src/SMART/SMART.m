@@ -21,12 +21,14 @@ p.addParamValue('Q_fixed', []);  % Q_fixed - if = 999 than whiten tune, otherwis
 p.addParamValue('P_inflation', []);
 p.addParamValue('upper_bound_API', []);  % set to 99999 if do not want to set max soil moisture
 p.addParamValue('logn_var', []);  % logn_var - variance of multiplicative ensemble perturbations...not sued if filter_flag = 1 or 3....setting to zero means all rainfall error is additive
+p.addParamValue('phi', []);  % precip perturbation autocorrelation
 p.addParamValue('slope_parameter_API', []);  % slope parameter API - not used if API_model_flag = 0
 p.addParamValue('location_flag', []);  % location flag 0) CONUS, 1) AMMA, 2) Global 3) Australia 31 4) Australia 240 5) Australia, 0.25-degree continental
 p.addParamValue('window_size', []);  % window size - number of time steps in a window
 p.addParamValue('API_mean', []);  % where API(t) = API_mean*API(t-1)^bb + rain(t)...default is 0.60
 p.addParamValue('bb', []);  % where API(t) = API_mean*API(t-1)^bb + rain(t)...default is 0.60
 p.addParamValue('API_range', []); % only used if API is varying seasonally
+p.addParamValue('if_rescale', []); % whether rescale input SM meas (1) or not (0)
 p.addParamValue('sep_sm_orbit', []); % 1 for separately rescale ascending and descending SM (this only makes sense for subdaily run); 0 for combining ascending and descending soil miosture products and SM obs appearing on the same timestep will be averaged
 p.parse(varargin{:});
 % Assign input arguments to variables
@@ -44,12 +46,14 @@ Q_fixed = str2num(p.Results.Q_fixed);
 P_inflation = str2num(p.Results.P_inflation);
 upper_bound_API = str2num(p.Results.upper_bound_API);
 logn_var = str2num(p.Results.logn_var);
+phi = str2num(p.Results.phi);
 slope_parameter_API = str2num(p.Results.slope_parameter_API);
 location_flag = str2num(p.Results.location_flag);
 window_size = str2num(p.Results.window_size);
 API_mean = str2num(p.Results.API_mean);
 bb = str2num(p.Results.bb);
 API_range = str2num(p.Results.API_range);
+if_rescale = str2num(p.Results.if_rescale);
 sep_sm_orbit = str2num(p.Results.sep_sm_orbit);
 
 dump_flag = 0;
@@ -123,9 +127,9 @@ for j=1:numpixels % space loop
         % Calculate Increments
         [increment_sum,increment_sum_hold,sum_rain,sum_rain_sp,sum_rain_sp_hold,sum_rain_sp2,increment_sum_ens, innovation(:, j), innovation_not_norm, rain_perturbed_sum_ens] = ...
             analysis(window_size,ist,filter_flag,transform_flag,API_model_flag,NUMEN,Q_fixed,P_inflation,...
-            logn_var,bb,rain_observed,rain_observed_hold,rain_indep,rain_true,sep_sm_orbit,sma_observed,smd_observed,...
+            logn_var,phi,bb,rain_observed,rain_observed_hold,rain_indep,rain_true,if_rescale,sep_sm_orbit,sma_observed,smd_observed,...
             ta_observed,ta_observed_climatology,PET_observed,PET_observed_climatology,EVI_observed,...
-            API_mean,sm_quality, API_range, slope_parameter_API, time_step);  
+            API_mean,sm_quality, API_range, slope_parameter_API, time_step);      
         
         % Correct Rainfall
         [sum_rain_corrected, sum_rain_corrected_ens, optimized_fraction] = ...

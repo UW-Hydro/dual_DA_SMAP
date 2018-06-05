@@ -1,6 +1,6 @@
 function [increment_sum,increment_sum_hold,sum_rain,sum_rain_sp,sum_rain_sp_hold,sum_rain_indep,increment_sum_ens, innovation1, innovation1_not_norm, rain_perturbed_sum_ens] =...
     analysis(window_size,ist,filter_flag,transform_flag,API_model_flag,NUMEN,Q_fixed,P_inflation_fixed,...
-    logn_var_constant,bb,rain_observed,rain_observed_hold,rain_indep,rain_true,sep_sm_orbit,sma_observed,smd_observed,...
+    logn_var_constant,phi,bb,rain_observed,rain_observed_hold,rain_indep,rain_true,if_rescale,sep_sm_orbit,sma_observed,smd_observed,...
     ta_observed,ta_observed_climatology,PET_observed,PET_observed_climatology,EVI_observed,...
     API_mean,R_DQX, API_range, slope_parameter_API, time_step)
 
@@ -112,6 +112,18 @@ else
     end
 end
 
+% If not rescale, reset SM and R to unscaled values
+if if_rescale == 0
+    R_API(:) = R_DQX.^2;
+    sm_observed_trans = sm_observed;
+end
+
+% ----- Run filter ----- %
+% innovation whitening....this is no longer being supported.....
+%     Q = 2000; %Initital condition only - start very large
+%     no_tune_flag = 0;
+%     P_inflation = P_inflation_fixed;
+%     converge_approach = 1;
 
 Q = Q_fixed;
 P_inflation = P_inflation_fixed;
@@ -207,12 +219,18 @@ while (converge_flag == 0)
     
     % rainfall correction with EnKF or EnKS
     if (filter_flag== 2 || filter_flag == 6)
+        % Generate mult_factor time series for each ensemble member
+        mult_factor(1:ist, 1:NUMEN) = 0;  % [time, ens]
+        for e=1:NUMEN
+            mult_factor(:, e) = generate_prec_lognormal_multiplier(...
+                logn_var, phi, ist);
+        end
+        
         for k=2:ist
             
             % Propagate ensemble and add state perturbation (Yixin)
             API_COEFF_V(k,:) = ones*API_COEFF(k);
-            mult_factor = exp(randn(1,NUMEN)*sqrt(log(logn_var + 1)) - log(logn_var + 1)/2);
-            rain_perturbed_ens(k, :) = mult_factor * rain_observed(k);
+            rain_perturbed_ens(k, :) = mult_factor(k, :) * rain_observed(k);
             temp_total(1:NUMEN)=nan;
             for e=1:NUMEN
                 temp_total(e) = API_short(API_filter_EnKF(k-1,e),API_COEFF_V(k,e),bb,1);
@@ -299,8 +317,9 @@ while (converge_flag == 0)
     % filtering only...no smoothing back correction...has not been
     % completely de-bugged...use with caution
     if (filter_flag==4 || filter_flag == 7)
+        mult_factor = generate_prec_lognormal_multiplier(...
+            logn_var, phi, ist);
         for k=2:ist
-            mult_factor = exp(randn(1,NUMEN)*sqrt(log(logn_var + 1))-log(logn_var + 1)/2);
             add_factor = randn(1,NUMEN);
             rain = rain_observed(k);
             
@@ -312,7 +331,7 @@ while (converge_flag == 0)
                    %      temp_total(e) = API_short(API_filter_PART(k-1,e),API_COEFF_V(k,e),bb,24);
                    %end
                 end
-                API_filter_PART(k,:) = temp_total + mult_factor*rain_observed(k) + sqrt(Q)*randn(1,NUMEN) + sqrt(P_inflation)*rain_observed(k)*randn(1,NUMEN);
+                API_filter_PART(k,:) = temp_total + mult_factor(k)*rain_observed(k) + sqrt(Q)*randn(1,NUMEN) + sqrt(P_inflation)*rain_observed(k)*randn(1,NUMEN);
                 
                 %older
                 %temp = (API_COEFF(k)-1).*abs(API_filter_PART(k-1,:)).^bb;
@@ -330,7 +349,7 @@ while (converge_flag == 0)
                     %     temp_total(e) = API_short(API_filter_PART(k-1,e),API_COEFF_V(k,e),bb,24);
                     %end
                 end
-                API_filter_PART(k,:) = temp_total + mult_factor*rain + add_factor*sqrt(Q);
+                API_filter_PART(k,:) = temp_total + mult_factor(k)*rain + add_factor*sqrt(Q);
                 
                 %older
                 %temp = (API_COEFF(k)-1).*abs(API_filter_PART(k-1,:)).^bb;
@@ -377,7 +396,7 @@ while (converge_flag == 0)
                 innovation_last = innovation1(k);
                 
                 API_filter_PART(k,:) = API_filter_PART(k,outIndex);
-                if (filter_flag == 7); increment(k) = (mult_factor*rain + add_factor*sqrt(Q))*WEIGHT' - rain; end;
+                if (filter_flag == 7); increment(k) = (mult_factor(k)*rain + add_factor*sqrt(Q))*WEIGHT' - rain; end;
                 if (filter_flag == 4); increment(k) = mean(API_filter_PART(k,:) - background); end;
             end
         end
