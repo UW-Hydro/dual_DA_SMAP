@@ -3,7 +3,7 @@
 ## Synthetic experiment:
 1.  Generate ensemble precipitation (for state EnKF)
 
-    `$ python gen_ensemble_forcing.py <cfg>`
+    `$ python gen_ensemble_forcing.py <cfg> <ens>`
 
 2.  Generate synthetic truth and measurements
 
@@ -59,7 +59,7 @@ For each state and precipitation ensemble member, run:
 ## Real-data:
 1. Generate ensemble precipitation (for state EnKF)
 
-    `$ python gen_ensemble_forcing.py <cfg>`
+    `$ python gen_ensemble_forcing.py <cfg> <ens>`
 
 2. Run DA for state updating
 
