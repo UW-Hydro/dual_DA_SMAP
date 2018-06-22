@@ -277,6 +277,12 @@ while (converge_flag == 0)
                     temp(temp >= 0)=nan;
                     [junk,index]=max(temp);
                     last_update = update_days(index);                 
+                    % Set upper limit to the earliest timestep to fill to
+                    % 10 days
+                    max_steps_to_fill = 10 * (24 / time_step);
+                    if (k - last_update > max_steps_to_fill)
+                        last_update = k - max_steps_to_fill;
+                    end
                     for m=k-1:-1:last_update + 1
                         % Use priors to generated K_EnKF
                         CYM = cov(API_filter_EnKF_prior(k,:),API_filter_EnKF_prior(m,:));
