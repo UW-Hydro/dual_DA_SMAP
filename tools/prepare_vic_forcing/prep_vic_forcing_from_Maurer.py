@@ -245,18 +245,17 @@ print('Processing orig. Maurer forcings...')
 for year in range(start_year, end_year+1):
     print('Year {}'.format(year))
     # --- Load in netCDF file for this year --- #
-    da_pr = xr.open_dataset(os.path.join(
-                cfg['FORCING']['maurer_dir'],
-                'pr.{}.nc'.format(year)))['pr']
-    da_tasmax = xr.open_dataset(os.path.join(
-                    cfg['FORCING']['maurer_dir'],
-                    'tasmax.{}.nc'.format(year)))['tasmax']
-    da_tasmin = xr.open_dataset(os.path.join(
-                    cfg['FORCING']['maurer_dir'],
-                    'tasmin.{}.nc'.format(year)))['tasmin']
-    da_wind = xr.open_dataset(os.path.join(
-                    cfg['FORCING']['maurer_dir'],
-                    'wind.{}.nc'.format(year)))['wind']
+    da_pr = xr.open_dataset(
+        cfg['FORCING']['maurer_orig_nc'].format(var='pr', YYYY=year))['pr']
+    da_tasmax = xr.open_dataset(
+        cfg['FORCING']['maurer_orig_nc'].format(var='tasmax', YYYY=year))['tasmax']
+    da_tasmin = xr.open_dataset(
+        cfg['FORCING']['maurer_orig_nc'].format(var='tasmin', YYYY=year))['tasmin']
+    da_wind = xr.open_dataset(
+        cfg['FORCING']['maurer_orig_nc'].format(var='wind', YYYY=year))['wind']
+    # --- Clean up time coordinate to avoid tiny time difference --- #
+    for da in [da_pr, da_tasmax, da_tasmin, da_wind]:
+        da['time'] = da_pr['time']
     # --- Combine variables --- #
     ds = xr.Dataset({"pr": da_pr, "tasmax": da_tasmax, "tasmin": da_tasmin,
                      "wind": da_wind})

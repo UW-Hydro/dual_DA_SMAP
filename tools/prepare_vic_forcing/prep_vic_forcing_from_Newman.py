@@ -59,6 +59,9 @@ def main(cfg_file, nproc=1):
     
     start_year = start_date.year
     end_year = end_date.year
+
+    ens_list = range(cfg['FORCING']['ens_start'],
+                     cfg['FORCING']['ens_end'] + 1)
     
     
     # ====================================================== #
@@ -119,7 +122,7 @@ def main(cfg_file, nproc=1):
     # If 1 processor, do a regular process
     if nproc == 1:
         # Loop over each ensemble member
-        for ens in range(1, cfg['FORCING']['n_ens']+1):
+        for ens in ens_list:
             load_and_process_Newman(ens, cfg, da_domain, lat_min, lat_max,
                                     lon_min, lon_max, start_date, end_date,
                                     dirs, da_wind_allyears)
@@ -128,7 +131,7 @@ def main(cfg_file, nproc=1):
         # Set up multiprocessing
         pool = mp.Pool(processes=nproc)
         # Loop over each ensemble member
-        for ens in range(1, cfg['FORCING']['n_ens']+1):
+        for ens in ens_list:
             pool.apply_async(load_and_process_Newman,
                              (ens, cfg, da_domain, lat_min, lat_max, lon_min,
                               lon_max, start_date, end_date, dirs,
@@ -146,7 +149,7 @@ def main(cfg_file, nproc=1):
     # --- Setup subdirs for asc VIC orig. forcings for each ensemble member
     # --- #
     list_ens = []
-    for ens in range(1, cfg['FORCING']['n_ens']+1):
+    for ens in ens_list:
         list_ens.append('ens_{}'.format(ens))
     subdirs_output = setup_output_dirs(
                         dirs['forc_orig_asc'],
@@ -154,7 +157,7 @@ def main(cfg_file, nproc=1):
     
     # --- Prepare netcdf2vic config file --- #
     dict_cfg_file = {}
-    for ens in range(1, cfg['FORCING']['n_ens']+1):
+    for ens in ens_list:
         cfg_file = os.path.join(subdirs_config['netcdf2vic'],
                                 'ens_{}.cfg'.format(ens))
         dict_cfg_file[ens] = cfg_file
@@ -184,14 +187,14 @@ def main(cfg_file, nproc=1):
     # --- Run nc_to_vic --- #
     # If 1 processor, do a regular process
     if nproc == 1:
-        for ens in range(1, cfg['FORCING']['n_ens']+1):
+        for ens in ens_list:
             nc_to_vic(dict_cfg_file[ens])
     # If multiple processors, use mp
     elif nproc > 1:
         # Set up multiprocessing
         pool = mp.Pool(processes=nproc)
         # Loop over each ensemble member
-        for ens in range(1, cfg['FORCING']['n_ens']+1):
+        for ens in ens_list:
             pool.apply_async(nc_to_vic, (dict_cfg_file[ens],))
         # Finish multiprocessing
         pool.close()
@@ -206,7 +209,7 @@ def main(cfg_file, nproc=1):
     # --- Setup subdirs for asc VIC disagg. forcings and VIC log files for
     # each ensemble member --- #
     list_ens = []
-    for ens in range(1, cfg['FORCING']['n_ens']+1):
+    for ens in ens_list:
         list_ens.append('ens_{}'.format(ens))
     subdirs_output = setup_output_dirs(
                         dirs['forc_disagg_asc'],
@@ -223,7 +226,7 @@ def main(cfg_file, nproc=1):
     s = string.Template(global_param)
     # Loop over each ensemble member
     dict_global_file = {}
-    for ens in range(1, cfg['FORCING']['n_ens']+1):
+    for ens in ens_list:
         # Fill in variables in the template
         global_param = s.safe_substitute(
                             time_step=cfg['VIC_DISAGG']['time_step'],
@@ -259,7 +262,7 @@ def main(cfg_file, nproc=1):
 
     # If 1 processor, do a regular process
     if nproc == 1:
-        for ens in range(1, cfg['FORCING']['n_ens']+1):
+        for ens in ens_list:
             vic_exe.run(dict_global_file[ens],
                         logdir=subdirs_logs['ens_{}'.format(ens)])
     # If multiple processors, use mp
@@ -267,7 +270,7 @@ def main(cfg_file, nproc=1):
         # Set up multiprocessing
         pool = mp.Pool(processes=nproc)
         # Loop over each ensemble member
-        for ens in range(1, cfg['FORCING']['n_ens']+1):
+        for ens in ens_list:
             pool.apply_async(run_vic_for_multiprocess,
                              (vic_exe, dict_global_file[ens],
                               subdirs_logs['ens_{}'.format(ens)],))
@@ -285,7 +288,7 @@ def main(cfg_file, nproc=1):
     # --- Setup subdirs for VIC disagg. netCDF forcings for each ensemble
     # member --- #
     list_ens = []
-    for ens in range(1, cfg['FORCING']['n_ens']+1):
+    for ens in ens_list:
         list_ens.append('ens_{}'.format(ens))
     subdirs_output = setup_output_dirs(
                         dirs['forc_disagg_nc'],
@@ -305,7 +308,7 @@ def main(cfg_file, nproc=1):
 
     # Loop over each ensemble member 
     dict_cfg_file = {}
-    for ens in range(1, cfg['FORCING']['n_ens']+1):
+    for ens in ens_list:
         cfg_file = os.path.join(subdirs_config['vic2nc'],
                                 'ens_{}.cfg'.format(ens))
         dict_cfg_file[ens] = cfg_file
@@ -397,7 +400,7 @@ def main(cfg_file, nproc=1):
     # --- Run vic2nc --- #
     # If 1 processor, do a regular process
     if nproc == 1:
-        for ens in range(1, cfg['FORCING']['n_ens']+1):
+        for ens in ens_list:
             cfg_vic2nc = read_config(dict_cfg_file[ens])
             options = cfg_vic2nc.pop('OPTIONS')
             global_atts = cfg_vic2nc.pop('GLOBAL_ATTRIBUTES')
@@ -415,7 +418,7 @@ def main(cfg_file, nproc=1):
         # Set up multiprocessing
         pool = mp.Pool(processes=nproc)
         # Loop over each ensemble member
-        for ens in range(1, cfg['FORCING']['n_ens']+1):
+        for ens in ens_list:
             cfg_vic2nc = read_config(dict_cfg_file[ens])
             options = cfg_vic2nc.pop('OPTIONS')
             global_atts = cfg_vic2nc.pop('GLOBAL_ATTRIBUTES')
