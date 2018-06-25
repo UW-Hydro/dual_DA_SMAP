@@ -3397,3 +3397,206 @@ def correct_prec_from_SMART(da_prec_orig, window_size, da_prec_corr_window,
     
     return da_prec_corrected
 
+
+def calculate_rmse_prec(out_nc, da_truth, da_model,
+                        agg_freq, log):
+    ''' A wrap funciton that calculates RMSE for all domain and save to file; if
+        result file already existed, then simply read in the file.
+
+    Parameters
+    ----------
+    out_nc: <str>
+        RMSE result output netCDF file
+    da_truth: <xr.Dataset>
+        Truth precip
+    da_model: <xr.Dataset>
+        Corrected prec whose RMSE is to be assessed (wrt. truth)
+    agg_freq: <str>
+        Aggregation frequency for rmse calculation;
+        e.g., '3H', '3D'
+    log: <bool>
+        Whether to take log first before calculating RMSE (but after aggregating)
+    '''
+
+    if not os.path.isfile(out_nc):  # if RMSE is not already calculated
+        # --- Aggregate --- #
+        da_truth_agg = da_truth.resample(dim='time', how='sum', freq=agg_freq)
+        da_model_agg = da_model.resample(dim='time', how='sum', freq=agg_freq)
+        # --- Take log if specified --- #
+        if log is True:
+            da_truth_agg = np.log(da_truth_agg + 1)
+            da_model_agg = np.log(da_model_agg + 1)
+        # --- Calculate RMSE --- #
+        # Determine the total number of loops
+        lat_coord = da_truth['lat']
+        lon_coord = da_truth['lon']
+        nloop = len(lat_coord) * len(lon_coord)
+        # Reshape variables
+        truth = da_truth_agg.values.reshape(
+            [len(da_truth_agg['time']), nloop])  # [time, nloop]
+        model = da_model_agg.values.reshape(
+            [len(da_model_agg['time']), nloop])  # [time, nloop]
+        # Calculate RMSE for all grid cells
+        rmse_model = np.array(list(map(
+                     lambda j: rmse(truth[:, j], model[:, j]),
+                    range(nloop))))  # [nloop]
+        # Reshape RMSE's
+        rmse_model = rmse_model.reshape(
+            [len(lat_coord), len(lon_coord)])  # [lat, lon]
+        # Put results into da's
+        da_rmse_model = xr.DataArray(
+            rmse_model, coords=[lat_coord, lon_coord],
+            dims=['lat', 'lon'])  # [mm/mm]
+        # Save RMSE to netCDF file
+        ds_rmse_model = xr.Dataset(
+            {'rmse': da_rmse_model})
+        ds_rmse_model.to_netcdf(out_nc, format='NETCDF4_CLASSIC')
+    else:  # if RMSE is already calculated
+        da_rmse_model = xr.open_dataset(out_nc)['rmse']
+
+    return da_rmse_model
+
+
+def calculate_corrcoef_prec(out_nc, da_truth, da_model,
+                            agg_freq, log):
+    ''' A wrap funciton that calculates corrcoef for all domain and save to file; if
+        result file already existed, then simply read in the file.
+
+    Parameters
+    ----------
+    out_nc: <str>
+        corrcoef result output netCDF file
+    da_truth: <xr.Dataset>
+        Truth precip
+    da_model: <xr.Dataset>
+        Corrected prec whose corrcoef is to be assessed (wrt. truth)
+    agg_freq: <str>
+        Aggregation frequency for corrcoef calculation;
+        e.g., '3H', '3D'
+    log: <bool>
+        Whether to take log first before calculating corrcoef (but after aggregating)
+    '''
+
+    if not os.path.isfile(out_nc):  # if corrcoef is not already calculated
+        # --- Aggregate --- #
+        da_truth_agg = da_truth.resample(dim='time', how='sum', freq=agg_freq)
+        da_model_agg = da_model.resample(dim='time', how='sum', freq=agg_freq)
+        # --- Take log if specified --- #
+        if log is True:
+            da_truth_agg = np.log(da_truth_agg + 1)
+            da_model_agg = np.log(da_model_agg + 1)
+        # --- Calculate corrcoef --- #
+        # Determine the total number of loops
+        lat_coord = da_truth['lat']
+        lon_coord = da_truth['lon']
+        nloop = len(lat_coord) * len(lon_coord)
+        # Reshape variables
+        truth = da_truth_agg.values.reshape(
+            [len(da_truth_agg['time']), nloop])  # [time, nloop]
+        model = da_model_agg.values.reshape(
+            [len(da_model_agg['time']), nloop])  # [time, nloop]
+        # Calculate corrcoef for all grid cells
+        corrcoef_model = np.array(list(map(
+                     lambda j: np.corrcoef(truth[:, j], model[:, j])[0, 1],
+                    range(nloop))))  # [nloop]
+        # Reshape corrcoef's
+        corrcoef_model = corrcoef_model.reshape(
+            [len(lat_coord), len(lon_coord)])  # [lat, lon]
+        # Put results into da's
+        da_corrcoef_model = xr.DataArray(
+            corrcoef_model, coords=[lat_coord, lon_coord],
+            dims=['lat', 'lon'])  # [mm/mm]
+        # Save corrcoef to netCDF file
+        ds_corrcoef_model = xr.Dataset(
+            {'corrcoef': da_corrcoef_model})
+        ds_corrcoef_model.to_netcdf(out_nc, format='NETCDF4_CLASSIC')
+    else:  # if corrcoef is already calculated
+        da_corrcoef_model = xr.open_dataset(out_nc)['corrcoef']
+
+    return da_corrcoef_model
+
+
+def calculate_categ_metrics(da_threshold, da_truth, da_model, agg_freq):
+    ''' Calculates FAR, POD and TS
+    
+    Parameters
+    ----------
+    da_truth: <xr.Dataset>
+        Truth precip
+    da_model: <xr.Dataset>
+        Corrected prec
+    agg_freq: <str>
+        Aggregation frequency for corrcoef calculation;
+        e.g., '3H', '3D'
+    da_threshold: <xr.DataArray>
+        Prec event threshold (mm/agg_period)
+    
+    Returns
+    ----------
+    da_far, da_pod, da_ts: <xr.DataArray>
+        2D FAR, POD and TS
+    '''
+    
+    # --- Aggregate --- #
+    da_truth_agg = da_truth.resample(dim='time', how='sum', freq=agg_freq)
+    da_model_agg = da_model.resample(dim='time', how='sum', freq=agg_freq)
+    # --- Calculate H (true pos), F (false pos) and M (missed event) --- #
+    da_truth_pos = da_truth_agg > da_threshold
+    da_model_pos = da_model_agg > da_threshold
+    H = (da_truth_pos & da_model_pos).sum(dim='time')
+    F = ((~da_truth_pos) & da_model_pos).sum(dim='time')
+    M = (da_truth_pos & (~da_model_pos)).sum(dim='time')
+    # --- Calculate metrics --- #
+    da_far = F / (H + F)
+    da_pod = H / (H + M)
+    da_ts = H / (H + F + M)
+    
+    return da_far, da_pod, da_ts
+
+
+def calculate_prec_threshold(out_nc, perc, da_prec, agg_freq):
+    ''' A wrap funciton that calculates percentile threshold for all domain and save to file; if
+        result file already existed, then simply read in the file.
+
+    Parameters
+    ----------
+    out_nc: <str>
+        RMSE result output netCDF file
+    perc: <float> (0-100)
+        Percentile threshold to distinguish rainfall event
+    da_prec: <xr.Dataset>
+        Prec data (first dim must be time)
+    agg_freq: <str>
+        Aggregation frequency for rmse calculation;
+        e.g., '3H', '3D'
+    
+    Returns
+    ----------
+    da_threshold: <xr.DataArray>
+        Prec event threshold (mm/agg_period)
+    '''
+
+    if not os.path.isfile(out_nc):  # if not already calculated
+        # --- Aggregate --- #
+        da_prec_agg = da_prec.resample(dim='time', how='sum', freq=agg_freq)
+        # --- Calculate threshold --- #
+        threshold = np.nanpercentile(
+            da_prec_agg.where(da_prec_agg>0).values,
+            q=perc, axis=0)
+        # Put results into da's
+        lat_coord = da_prec['lat']
+        lon_coord = da_prec['lon']
+        da_threshold = xr.DataArray(
+            threshold, coords=[lat_coord, lon_coord],
+            dims=['lat', 'lon'])  # [mm/agg_period]
+        # Save RMSE to netCDF file
+        ds_threshold = xr.Dataset(
+            {'threshold': da_threshold})
+        ds_threshold.to_netcdf(out_nc, format='NETCDF4_CLASSIC')
+    else:  # if RMSE is already calculated
+        da_threshold = xr.open_dataset(out_nc)['threshold']
+
+    return da_threshold
+
+
+

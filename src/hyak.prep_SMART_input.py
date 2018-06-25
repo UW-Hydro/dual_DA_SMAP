@@ -283,12 +283,14 @@ with open(os.path.join(out_dir, 'run.m'), 'w') as f:
     f.write('    \'P_inflation\', \'{}\', ...\n'.format(cfg['SMART_RUN']['P_inflation']))
     f.write('    \'upper_bound_API\', \'{}\', ...\n'.format(cfg['SMART_RUN']['upper_bound_API']))
     f.write('    \'logn_var\', \'{}\', ...\n'.format(cfg['SMART_RUN']['logn_var']))
+    f.write('    \'phi\', \'{}\', ...\n'.format(cfg['SMART_RUN']['phi']))
     f.write('    \'slope_parameter_API\', \'{}\', ...\n'.format(cfg['SMART_RUN']['slope_parameter_API']))
     f.write('    \'location_flag\', \'{}\', ...\n'.format(cfg['SMART_RUN']['location_flag']))
     f.write('    \'window_size\', \'{}\', ...\n'.format(cfg['SMART_RUN']['window_size']))
     f.write('    \'API_mean\', \'{}\', ...\n'.format(cfg['SMART_RUN']['API_mean']))
     f.write('    \'bb\', \'{}\', ...\n'.format(cfg['SMART_RUN']['bb']))
     f.write('    \'API_range\', \'{}\', ...\n'.format(cfg['SMART_RUN']['API_range']))
+    f.write('    \'if_rescale\', \'{}\', ...\n'.format(cfg['SMART_RUN']['if_rescale']))
     f.write('    \'sep_sm_orbit\', \'{}\')\n'.format(cfg['SMART_RUN']['sep_sm_orbit']))
 
 
