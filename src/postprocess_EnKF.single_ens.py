@@ -132,6 +132,9 @@ else:
                     os.path.join(cfg['CONTROL']['root_dir'],
                                  cfg['FORCINGS']['orig_forcing_nc_basepath']),
                     year)))
+        # Select out SMART simulation period
+        class_forcings_orig.ds = class_forcings_orig.ds.sel(
+            time=slice(start_time, end_time))
         # Replace prec
         ds_prec_replaced = class_forcings_orig.replace_prec(
                                 cfg['FORCINGS']['PREC'],

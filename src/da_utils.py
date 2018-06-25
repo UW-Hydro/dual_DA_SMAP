@@ -4013,7 +4013,6 @@ def da_2D_to_3D_from_SMART(dict_array_2D, da_mask, out_time_varname, out_time_co
     dict_da_3D: <dict>
         Keys: variable name (same as in input)
         Elements: xr.DataArray with dimension [time, lat, lon]
-
     '''
 
     # Extract ndays, nlat and nlon (as well as lat and lon)
@@ -4047,13 +4046,88 @@ def da_2D_to_3D_from_SMART(dict_array_2D, da_mask, out_time_varname, out_time_co
     return dict_da_3D
 
 
+def rescale_and_save_SMART_prec(da_prec_orig, window_size, time_step,
+                                da_prec_corr_window, start_time, out_dir, out_prefix):
+    ''' Rescale and save SMART-corrected precipitation (one ensemble member)
+    Parameters
+    ----------
+    da_prec_orig: <xr.DataArray>
+        Original precipitation
+    window_size: <int>
+        Window size in SMART (number of timesteps in a window)
+    time_step: <int>
+        SMART timestep [hour]
+    da_prec_corr_window_ens: <xr.DataArray>
+        SMART-corrected window-averaged precipitation
+    start_time: <pd.datetime>
+        Start time of simulation
+    out_dir: <str>
+        Output directory for rescaled precipitation
+    out_prefix: <str>
+        Prefix of the output prec file ("YYYY.nc" will be appended)
+    '''
+
+    # Rescale
+    da_prec_corrected = correct_prec_from_SMART(
+        da_prec_orig,
+        window_size,
+        da_prec_corr_window,
+        start_time,
+        time_step)
+    
+    # Save to file
+    ds_prec_corrected = xr.Dataset({'prec_corrected': da_prec_corrected})
+    for year, ds in ds_prec_corrected.groupby('time.year'):
+        to_netcdf_forcing_file_compress(
+            ds_force=ds,
+            out_nc=os.path.join(out_dir, '{}{}.nc'.format(out_prefix, year)))
+        
+    return da_prec_corrected
+
+
+def save_SMART_prec(start_time, end_time, time_step,
+                    da_prec_corr_window, out_dir, out_prefix):
+    ''' Save SMART-corrected precipitation when window size = 1 (one ensemble member)
+
+    Parameters
+    ----------
+    start_time: <pd.datetime>
+        SMART start time
+    end_time: <pd.datetime>
+        SMART end time
+    time_step: <int>
+        SMART timestep [hour]
+    da_prec_corr_window: <xr.DataArray>
+        SMART-corrected window-averaged precipitation; this function is for
+        when window size = 1, and the 'window' dimension will be directly
+        replaced by timestamps
+    out_dir: <str>
+        Output directory for rescaled precipitation
+    out_prefix: <str>
+        Prefix of the output prec file ("YYYY.nc" will be appended)
+    '''
+
+    # Replace window dimension by time
+    da_prec_corr_to_save = da_prec_corr_window.rename({'window': 'time'})
+    da_prec_corr_to_save['time'] = pd.date_range(
+        start_time, end_time,
+        freq='{}H'.format(time_step))
+    ds_prec_corrected = xr.Dataset({'prec_corrected': da_prec_corr_to_save})
+    for year, ds in ds_prec_corrected.groupby('time.year'):
+        to_netcdf_forcing_file_compress(
+            ds_force=ds,
+            out_nc=os.path.join(out_dir, '{}{}.nc'.format(out_prefix, year)))
+        
+    return da_prec_corr_to_save
+
+
 def correct_prec_from_SMART(da_prec_orig, window_size, da_prec_corr_window,
-                            start_date):
+                            start_time, time_step):
     ''' Correct (i.e., rescale) original precipitation data based on outputs from
         SMART (which is corrected prec sum in longer time windows).
             - The first window is not corrected (orig. prec used)
             - The last incomplete window, if exists, is not corrected (orig. prec used)
-        
+
     Parameters
     ----------
     da_prec_orig: <xr.DataArray>
@@ -4061,16 +4135,18 @@ def correct_prec_from_SMART(da_prec_orig, window_size, da_prec_corr_window,
         sub-daily.
         Dims: [time, lat, lon]
     window_size: <int>
-        Size of each window [unit: day]
+        Number of timesteps in each window
     da_prec_corr_window: <xr.DataArray>
         Corrected prec sum in each window
         Dims: [window (index starting from 0), lat, lon]
         NOTE: this is the output from SMART:
                 - the first window data is junk (always zeros)
                 - Only include complete windows
-    start_date: <dt.datetime or pd.datetime>
-        Starting date (midnight) of the starting time of all the time series
-        
+    start_time: <dt.datetime or pd.datetime>
+        Starting time of the starting time of all the time series
+    time_step: <int>
+        SMART timestep [hour]
+
     Returns
     ----------
     da_prec_corrected: <xr.DataArray>
@@ -4078,27 +4154,28 @@ def correct_prec_from_SMART(da_prec_orig, window_size, da_prec_corr_window,
         of input da_prec_orig
         Dims: [time, lat, lon]
     '''
-    
+
     # Identify the number of complete windows
     nwindow = len(da_prec_corr_window['window'])
-    
+    window_hours = window_size*time_step  # Number of hours in a window
+
     # Sum original prec in each window (the last window may be incomplete)
     da_prec_orig_window = da_prec_orig.resample(
                             dim='time',
-                            freq='{}D'.format(window_size),
+                            freq='{}H'.format(window_hours),
                             how='sum')
     da_prec_orig_window = da_prec_orig_window.rename({'time': 'window'})
-    
+
     # Loop over each window and rescale original prec (skip first window)
     da_prec_corrected = da_prec_orig.copy(deep=True)
     for i in range(1, nwindow):
         # --- Select out this window period from original prec data --- #
-        window_start_date = start_date + pd.DateOffset(days=i*window_size)
-        window_end_date = start_date + pd.DateOffset(days=(i+1)*window_size-0.0001)
+        window_start_time = start_time + pd.DateOffset(hours=i*window_hours)
+        window_end_time = start_time + pd.DateOffset(hours=(i+1)*window_hours-0.0001)
         da_prec_orig_this_window = da_prec_orig.sel(
-                time=slice(window_start_date, window_end_date))
+                time=slice(window_start_time, window_end_time))
         # --- Rescale --- #
-        # (1) Calculate rescaling factors for this window;
+        # (1) Calculate rescaling factors for this windowkki;
         prec_corr = da_prec_corr_window[i, :, :].values  # dim: [lat, lon]
         prec_sum_orig = da_prec_orig_window[i, :, :].values  # dim: [lat, lon]
         # Note: If prec_sum_orig is 0 for a grid cell, scale_factors will be np.inf for
@@ -4120,43 +4197,10 @@ def correct_prec_from_SMART(da_prec_orig, window_size, da_prec_corr_window,
         const_prec_inf_scale = const_prec[ind_inf_scale[0], ind_inf_scale[1]]
         prec_corr_this_window[:, ind_inf_scale[0], ind_inf_scale[1]] = const_prec_inf_scale
         # --- Put in the final da --- #
-        da_prec_corrected.sel(time=slice(window_start_date, window_end_date))[:] = \
+        da_prec_corrected.sel(time=slice(window_start_time, window_end_time))[:] = \
                 prec_corr_this_window
-    
+
     return da_prec_corrected
-
-
-def rescale_and_save_SMART_prec(da_prec_orig, window_size,
-                                da_prec_corr_window, start_date, out_dir, out_prefix):
-    ''' Rescale and save SMART-corrected precipitation (one ensemble member)
-    Parameters
-    ----------
-    da_prec_orig: <xr.DataArray>
-        Original precipitation
-    window_size: <int>
-        Window size in SMART
-    da_prec_corr_window_ens: <xr.DataArray>
-        SMART-corrected window-averaged precipitation
-    start_date: <pd.datetime>
-        Start date of simulation
-    out_dir: <str>
-        Output directory for rescaled precipitation
-    out_prefix: <str>
-        Prefix of the output prec file ("YYYY.nc" will be appended)
-    '''
-
-    # Rescale
-    da_prec_corrected = correct_prec_from_SMART(
-        da_prec_orig,
-        window_size,
-        da_prec_corr_window,
-        start_date)
-    # Save to file
-    ds_prec_corrected = xr.Dataset({'prec_corrected': da_prec_corrected})
-    for year, ds in ds_prec_corrected.groupby('time.year'):
-        to_netcdf_forcing_file_compress(
-            ds_force=ds,
-            out_nc=os.path.join(out_dir, '{}{}.nc'.format(out_prefix, year)))
 
 
 def extract_mismatched_grid_weight_info(da_vic_domain, da_meas, weight_nc):
@@ -4953,4 +4997,304 @@ def cleanup_updated_states(updated_state_nc, out_cellAvg_state_nc, da_tile_frac)
     # Delete original state file
     os.remove(updated_state_nc)
 
+
+def regrid_spatial_prec_and_save(weight_nc, da_prec_orig, da_prec_corrected, da_mask,
+                                 out_dir, out_prefix):
+    ''' Rescale a field of original rainfall using the corrected field at a coarser
+    resolution; the function rescales the coarser-pixel-mean rainfall to be the
+    corrected values, while maintaining the original sub-pixel spatial pattern.
+    Save to netCDF file
+    
+    Parameters
+    ----------
+    weight_nc: <str>
+        xesmf-format weight nc file; must not split the source grid cells
+    da_prec_orig: <xr.DataArray> [time, lat_source, lon_source]
+        Original precipitation at original finer resolution
+    da_prec_corrected: <xr.DataArray> [time, lat_target, lon_target]
+        Corrected precipitation at the SMART resolution (coarser)
+    da_mask: <xr.DataArray> [lat_target, lon_target]
+        Target domain
+    out_dir: <str>
+        Output directory for regridded precipitation
+    out_prefix: <str>
+        Prefix of the output prec file ("YYYY.nc" will be appended)
+    '''
+    
+    # Regrid
+    da_prec_corrected_regridded = regrid_spatial_prec(
+        weight_nc, da_prec_orig, da_prec_corrected, da_mask)
+    
+    # Save to file
+    ds_prec_corrected_regridded = xr.Dataset({'prec_corrected': da_prec_corrected_regridded})
+    for year, ds in ds_prec_corrected_regridded.groupby('time.year'):
+        to_netcdf_forcing_file_compress(
+            ds_force=ds,
+            out_nc=os.path.join(out_dir, '{}{}.nc'.format(out_prefix, year)))
+
+    return da_prec_corrected_regridded
+
+
+def regrid_spatial_prec(weight_nc, da_prec_orig, da_prec_corrected, da_mask):
+    ''' Rescale a field of original rainfall using the corrected field at a coarser
+    resolution; the function rescales the coarser-pixel-mean rainfall to be the
+    corrected values, while maintaining the original sub-pixel spatial pattern.
+    
+    Parameters
+    ----------
+    weight_nc: <str>
+        xesmf-format weight nc file; must not split the source grid cells
+    da_prec_orig: <xr.DataArray> [time, lat_source, lon_source]
+        Original precipitation at original finer resolution
+    da_prec_corrected: <xr.DataArray> [time, lat_target, lon_target]
+        Corrected precipitation at the SMART resolution (coarser)
+    da_mask: <xr.DataArray> [lat_target, lon_target]
+        Target domain
+        
+    Returns
+    ----------
+    da_prec_corrected_regridded: <xr.DataArray> [time, lat_source, lon_source]
+        Regridded corrected precipitation
+    '''
+
+    # --- Remap original precipitation to SMAP resolution --- #
+    # --- This calculates the spatial-mean of orig. precip --- #
+    da_prec_orig_remapped, weight_array = remap_con(
+        reuse_weight=True, da_source=da_prec_orig,
+        final_weight_nc=weight_nc,
+        da_target_domain=da_mask)
+    # --- (1) Calculate rescale factor for all SMAP pixels and all timesteps --- #
+    da_scale_factor = da_prec_corrected / da_prec_orig_remapped  # [time, lat, lon]
+
+    # --- (2) Rescale --- #
+    da_prec_corrected_regridded = da_prec_orig.copy(deep=True)
+    # Loop over each SMAP grid cell
+    for i, lat in enumerate(da_prec_corrected['lat'].values):
+        for j, lon in enumerate(da_prec_corrected['lon'].values):#
+            # --- Find all underlying source cells --- #
+            ind1D_smap = map_ind_2D_to_1D(i, j, len(da_prec_corrected['lon']))
+            ind1D_source_cells = np.where(weight_array[ind1D_smap, :]>0)[0]
+            list_ind2D_source = [map_ind_1D_to_2D(ind1D, len(da_prec_orig['lon']))
+                                 for ind1D in ind1D_source_cells]  #[(lat_ind, lon_ind)]
+            list_latlon_source = [(da_prec_orig['lat'].values[ind2D[0]],
+                                   da_prec_orig['lon'].values[ind2D[1]])
+                                  for ind2D in list_ind2D_source]  # [(lat, lon)]
+            # --- Rescale --- #
+            # 1) Extract original precipitation from all underlying source cells
+            prec_orig_all_sources = np.asarray(
+                [da_prec_orig[:, ind2D[0], ind2D[1]].values
+                 for ind2D in list_ind2D_source])  # [n_source, time]
+            # 2) Extract scale factor for this SMAP pixel for all timesteps
+            scale_factor = da_scale_factor.loc[:, lat, lon].values  # [time]
+            # Rescale original, finer-resolution precip
+            prec_corrected_all_sources = \
+                scale_factor * prec_orig_all_sources  # [n_source, time]
+            # 3) For timesteps where scale_factor == np.inf or scale == np.nan
+            # (which indicates orig. prec are all zero for this SMAP pixel and this
+            # time; np.inf indicates non-zero numerator while np.nan indicates
+            # zero numerator; np.nan at inactive grid cells as well), fill in with
+            # constant corrected prec from SMART
+            # Temporal indices of such scale_factor
+            ind_inf_scale = np.where(np.isinf(scale_factor) + np.isnan(scale_factor))[0]
+            # Constant corrected precip to fill in
+            prec_corrected_to_fill = da_prec_corrected.loc[:, lat, lon].values[ind_inf_scale]
+            # Fill in
+            prec_corrected_all_sources[:, ind_inf_scale] = prec_corrected_to_fill
+            # 4) Put into the final da
+            for k, ind2D in enumerate(list_ind2D_source):
+                da_prec_corrected_regridded[:, ind2D[0], ind2D[1]] = \
+                    prec_corrected_all_sources[k, :]
+
+    # --- (3) Finally, use orig prec to fill in all nan's --- #
+    prec_corrected_regridded = da_prec_corrected_regridded.values
+    prec_corrected_regridded[np.isnan(prec_corrected_regridded)] = \
+        da_prec_orig.values[np.isnan(prec_corrected_regridded)]
+    da_prec_corrected_regridded[:] = prec_corrected_regridded
+                    
+    return da_prec_corrected_regridded
+
+
+def process_weight_file(orig_weight_nc, output_weight_nc, n_source, n_target,
+                        da_source_domain, process_method=None):
+    ''' Process the weight file generated by xESMF.
+    Currently, use conservative remapping.
+    Process rules:
+        1) If a target grid cell is partially covered by source grid cells
+        (regardless of the coverage), then those source cells will be scaled and
+        used to remap to that target cell.
+        2)
+
+    Parameters
+    ----------
+    orig_weight_nc: <str>
+        Original weight netCDF file output from xESMF
+    output_weight_nc: <str>
+        Path for output new weight file
+    n_source: <int>
+        Number of grid cells in the source grid
+    n_target: <int>
+        Number of grid cells in the target grid
+    da_source_domain: <xr.DataArray>
+        Domain file for the source domain. Should be 0 or 1 mask.
+    process_method:
+        This option is not implemented yet (right now, there is only one way of processing
+        the weight file). Can be extended to have the option of, e.g., setting a threshold
+        for whether to remap for a target cell or not if the coverage is low
+
+    Requres
+    ----------
+    from scipy.sparse import coo_matrix
+    import xesmf as xe
+    '''
+
+    # --- Read in the original xESMF weight file --- #
+    A = xe.frontend.read_weights(orig_weight_nc, n_source, n_target)
+    weight_array = A.toarray()  # [n_target, n_source]
+
+    # --- For grid cells in the source domain that is inactive, assign weight 0 --- #
+    # --- (xESMF always assumes full rectangular domain and does not consider domain shape) --- #
+    # Flatten the source domain file
+    N_source_lat = da_source_domain.values.shape[0]
+    N_source_lon = da_source_domain.values.shape[1]
+    source_domain_flat = da_source_domain.values.reshape([N_source_lat * N_source_lon])
+    # Set weights for the masked source domain as zero
+    masked_flag_flat = (source_domain_flat > -10e-15) & (source_domain_flat < 10e-15)
+    weight_array[:, masked_flag_flat] = 0
+
+    # --- Adjust weights for target grid cells whose sum < 1 --- #
+    # Loop over each target grid cell
+    for i in range(n_target):
+        sum_weight = weight_array[i, :].sum()
+        # If sum of weight is 0, there is no active source cell in the target cell.
+        # Set all weights for this target cell to -1
+        if sum_weight > -10e-14 and sum_weight < 10e-14:
+            weight_array[i, :] = -1
+        # Otherwise, the sum of weight should really be 1. If the sum < 1, rescale to 1
+        elif sum_weight < (1 - 10e-10):
+            weight_array[i, :] /= sum_weight
+        elif sum_weight > (1 + 10e-10):
+            print(sum_weight)
+            raise ValueError('Error: xESMF weight sum exceeds 1. Something is wrong!')
+
+    # --- Write new weights to file --- #
+    data = weight_array[weight_array!=0]
+    ind = np.where(weight_array!=0)
+    row = ind[0] + 1  # adjust index to start from 1
+    col = ind[1] + 1
+    ds_weight_corrected = xr.Dataset({'S': (['n_s'],  data),
+                                      'col': (['n_s'],  col),
+                                      'row': (['n_s'],  row)},
+                                     coords={'n_s': (['n_s'], range(len(data)))})
+    ds_weight_corrected.to_netcdf(output_weight_nc, format='NETCDF4_CLASSIC')
+    return weight_array
+
+
+def remap_and_save_smart_prec(prec_input_basepath, start_year, end_year,
+                              da_domain_target, out_remapped_dir, out_prefix,
+                              reuse_weight=False, da_domain_source=None):
+    ''' Remaps SMART-corrected rainfall and save
+    
+    PARAMETERS
+    ----------
+    prec_input_basepath: <str>
+        SMART-corrected input rainfall data to be corrected; 'YYYY.nc' will be appended
+    start_year: <int>
+        SMART start year
+    end_year: <int>
+        SMART end year
+    da_domain_target: <xr.DataArray>
+        Target domain mask
+    out_remapped_dir: <str>
+        Output directory for remapped rainfall (and weight files)
+    out_prefix: <str>
+        Prefix of output remapped rainfall data; 'YYYY.nc' will be appended
+    reuse_weight: <bool>
+        Whether reuse previously generated weight (the weight file is assumed
+        to be 'weight_final.nc' under out_remapped_dir)
+    da_domain_source: <xr.DataArray> (only needed when reuse_weight = False)
+        Source domain mask
+    '''
+
+    # Loop over each year
+    for year in range(start_year, end_year+1):
+        # Load input precipitation data
+        da_orig = xr.open_dataset(
+            '{}{}.nc'.format(prec_input_basepath, year))['prec_corrected']
+        # Only calculate weights once
+        if reuse_weight is False and year == start_year:
+            da_remapped, weight_array = remap_con(
+                reuse_weight=False,
+                da_source=da_orig,
+                final_weight_nc=os.path.join(out_remapped_dir, 'weight_final.nc'),
+                da_target_domain=da_domain_target,
+                da_source_domain=da_domain_source,
+                tmp_weight_nc=os.path.join(out_remapped_dir, 'weight.tmp.nc'))
+        else:
+            da_remapped, weight_array = remap_con(
+                reuse_weight=True,
+                da_source=da_orig,
+                final_weight_nc=os.path.join(out_remapped_dir, 'weight_final.nc'),
+                da_target_domain=da_domain_target)
+        # Save remapped data to file
+        ds_remapped = xr.Dataset({'prec_corrected': da_remapped.where(da_domain_target==1)})
+        to_netcdf_forcing_file_compress(
+            ds_remapped,
+            os.path.join(out_remapped_dir, '{}{}.nc'.format(out_prefix, year)))
+    
+    return da_remapped
+
+
+def remap_and_save_prec(prec_input_basepath, start_year, end_year,
+                        da_domain_target, out_remapped_dir, out_prefix,
+                        reuse_weight=False, da_domain_source=None):
+    ''' Remaps rainfall and save (assume 'PREC' as variable name)
+    
+    PARAMETERS
+    ----------
+    prec_input_basepath: <str>
+        SMART-corrected input rainfall data to be corrected; 'YYYY.nc' will be appended
+    start_year: <int>
+        SMART start year
+    end_year: <int>
+        SMART end year
+    da_domain_target: <xr.DataArray>
+        Target domain mask
+    out_remapped_dir: <str>
+        Output directory for remapped rainfall (and weight files)
+    out_prefix: <str>
+        Prefix of output remapped rainfall data; 'YYYY.nc' will be appended
+    reuse_weight: <bool>
+        Whether reuse previously generated weight (the weight file is assumed
+        to be 'weight_final.nc' under out_remapped_dir)
+    da_domain_source: <xr.DataArray> (only needed when reuse_weight = False)
+        Source domain mask
+    '''
+
+    # Loop over each year
+    for year in range(start_year, end_year+1):
+        # Load input precipitation data
+        da_orig = xr.open_dataset(
+            '{}{}.nc'.format(prec_input_basepath, year))['PREC']
+        # Only calculate weights once
+        if reuse_weight is False and year == start_year:
+            da_remapped, weight_array = remap_con(
+                reuse_weight=False,
+                da_source=da_orig,
+                final_weight_nc=os.path.join(out_remapped_dir, 'weight_final.nc'),
+                da_target_domain=da_domain_target,
+                da_source_domain=da_domain_source,
+                tmp_weight_nc=os.path.join(out_remapped_dir, 'weight.tmp.nc'))
+        else:
+            da_remapped, weight_array = remap_con(
+                reuse_weight=True,
+                da_source=da_orig,
+                final_weight_nc=os.path.join(out_remapped_dir, 'weight_final.nc'),
+                da_target_domain=da_domain_target)
+        # Save remapped data to file
+        ds_remapped = xr.Dataset({'PREC': da_remapped})
+        to_netcdf_forcing_file_compress(
+            ds_remapped,
+            os.path.join(out_remapped_dir, '{}{}.nc'.format(out_prefix, year)))
+    
+    return da_remapped
 

@@ -13,5 +13,5 @@ lon_min=`cdo sinfo $target_domain_nc | grep "lon       : first" | head -n 1 | aw
 lon_max=`cdo sinfo $target_domain_nc | grep "lon       : first" | head -n 1 | awk '{print $8}'`
 
 # --- Use ncks to clip --- #
-ncks -d lat,$lat_min,$lat_max -d lon,$lon_min,$lon_max $input_nc $output_nc
+ncks -O -d lat,$lat_min,$lat_max -d lon,$lon_min,$lon_max $input_nc $output_nc
 
