@@ -1,0 +1,77 @@
+#!/bin/bash
+
+set -e
+
+# This script creates RVIC (parameter run) input files
+# Input:
+#   ascii flow direction file
+#   flow distance (currently only support constant value)
+# Output:
+#   RVIC route param file
+#   RVIC domain file
+
+# Note:
+#   Currently set fraction file to all 1
+
+# Running example:
+# ./convert_params_Lohmann2RVIC.scr `cat convert_params_Lohmann2RVIC.cfg`
+# where convert_params_Lohmann2RVIC.cfg is a config file, with a list of each parameter argument in order
+
+#====================================================#
+# Parameter setting
+#====================================================#
+#=== input ===#
+# Flow direction file, ascii, Lohmann model format
+flowdir_asc_file=$1
+# xmask file, ascii format
+xmask_file=$2
+grid_size=$3
+
+#=== output paths ===#
+output_route_param_file=$4
+output_domain_file=$5
+
+#====================================================#
+# Create RVIC routing param file (nc)
+#====================================================#
+gdal_translate -of netcdf $flowdir_asc_file $output_route_param_file # create nc file
+ncrename -v Band1,Flow_Direction $output_route_param_file  # rename flow direction variable
+#=== add Basin_ID and Flow_Distance varialbes ===#
+cdo mulc,0 $output_route_param_file $output_route_param_file.temp_0.nc
+cdo addc,1 $output_route_param_file.temp_0.nc $output_route_param_file.temp_1.nc
+cdo ifthen $output_route_param_file $output_route_param_file.temp_1.nc $output_route_param_file.temp_1_masked.nc
+# add Basin_ID variable
+ncrename -v Flow_Direction,Basin_ID $output_route_param_file.temp_1_masked.nc
+ncks -A $output_route_param_file.temp_1_masked.nc $output_route_param_file
+# add Flow_Distance variable
+#gdal_translate -of netcdf $xmask_file $output_route_param_file.temp_fdist_masked.nc
+#ncrename -v Band1,Flow_Distance $output_route_param_file.temp_fdist_masked.nc  # rename flow distance variable
+#ncks -A $output_route_param_file.temp_fdist_masked.nc $output_route_param_file
+cp $output_route_param_file.temp_1_masked.nc $output_route_param_file.temp_fdist_masked_1.nc
+ncrename -v Basin_ID,Flow_Distance $output_route_param_file.temp_fdist_masked_1.nc
+cdo mulc,$xmask_file $output_route_param_file.temp_fdist_masked_1.nc $output_route_param_file.temp_fdist_masked.nc
+ncks -A $output_route_param_file.temp_fdist_masked.nc $output_route_param_file
+
+#====================================================#
+# Create RVIC domain file (nc)
+#====================================================#
+# create domain file
+cp $output_route_param_file.temp_1_masked.nc $output_domain_file
+# change the variable to mask variable (all 1)
+ncrename -v Basin_ID,mask $output_domain_file
+# add frac variable (all 1)
+ncrename -v Basin_ID,frac $output_route_param_file.temp_1_masked.nc
+ncks -A $output_route_param_file.temp_1_masked.nc $output_domain_file
+# calculate and add area variable
+ncrename -v frac,area $output_route_param_file.temp_1_masked.nc
+python calc_area_netCDF.py --domain_file $output_route_param_file.temp_1_masked.nc --grid_size $grid_size
+ncks -A $output_route_param_file.temp_1_masked.nc $output_domain_file
+
+#====================================================#
+# Clean up
+#====================================================#
+rm $output_route_param_file.temp_0.nc
+rm $output_route_param_file.temp_1.nc
+rm $output_route_param_file.temp_1_masked.nc
+rm $output_route_param_file.temp_fdist_masked.nc
+rm $output_route_param_file.temp_fdist_masked_1.nc
