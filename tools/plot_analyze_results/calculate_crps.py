@@ -183,56 +183,58 @@ print('\tTruth history...')
 ds_truth_hist = xr.open_dataset(os.path.join(
         gen_synth_basedir, truth_dirname,
         'history', truth_nc_filename))
-print('\tTruth states...')
-truth_state_nc = os.path.join(
-    gen_synth_basedir,
-    truth_dirname,
-    'states',
-    'truth_state_cellAvg.{}_{}.nc'.format(
-        meas_times[0].strftime('%Y%m%d'),
-        meas_times[-1].strftime('%Y%m%d')))
-ds_truth_states = xr.open_dataset(truth_state_nc)
+if var == 'sm1' or var == 'sm2' or var == 'sm3':
+    print('\tTruth states...')
+    truth_state_nc = os.path.join(
+        gen_synth_basedir,
+        truth_dirname,
+        'states',
+        'truth_state_cellAvg.{}_{}.nc'.format(
+            meas_times[0].strftime('%Y%m%d'),
+            meas_times[-1].strftime('%Y%m%d')))
+    ds_truth_states = xr.open_dataset(truth_state_nc)
 
 # --- EnKF results --- #
-print('\tEnKF updated states...')
-out_nc = os.path.join(
-    EnKF_result_basedir,
-    'states',
-    'updated_concat',
-    'updated_state_cellAvg.{}_{}.ens_concat.nc'.format(
-         meas_times[0].strftime('%Y%m%d'),
-         meas_times[-1].strftime('%Y%m%d')))
-if os.path.isfile(out_nc):  # If already exists
-    ds_EnKF_states_allEns = xr.open_dataset(out_nc)
-else:
-    list_ds_allEns = []
-    for i in range(N):
-        print(i+1)
-        ds = xr.open_dataset(os.path.join(
-            EnKF_result_basedir,
-            'states',
-            'updated_concat',
-            'updated_state_cellAvg.{}_{}.ens{}.nc'.format(
-                meas_times[0].strftime('%Y%m%d'),
-                meas_times[-1].strftime('%Y%m%d'),
-                i+1)))
-        list_ds_allEns.append(ds)
-    ds_EnKF_states_allEns = xr.concat(list_ds_allEns, dim='N')
-    ds_EnKF_states_allEns.to_netcdf(out_nc)
-# --- EnKF ens-mean updated states --- #
-out_nc = os.path.join(
-    EnKF_result_basedir,
-    'states',
-    'updated_concat',
-    'updated_state_cellAvg.{}_{}.ens_mean.nc'.format(
-         meas_times[0].strftime('%Y%m%d'),
-         meas_times[-1].strftime('%Y%m%d')))
-if os.path.isfile(out_nc):  # If already exists
-    ds_EnKF_states = xr.open_dataset(out_nc)
-else:
-    ds_EnKF_states_allEns = xr.concat(list_ds_allEns, dim='N')
-    ds_EnKF_states = ds_EnKF_states_allEns.mean('N')
-    ds_EnKF_states.to_netcdf(out_nc)
+if var == 'sm1' or var == 'sm2' or var == 'sm3':
+    print('\tEnKF updated states...')
+    out_nc = os.path.join(
+        EnKF_result_basedir,
+        'states',
+        'updated_concat',
+        'updated_state_cellAvg.{}_{}.ens_concat.nc'.format(
+             meas_times[0].strftime('%Y%m%d'),
+             meas_times[-1].strftime('%Y%m%d')))
+    if os.path.isfile(out_nc):  # If already exists
+        ds_EnKF_states_allEns = xr.open_dataset(out_nc)
+    else:
+        list_ds_allEns = []
+        for i in range(N):
+            print(i+1)
+            ds = xr.open_dataset(os.path.join(
+                EnKF_result_basedir,
+                'states',
+                'updated_concat',
+                'updated_state_cellAvg.{}_{}.ens{}.nc'.format(
+                    meas_times[0].strftime('%Y%m%d'),
+                    meas_times[-1].strftime('%Y%m%d'),
+                    i+1)))
+            list_ds_allEns.append(ds)
+        ds_EnKF_states_allEns = xr.concat(list_ds_allEns, dim='N')
+        ds_EnKF_states_allEns.to_netcdf(out_nc)
+    # --- EnKF ens-mean updated states --- #
+    out_nc = os.path.join(
+        EnKF_result_basedir,
+        'states',
+        'updated_concat',
+        'updated_state_cellAvg.{}_{}.ens_mean.nc'.format(
+             meas_times[0].strftime('%Y%m%d'),
+             meas_times[-1].strftime('%Y%m%d')))
+    if os.path.isfile(out_nc):  # If already exists
+        ds_EnKF_states = xr.open_dataset(out_nc)
+    else:
+        ds_EnKF_states_allEns = xr.concat(list_ds_allEns, dim='N')
+        ds_EnKF_states = ds_EnKF_states_allEns.mean('N')
+        ds_EnKF_states.to_netcdf(out_nc)
 
 print('EnKF history, daily ...')
 # --- Load and concat daily history file of all ensemble members --- #
