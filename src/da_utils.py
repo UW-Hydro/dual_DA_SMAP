@@ -133,7 +133,8 @@ class States(object):
         
 
     def perturb_soil_moisture_Gaussian(self, L, scale_n_nloop, da_max_moist_n,
-                                       adjust_negative=True, seed=None):
+                                       adjust_negative=True, seed=None,
+                                       prescribed_noise=None):
         ''' Perturb soil moisture states by adding Gaussian noise.
             Each grid cell and soil layer can have different noise magnitude (specified
             by the diagonal of covariance matrix P), but all veg and snow tiles within
@@ -164,6 +165,11 @@ class States(object):
             in this function and will not affect the upper-level code.
             None for not re-assign seed in this function, but using the global seed)
             Default: None
+        prescribed_noise: <np.array> or None
+            If not None, use pre-generated random noises as Z (before transforming
+            to be vertically/tile correlated) instead of regenerating here
+            Dim: [lat, lon, n]
+            Default: None
 
         Returns
         ----------
@@ -190,19 +196,25 @@ class States(object):
         nloop = len(lat) * len(lon)
         n = len(nlayer) * len(veg_class) * len(snow_band)
         
+        # --- If prescribed_noise = None:
         # Generate N(0, 1) random noise for whole domain and all states
-        if seed is None:
-            noise = np.array(list(map(
-                        np.random.normal,
-                        np.zeros(nloop*n),
-                        np.ones(nloop*n))))  # [nloop*n]
+        if prescribed_noise is None:
+            if seed is None:
+                noise = np.array(list(map(
+                            np.random.normal,
+                            np.zeros(nloop*n),
+                            np.ones(nloop*n))))  # [nloop*n]
+            else:
+                rng = np.random.RandomState(seed)
+                noise = np.array(list(map(
+                            rng.normal,
+                            np.zeros(nloop*n),
+                            np.ones(nloop*n))))  # [nloop*n]
+            noise = noise.reshape([nloop, n])  # [nloop, n]
+        # --- If prescribed_noise != None, directly use prescribed noise
         else:
-            rng = np.random.RandomState(seed)
-            noise = np.array(list(map(
-                        rng.normal,
-                        np.zeros(nloop*n),
-                        np.ones(nloop*n))))  # [nloop*n]
-        noise = noise.reshape([nloop, n])  # [nloop, n]
+            noise = prescribed_noise.reshape([nloop, n])
+
         # Apply transformation --> multivariate random noise
         noise = np.array(list(map(
             lambda j: np.dot(L, noise[j, :].reshape([n, 1])),
@@ -706,6 +718,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
              mpi_proc=None, mpi_exe='mpiexec', debug=False, save_cellAvg_state_only=False,
              output_temp_dir=None,
              restart=None, dict_diagnose=None,
+             state_perturb_spatial_corr=False,
+             state_perturb_random_field_dir=None,
              linear_model=False, linear_model_prec_varname=None,
              dict_linear_model_param=None):
     ''' This function runs ensemble kalman filter (EnKF) on VIC (image driver)
@@ -799,6 +813,15 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
         Input diagnose flags. Options:
             - {'zero_update': True/False} - whether to turn off update; default is False (i.e., with update)
         Default: None
+    state_perturb_spatial_corr: <bool>
+        Whether state perturbation is spatially correlated
+        Default: False
+    state_perturb_random_field_dir: <str>
+        Dir for pre-generated spatially-correlated random fields.
+        File name: "vert_uncorr.<YYYYMMDD-HH-MM-SS>.nc"; dim: [lat, lon, n, N]
+        One file is a zero-mean unit-variance field for each tile/layer/ensemble/timestep;
+        all input 2D fields are uncorrelated - correlation will be added when running da
+        Optional: only needed when state_perturb_spatial_corr = True
     linear_model: <bool>
         Whether to run a linear model instead of VIC for propagation.
         Default is 'False', which is to run VIC
@@ -896,10 +919,20 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
             debug_dir = setup_output_dirs(
                             output_temp_dir,
                             mkdirs=[init_state_dir_name])[init_state_dir_name]
+        # Load prescribed state noise, if specified
+        if state_perturb_spatial_corr is True:
+            prescribed_noise_ensemble = xr.open_dataset(os.path.join(
+                state_perturb_random_field_dir,
+                'vert_uncorr.{}.nc'.format(init_state_time.strftime("%Y%m%d-%H-%M-%S"))))['noise']
+
         # --- If nproc == 1, do a regular ensemble loop --- #
         if nproc == 1:
             for i in range(N):
                 seed = np.random.randint(low=100000)
+                if state_perturb_spatial_corr is True:
+                    prescribed_noise = prescribed_noise_ensemble.values[:, :, :, i]
+                else:
+                    prescribed_noise = None
                 da_perturbation = perturb_soil_moisture_states_class_input(
                         class_states=class_states,
                         L=L,
@@ -909,7 +942,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                         da_max_moist_n=da_max_moist_n,
                         adjust_negative=adjust_negative,
                         seed=seed,
-                        no_sm3=no_sm3_perturb)
+                        no_sm3=no_sm3_perturb,
+                        prescribed_noise=prescribed_noise)
                 # Save soil moisture perturbation
                 if debug:
                     ds_perturbation = xr.Dataset({'STATE_SOIL_MOISTURE':
@@ -924,11 +958,16 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
             # --- Loop over each ensemble member --- #
             for i in range(N):
                 seed = np.random.randint(low=100000)
+                if state_perturb_spatial_corr is True:
+                    prescribed_noise = prescribed_noise_ensemble.values[:, :, :, i]
+                else:
+                    prescribed_noise = None
                 pool.apply_async(
                     perturb_soil_moisture_states_class_input,
                     (class_states, L, scale_n_nloop,
                      os.path.join(init_state_dir, 'state.ens{}.nc'.format(i+1)),
-                     da_max_moist_n, adjust_negative, seed, no_sm3_perturb))
+                     da_max_moist_n, adjust_negative, seed, no_sm3_perturb,
+                     prescribed_noise))
             # --- Finish multiprocessing --- #
             pool.close()
             pool.join()
@@ -1317,6 +1356,13 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                             output_vic_state_root_dir,
                             mkdirs=[pert_state_dir_name])[pert_state_dir_name]
         # Perturb states for each ensemble member
+        # Load prescribed state noise, if specified
+        if state_perturb_spatial_corr is True:
+            prescribed_noise_ensemble = xr.open_dataset(os.path.join(
+                state_perturb_random_field_dir,
+                'vert_uncorr.{}.nc'.format(current_time.strftime("%Y%m%d-%H-%M-%S"))))['noise']
+        else:
+            prescribed_noise_ensemble = None
         list_da_perturbation = perturb_soil_moisture_states_ensemble(
                     N,
                     states_to_perturb_dir=out_updated_state_dir,
@@ -1326,7 +1372,8 @@ def EnKF_VIC(N, start_time, end_time, init_state_nc, L, scale_n_nloop, da_max_mo
                     da_max_moist_n=da_max_moist_n,
                     adjust_negative=adjust_negative,
                     nproc=nproc,
-                    no_sm3=no_sm3_perturb)
+                    no_sm3=no_sm3_perturb,
+                    prescribed_noise_ensemble=prescribed_noise_ensemble)
         if debug:
             # Aggregate to cellAvg
             da_perturbation = xr.concat(list_da_perturbation, dim='N')
@@ -2903,7 +2950,8 @@ def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir,
                                           out_states_dir,
                                           da_max_moist_n,
                                           adjust_negative=True,
-                                          nproc=1, no_sm3=False):
+                                          nproc=1, no_sm3=False,
+                                          prescribed_noise_ensemble=None):
     ''' Perturb all soil_moisture states for each ensemble member
     
     Parameters
@@ -2942,6 +2990,11 @@ def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir,
         Whether to EXCLUDE SM3 from kalman filter state vector
         (i.e., no perturbation or update)
         Default: False (i.e., default is to include SM3)
+    prescribed_noise_ensemble: <xr.DataArray>
+        If not None, use pre-generated random noises as Z (before transforming
+        to be vertically/tile correlated) instead of regenerating here
+        Dim: [lat, lon, n, N]
+        Default: None
 
     Return
     ----------
@@ -2965,10 +3018,14 @@ def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir,
             out_states_nc = os.path.join(out_states_dir,
                                          'state.ens{}.nc'.format(i+1))
             seed = np.random.randint(low=100000)
+            if prescribed_noise_ensemble is not None:
+                prescribed_noise = prescribed_noise_ensemble.values[:, :, :, i]
+            else:
+                prescribed_noise = None
             da_perturbation = perturb_soil_moisture_states(
                                          states_to_perturb_nc, L, scale_n_nloop,
                                          out_states_nc, da_max_moist_n,
-                                         adjust_negative, seed, no_sm3)
+                                         adjust_negative, seed, no_sm3, prescribed_noise)
             list_da_perturbation.append(da_perturbation)
     # --- If nproc > 1, use multiprocessing --- #
     elif nproc > 1:
@@ -2983,11 +3040,15 @@ def perturb_soil_moisture_states_ensemble(N, states_to_perturb_dir,
             out_states_nc = os.path.join(out_states_dir,
                                          'state.ens{}.nc'.format(i+1))
             seed = np.random.randint(low=100000)
+            if prescribed_noise_ensemble is not None:
+                prescribed_noise = prescribed_noise_ensemble.values[:, :, :, i]
+            else:
+                prescribed_noise = None
             results[i] = pool.apply_async(
                     perturb_soil_moisture_states,
                     (states_to_perturb_nc, L, scale_n_nloop,
                      out_states_nc, da_max_moist_n,
-                     adjust_negative, seed, no_sm3))
+                     adjust_negative, seed, no_sm3, prescribed_noise))
         # --- Finish multiprocessing --- #
         pool.close()
         pool.join()
@@ -3309,7 +3370,7 @@ def propagate_ensemble_linear_model(N, start_time, end_time, lat_coord,
 def perturb_soil_moisture_states(states_to_perturb_nc, L, scale_n_nloop,
                                  out_states_nc, da_max_moist_n,
                                  adjust_negative=True, seed=None,
-                                 no_sm3=False):
+                                 no_sm3=False, prescribed_noise=None):
     ''' Perturb all soil_moisture states
 
     Parameters
@@ -3346,6 +3407,11 @@ def perturb_soil_moisture_states(states_to_perturb_nc, L, scale_n_nloop,
         Whether to EXCLUDE SM3 from kalman filter state vector
         (i.e., no perturbation or update)
         Default: False (i.e., default is to include SM3)
+    prescribed_noise: <np.array> or None
+        If not None, use pre-generated random noises as Z (before transforming
+        to be vertically/tile correlated) instead of regenerating here
+        Dim: [lat, lon, n]
+        Default: None
 
     Returns
     ----------
@@ -3366,7 +3432,7 @@ def perturb_soil_moisture_states(states_to_perturb_nc, L, scale_n_nloop,
     # Perturb
     ds_perturbed = class_states.perturb_soil_moisture_Gaussian(
                             L, scale_n_nloop, da_max_moist_n,
-                            adjust_negative, seed)
+                            adjust_negative, seed, prescribed_noise)
     # If exclude SM3 from state vector, reset SM3 to before-perturbed states
     if no_sm3 is True:
         ds_perturbed['STATE_SOIL_MOISTURE'][:, :, 2, :, :] = \
@@ -3384,7 +3450,8 @@ def perturb_soil_moisture_states(states_to_perturb_nc, L, scale_n_nloop,
 
 def perturb_soil_moisture_states_class_input(class_states, L, scale_n_nloop,
                                  out_states_nc, da_max_moist_n,
-                                 adjust_negative=True, seed=None, no_sm3=False):
+                                 adjust_negative=True, seed=None, no_sm3=False,
+                                 prescribed_noise=None):
     ''' Perturb all soil_moisture states (same as funciton
         perturb_soil_moisture_states except here inputing class_states
         instead of an netCDF path for states to perturb)
@@ -3422,6 +3489,11 @@ def perturb_soil_moisture_states_class_input(class_states, L, scale_n_nloop,
     no_sm3: <bool>
         Whether to EXCLUDE SM3 from kalman filter state vector (i.e., no perturbation or update)
         Default: False (i.e., default is to include SM3)
+    prescribed_noise: <np.array> or None
+        If not None, use pre-generated random noises as Z (before transforming
+        to be vertically/tile correlated) instead of regenerating here
+        Dim: [lat, lon, n]
+        Default: None
 
     Returns
     ----------
@@ -3439,7 +3511,7 @@ def perturb_soil_moisture_states_class_input(class_states, L, scale_n_nloop,
     # Perturb
     ds_perturbed = class_states.perturb_soil_moisture_Gaussian(
                             L, scale_n_nloop, da_max_moist_n,
-                            adjust_negative, seed)
+                            adjust_negative, seed, prescribed_noise)
     # If exclude SM3 from state vector, reset SM3 to before-perturbed states
     if no_sm3 is True:
         ds_perturbed['STATE_SOIL_MOISTURE'][:, :, 2, :, :] = \
