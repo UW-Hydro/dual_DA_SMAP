@@ -34,7 +34,7 @@ output_domain_file=$5
 #====================================================#
 # Create RVIC routing param file (nc)
 #====================================================#
-#gdal_translate -of netcdf $flowdir_asc_file $output_route_param_file # create nc file
+gdal_translate -of netcdf $flowdir_asc_file $output_route_param_file # create nc file
 ncrename -v Band1,Flow_Direction $output_route_param_file  # rename flow direction variable
 #=== add Basin_ID and Flow_Distance varialbes ===#
 cdo mulc,0 $output_route_param_file $output_route_param_file.temp_0.nc

@@ -260,8 +260,8 @@ for year in range(start_year, end_year+1):
     ds = xr.Dataset({"pr": da_pr, "tasmax": da_tasmax, "tasmin": da_tasmin,
                      "wind": da_wind})
     # --- Mask out the target area --- #
-    ds_small = ds.sel(latitude=slice(lat_min, lat_max),
-                      longitude=slice(lon_min, lon_max))
+    ds_small = ds.sel(lat=slice(lat_min, lat_max),
+                      lon=slice(lon_min, lon_max))
     ds_masked = ds_small.where(da_domain.values)
     # --- Write out a single nc file --- #
     ds_masked.to_netcdf(os.path.join(dirs['forc_orig_nc'],
@@ -284,7 +284,7 @@ with open(cfg_file, 'w') as f:
     f.write('verbose: True\n')
     f.write('output_format: ASCII\n')
     f.write('out_prefix: forc_orig_\n')
-    f.write('coord_keys: longitude,latitude\n')
+    f.write('coord_keys: lon,lat\n')
     f.write('var_keys: pr,tasmax,tasmin,wind\n')
     f.write('start_year: {}\n'.format(start_year))
     f.write('end_year: {}\n'.format(end_year))
