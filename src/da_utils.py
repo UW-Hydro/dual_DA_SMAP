@@ -636,7 +636,7 @@ class VarToPerturb(object):
         self.lon = self.da['lon']
         self.time = self.da['time']
 
-    def add_gaussian_white_noise(self, da_sigma, da_max_values,
+    def add_gaussian_white_noise(self, da_sigma, da_max_values, phi=0,
                                  adjust_negative=True, seed=None):
         ''' Add Gaussian noise for all active grid cells and all time steps
 
@@ -650,12 +650,8 @@ class VarToPerturb(object):
             Maximum values of variable for the whole domain. Perturbed values
             above maximum will be reset to maximum value.
             Dimension: [lat, lon]
-        
-        Returns
-        ----------
-        da_perturbed: <xarray.DataArray>
-            Perturbed variable for the whole field
-            Dimension: [time, lat, lon]
+        phi: <float>
+            Parameter in AR(1) process. Default: 0 (no autocorrelation).
         adjust_negative: <bool>
             Whether or not to adjust negative variable values after
             adding noise to zero.
@@ -665,23 +661,48 @@ class VarToPerturb(object):
             in this function and will not affect the upper-level code.
             None for not re-assign seed in this function, but using the global seed)
             Default: None
+
+        Returns
+        ----------
+        da_perturbed: <xarray.DataArray>
+            Perturbed variable for the whole field
+            Dimension: [time, lat, lon]
         '''
 
+        mu = 0
+        
         # Generate random noise for the whole field
         da_noise = self.da.copy(deep=True)
         da_noise[:] = np.nan
         for lt in self.lat:
             for lg in self.lon:
                 sigma = da_sigma.loc[lt, lg].values
-                if np.isnan(sigma) == True or sigma <= 0:  # if inactive cell, skip
+                if np.isnan(sigma) is True or sigma <= 0:  # if inactive cell, skip
                     continue
+                # Calculate std of white noise and generate random white noise
+                scale = sigma * np.sqrt(1 - phi * phi)
                 if seed is None:
-                    da_noise.loc[:, lt, lg] = np.random.normal(
-                            loc=0, scale=sigma, size=len(self.time))
+                    white_noise = np.random.normal(
+                            loc=0, scale=scale,
+                            size=(len(self.time)))
+                    # da_noise.loc[:, lt, lg] = np.random.normal(
+                    #        loc=0, scale=sigma, size=len(self.time))
                 else:
                     rng = np.random.RandomState(seed)
-                    da_noise.loc[:, lt, lg] = rng.normal(
-                            loc=0, scale=sigma, size=len(self.time))
+                    white_noise = rng.normal(
+                            loc=0, scale=scale,
+                            size=(len(self.time)))
+                # --- AR(1) process --- #
+                # Initialize
+                ar1 = np.empty(len(self.time))
+                # Generate data for the first time point (need to double check how to do this!!!!!)
+                ar1[0] = white_noise[0]
+                # Loop over each time point
+                for t in range(1, len(self.time)):
+                    ar1[t] = mu + phi * (ar1[t-1] - mu) + white_noise[t]
+                # --- Put final noise into da --- #
+                da_noise.loc[:, lt, lg] = ar1
+                
         # Add noise to the original da
         da_perturbed = self.da + da_noise
         # Set negative to zero
@@ -697,7 +718,7 @@ class VarToPerturb(object):
         da_perturbed[:] = tmp
         # Add attrs back
         da_perturbed.attrs = self.da.attrs
-
+        
         return da_perturbed
 
 
