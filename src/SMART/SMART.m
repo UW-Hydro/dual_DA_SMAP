@@ -7,13 +7,13 @@ rng(11);
 p = inputParser;
 % 'addParamValue' in old releases; 'addParameter' in new releases
 % WARNING...some of these choice are not fully implemented
-p.addParamValue('input_dataset', []);  % the input .mat file path; containing: 3 prec datasets; 2 soil moisture datasets; soil moisture error
+p.addParameter('input_dataset', []);  % the input .mat file path; containing: 3 prec datasets; 2 soil moisture datasets; soil moisture error
 p.addParamValue('output_dir', []);  % output directory; corrected rainfall data, innovation and lambda parameter will be written to this directory
 p.addParamValue('start_time', []);  % start time of simulation and data; format: "YYYY-MM-DD HH:MM"
 p.addParamValue('end_time', []);  % end time of simulation and data; format: "YYYY-MM-DD HH:MM"
 p.addParamValue('time_step', []);  % Time step length in hour for all input data 
 p.addParamValue('filter_flag', []);  % filter_flag 1)KF, 2)EnKF, 3)DI, 4)PART, 5)KF with RTS gap-filling, 6) EnKF with EnKS gap-filling, 7) PART - DIRECT RAINFALL
-p.addParamValue('transform_flag', []);  % transform_flag 1) CDF, 2) seasonal 1&2, 3) bias 1&2, 4) seasonal CDF 
+p.addParameter('transform_flag', []);  % transform_flag 1) CDF, 2) seasonal 1&2, 3) bias 1&2, 4) seasonal CDF 
 p.addParamValue('API_model_flag', []);  % API_model_flag 0) static 1) simple sine model, 2) Ta climatology, 3) PET climatologoy, 4) Ta-variation, 5) PET variation
 p.addParamValue('lambda_flag', []);  % if = 999 then obtain lambda via fitting against "rain_indep", otherwise it sets a fixed value of lambda
 p.addParamValue('NUMEN', []);  % NUMEN - number of ensembles used in EnKF or EnKS analysis...not used if filter_flag  = 1 or 3
@@ -51,7 +51,13 @@ slope_parameter_API = str2num(p.Results.slope_parameter_API);
 location_flag = str2num(p.Results.location_flag);
 window_size = str2num(p.Results.window_size);
 API_mean = str2num(p.Results.API_mean);
+if length(API_mean) == 0
+    API_mean = p.Results.API_mean;
+end
 bb = str2num(p.Results.bb);
+if length(bb) == 0
+    bb = p.Results.bb;
+end
 API_range = str2num(p.Results.API_range);
 if_rescale = str2num(p.Results.if_rescale);
 sep_sm_orbit = str2num(p.Results.sep_sm_orbit);
@@ -76,7 +82,22 @@ numpixels = size_data(1);
 innovation(1:ist, 1:numpixels) = 0;
 lambda(1:numpixels) = 0;
 
-for j=1:numpixels % space loop
+% Load API_mean and bb
+% If input is a number, convert API_mean to an array of pixels, 
+if isnumeric(API_mean)
+    API_mean(1:numpixels) = API_mean;
+else
+    load(API_mean);
+    API_mean = API_COEFF_tuned;
+end
+if isnumeric(bb)
+    bb(1:numpixels) = bb;
+else
+    load(bb);
+    bb = bb_tuned;
+end
+
+for j=1:numpixels  %j=1:numpixels %space loop
     
     % REQUIRED INPUTS (TIME SERIES FOR EACH SPATIAL PIXEL)
     % (Missing input data is assumed to be nan)
@@ -123,13 +144,13 @@ for j=1:numpixels % space loop
         rain_true(rain_true < 0) = -99999; % all calibration/evaluation is based on windows with no missing indep or true rainfall data
         rain_indep(rain_indep < 0) = -99999; % all calibration/evaluation is based on windows with no missing indep or true rainfall data
         rain_indep=rain_indep*mean(rain_observed_hold(rain_observed_hold >= 0))/mean(rain_indep(rain_indep >= 0)); %make sure RS precipitation products have same mean
-        
+
         % Calculate Increments
         [increment_sum,increment_sum_hold,sum_rain,sum_rain_sp,sum_rain_sp_hold,sum_rain_sp2,increment_sum_ens, innovation(:, j), innovation_not_norm, rain_perturbed_sum_ens] = ...
             analysis(window_size,ist,filter_flag,transform_flag,API_model_flag,NUMEN,Q_fixed,P_inflation,...
-            logn_var,phi,bb,rain_observed,rain_observed_hold,rain_indep,rain_true,if_rescale,sep_sm_orbit,sma_observed,smd_observed,...
+            logn_var,phi,bb(j),rain_observed,rain_observed_hold,rain_indep,rain_true,if_rescale,sep_sm_orbit,sma_observed,smd_observed,...
             ta_observed,ta_observed_climatology,PET_observed,PET_observed_climatology,EVI_observed,...
-            API_mean,sm_quality, API_range, slope_parameter_API, time_step);      
+            API_mean(j),sm_quality, API_range, slope_parameter_API, time_step);
         
         % Correct Rainfall
         [sum_rain_corrected, sum_rain_corrected_ens, optimized_fraction] = ...
@@ -278,7 +299,7 @@ for j=1:numpixels % space loop
 %         
 %         % Output metrics
 %         fprintf(1,'%f %f %f  \n',-A(1,2)+B(1,2),-C+D,optimized_fraction)
-%     end       
+%   end
 end
 
 %% 
