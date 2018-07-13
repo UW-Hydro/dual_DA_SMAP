@@ -175,12 +175,19 @@ for j=1:numpixels
             end;
         end
     end
-       
+
     % --- Tune API parameters (toward unscaled SM meas) --- %
     if bb == -1
         A = [1 0; -1 0; 0 1; 0 -1];
         b = [0.9999; -0.01; 1.5; -0.5];
         x0 = [0.8, 1];
+        % Skip the grid cell if SM meas is all nan
+        if sum(~isnan(sm_observed)) == 0
+            API_COEFF_tuned(j) = x0(1);
+            bb_tuned(j) = x0(2);
+            continue;
+        end
+        % Tune
         x_tuned = fmincon(...
             @(x) API_with_true_rain_for_tuning(x(1), x(2), ist, ...
                 rain_true, rain_observed, sm_observed), ...
@@ -188,6 +195,12 @@ for j=1:numpixels
         API_COEFF_tuned(j) = x_tuned(1);
         bb_tuned(j) = x_tuned(2);
     else
+        % Skip the grid cell if SM meas is all nan
+        if sum(~isnan(sm_observed)) == 0
+            API_COEFF_tuned(j) = x0(1);
+            continue;
+        end
+        % Tune
         API_COEFF_tuned(j) = fminbnd(...
             @(x) API_with_true_rain_for_tuning(x, bb, ist, ...
                 rain_true, rain_observed, sm_observed), 0.01, 0.9999, ...
