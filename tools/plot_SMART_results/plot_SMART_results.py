@@ -222,18 +222,24 @@ fig.savefig(os.path.join(output_subdir_maps, 'lambda_param.png'), format='png',
 
 
 # ============================================================ #
-# Plot categorical metrics maps
+# Plot categorical metric
 # ============================================================ #
 # --- Setting --- #
 # Aggregation freq
 list_freq = ['3H', '1D', '3D']
 # Percentile of threshold
-list_perc = [10, 20, 30, 40, 50, 60, 70, 80, 90]
+list_perc = [10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 99]
 
-# --- Calculate and plot metrics --- #
-print('Plotting categorical metrics...')
+# --- Calculate metrics --- #
+print('Calculating categorical metrics...')
+dict_orig = {}  # {freq: perc: FAR/POD/TS: da}
+dict_corrected = {}
 for freq in list_freq:
+    dict_orig[freq] = {}
+    dict_corrected[freq] = {}
     for perc in list_perc: # --- Calculate threshold and save to file --- #
+        dict_orig[freq][perc] = {}
+        dict_corrected[freq][perc] = {}
         output_thred_dirname = 'percentile_threshold.{}_{}'.format(
             start_time.strftime('%Y%m%d'),
             end_time.strftime('%Y%m%d'))
@@ -251,20 +257,65 @@ for freq in list_freq:
             da_threshold, da_prec_truth, da_prec_orig, freq)
         da_far_corrected, da_pod_corrected, da_ts_corrected = calculate_categ_metrics(
             da_threshold, da_prec_truth, da_prec_corrected, freq)
-        dict_orig = {'FAR': da_far_orig, 'POD': da_pod_orig, 'TS': da_ts_orig}
-        dict_corrected = {'FAR': da_far_corrected, 'POD': da_pod_corrected,
-                          'TS': da_ts_corrected}
-        
-        # --- Plot maps --- #
+        dict_orig[freq][perc] = {
+            'FAR': da_far_orig, 'POD': da_pod_orig, 'TS': da_ts_orig}
+        dict_corrected[freq][perc] = {
+            'FAR': da_far_corrected, 'POD': da_pod_corrected,
+            'TS': da_ts_corrected}
+
+# --- Plot domain-median of delta at all thresholds --- #
+# Calculate domain-median of delta
+dict_delta_median = {}
+for freq in list_freq:
+    dict_delta_median[freq] = {}
+    for perc in list_perc:
+        dict_delta_median[freq][perc] = {}
+        for var in ['FAR', 'POD', 'TS']:
+            orig_median = float(dict_orig[freq][perc][var].median().values)
+            corrected_median = float(dict_corrected[freq][perc][var].median().values)
+            dict_delta_median[freq][perc][var] = corrected_median - orig_median
+# Organize domain-median delta values into arrays
+dict_list_delta = {}  # {var: freq: array of all thresholds}
+for var in ['FAR', 'POD', 'TS']:
+    dict_list_delta[var] = {}
+    for freq in list_freq:
+        list_delta_all_thresholds = []
+        for perc in list_perc:
+            list_delta_all_thresholds.append(dict_delta_median[freq][perc][var])
+        array_all_thresholds = np.asarray(list_delta_all_thresholds)
+        dict_list_delta[var][freq] = array_all_thresholds
+# Plot
+list_color = ['r', 'b', 'orange']
+for var in ['FAR', 'POD', 'TS']:
+    fig = plt.figure(figsize=(8, 4))
+    plt.plot(list_perc, np.zeros(len(list_perc)), '--', color='Grey')
+    for i, freq in enumerate(list_freq):
+        plt.plot(list_perc, dict_list_delta[var][freq], '.-', color=list_color[i],
+                 label=freq)
+    # Makes plot look better
+    plt.ylabel(r'$\Delta$ {}'.format(var), fontsize=20)
+    plt.xlabel('Percentile threshold', fontsize=20)
+    plt.legend(fontsize=16)
+    plt.ylim([-0.5, 0.5])
+    # Save figure
+    fig.savefig(os.path.join(output_subdir_maps,
+                             '{}.domain_mediaon_delta.png'.format(var)), format='png',
+            bbox_inches='tight', pad_inches=0)
+
+
+# --- Plot maps --- #
+for freq in list_freq:
+    for perc in list_perc:
         for var in ['FAR', 'POD', 'TS']:
             # Orig. precipitation
             fig = plt.figure(figsize=(14, 7))
-            cs = dict_orig[var].plot(add_colorbar=False, cmap='viridis', vmin=0, vmax=1)
+            cs = dict_orig[freq][perc][var].plot(
+                add_colorbar=False, cmap='viridis', vmin=0, vmax=1)
             cbar = plt.colorbar(cs).set_label(var, fontsize=20)
             plt.title('{} of original precip., {}, percentile threshold = {}th\n'
                       'domain median = {:.2f}'.format(
                           var, freq, perc,
-                          float(dict_orig[var].median().values)),
+                          float(dict_orig[freq][perc][var].median().values)),
                       fontsize=20)
             fig.savefig(os.path.join(output_subdir_maps,
                                      '{}.prec_orig.{}.q{}.png'.format(var, freq, perc)),
@@ -273,12 +324,13 @@ for freq in list_freq:
 
             # Corrected. precipitation
             fig = plt.figure(figsize=(14, 7))
-            cs = dict_corrected[var].plot(add_colorbar=False, cmap='viridis', vmin=0, vmax=1)
+            cs = dict_corrected[freq][perc][var].plot(
+                add_colorbar=False, cmap='viridis', vmin=0, vmax=1)
             cbar = plt.colorbar(cs).set_label(var, fontsize=20)
             plt.title('{} of corrected precip., {}, percentile threshold = {}th\n'
                       'domain median = {:.2f}'.format(
                           var, freq, perc,
-                          float(dict_corrected[var].median().values)),
+                          float(dict_corrected[freq][perc][var].median().values)),
                       fontsize=20)
             fig.savefig(os.path.join(output_subdir_maps,
                                      '{}.prec_corrected.{}.q{}.png'.format(var, freq, perc)),
@@ -287,9 +339,9 @@ for freq in list_freq:
 
             # Improvement
             if var == 'FAR':
-                da_improv = dict_orig[var] - dict_corrected[var]
+                da_improv = dict_orig[freq][perc][var] - dict_corrected[freq][perc][var]
             else:
-                da_improv = dict_corrected[var] - dict_orig[var]
+                da_improv = dict_corrected[freq][perc][var] - dict_orig[freq][perc][var]
             fig = plt.figure(figsize=(14, 7))
             cs = da_improv.plot(add_colorbar=False, cmap='bwr_r', vmin=-0.1, vmax=0.1)
             cbar = plt.colorbar(cs, extend='both').set_label(var, fontsize=20)

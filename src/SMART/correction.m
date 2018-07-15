@@ -1,4 +1,4 @@
-function [sum_rain_corrected, sum_rain_corrected_ens, optimized_fraction] = correction(increment_sum,increment_sum_hold, increment_sum_ens, sum_rain_sp,sum_rain_indep,lambda_flag, filter_flag, NUMEN, rain_perturbed_sum_ens)
+function [sum_rain_corrected, sum_rain_corrected_ens, optimized_fraction] = correction(increment_sum,increment_sum_hold, increment_sum_ens, sum_rain_sp,sum_rain_indep,lambda_flag, filter_flag, NUMEN, rain_perturbed_sum_ens, lambda_tuning_target)
 
 % Initialize corrected rainfall (sum in each window) (Yixin)
 d = size(sum_rain_sp);
@@ -19,7 +19,13 @@ sum_rain_sp_pr = sum_rain_sp(sum_rain_indep >= 0);
 sum_rain_sp_subset = sum_rain_sp_pr(increment_sum_hold_pr > -500);
 
 % --- find optimized lambda --- %
-if (lambda_flag == 999); optimized_fraction = fminbnd(@(x) fraction_tune(x,sum_rain_indep_subset,sum_rain_sp_subset,increment_sum_hold_subset),0.01,2.00,optimset('Display','off')); end;
+if (lambda_flag == 999)
+    if (strcmp(lambda_tuning_target, 'rmse') == 1)
+        optimized_fraction = fminbnd(@(x) fraction_tune(x,sum_rain_indep_subset,sum_rain_sp_subset,increment_sum_hold_subset),0.01,2.00,optimset('Display','off'));
+    elseif (strcmp(lambda_tuning_target, 'corrcoef') == 1)
+        optimized_fraction = fminbnd(@(x) fraction_tune_corrcoef(x,sum_rain_indep_subset,sum_rain_sp_subset,increment_sum_hold_subset),0.01,2.00,optimset('Display','off'));
+    end
+end
 if (lambda_flag ~= 999); optimized_fraction = lambda_flag; end;
 
 % Calculate corrected rainfall
