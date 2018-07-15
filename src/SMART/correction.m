@@ -9,6 +9,11 @@ sum_rain_corrected_ens(1:ist, 1:NUMEN) = 0;
 % Find optimized lambda
 % --- Only keep the time steps when there is an increment and there is
 % rainfall in the independent rainfall data --- % Yixin
+%%%%%%%%%%%%% Yixin HACK %%%%%%%%%%%%%%%
+% Set -999 increment time steps to 0, so that the objective function calculated during tuning lambda is exactly the same as post-calculation after SMART
+increment_sum_hold(increment_sum_hold < -500) = 0;
+%%%%%%%%%%%%% HACK END %%%%%%%%%%%
+
 increment_sum_hold_pr = increment_sum_hold(sum_rain_indep >= 0);
 increment_sum_hold_subset = increment_sum_hold_pr(increment_sum_hold_pr > -500);
 

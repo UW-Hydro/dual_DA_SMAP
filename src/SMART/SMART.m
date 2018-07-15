@@ -145,7 +145,9 @@ for j=1:numpixels  %j=1:numpixels %space loop
         rain_observed(rain_observed < 0) = 0; %for the rain time series feed into the KF...get rid of missing rain data...dataset must be complete (no missing values)
         rain_true(rain_true < 0) = -99999; % all calibration/evaluation is based on windows with no missing indep or true rainfall data
         rain_indep(rain_indep < 0) = -99999; % all calibration/evaluation is based on windows with no missing indep or true rainfall data
-        rain_indep=rain_indep*mean(rain_observed_hold(rain_observed_hold >= 0))/mean(rain_indep(rain_indep >= 0)); %make sure RS precipitation products have same mean
+%%%%%%%%%%%% Yixin HACK - do not bias-correct the independent rainfall for tuning lambda %%%%%%%%%%%%%%%%
+%        rain_indep=rain_indep*mean(rain_observed_hold(rain_observed_hold >= 0))/mean(rain_indep(rain_indep >= 0)); %make sure RS precipitation products have same mean
+%%%%%%%%%%%% END HACK %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
         % Calculate Increments
         [increment_sum,increment_sum_hold,sum_rain,sum_rain_sp,sum_rain_sp_hold,sum_rain_sp2,increment_sum_ens, innovation(:, j), innovation_not_norm, rain_perturbed_sum_ens] = ...
