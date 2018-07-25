@@ -145,7 +145,7 @@ int main(int argc,char ** argv) {
             argv[2],argv[3],argv[4],argv[5],argv[6],argv[7],argv[8],argv[9],argv[10]) ;
 
   /**  Seed the random number generator  **/
-  tmptime     = time(&currtime) * -1;
+  tmptime     = 1001; //time(&currtime) * -1;
   ran2seed    = &tmptime;
   ran2(ran2seed);
   ran2seed[0] = 1;  /* huh? */
