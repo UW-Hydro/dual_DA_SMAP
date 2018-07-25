@@ -1,0 +1,10 @@
+MOCOM notes -- A. Wood, 2014
+v2:  altered pcic one to re-implement the functionality for passing an archive name to the 
+       run script
+
+v3:  trying to fix problem w/ removing the dirs that have good runs
+       added documentation
+
+     -- reformatted all output to be more readable
+     -- seems like the INVALID params get repeated from time to time -- why?
+
