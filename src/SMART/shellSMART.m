@@ -26,6 +26,7 @@ SMART('input_dataset', './output/smart_input_synth_from_API.mat', ...
       'API_range', '0.15', ...
       'if_rescale', '0', ...   % whether rescale input SM meas (1) or not (0)
       'lambda_tuning_target', 'rmse', ...  # 'rmse' or 'corrcoef'; only used if lambda_flag == 999
+      'correct_magnitude_only', '1', ...  # 1 for correct rainfall when obs_rain > 0 only; 0 for no such constraint (original SMART)
       'sep_sm_orbit', '1');
 
 %Argument list:

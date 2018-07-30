@@ -30,6 +30,7 @@ p.addParamValue('bb', []);  % where API(t) = API_mean*API(t-1)^bb + rain(t)...de
 p.addParamValue('API_range', []); % only used if API is varying seasonally
 p.addParamValue('if_rescale', []); % whether rescale input SM meas (1) or not (0)
 p.addParamValue('lambda_tuning_target', []); % 'rmse' or 'corrcoef'; only used if lambda_flag == 999
+p.addParamValue('correct_magnitude_only', []); % # 1 for correct rainfall when obs_rain > 0 only; 0 for no such constraint (original SMART)
 p.addParamValue('sep_sm_orbit', []); % 1 for separately rescale ascending and descending SM (this only makes sense for subdaily run); 0 for combining ascending and descending soil miosture products and SM obs appearing on the same timestep will be averaged
 p.parse(varargin{:});
 % Assign input arguments to variables
@@ -62,6 +63,7 @@ end
 API_range = str2num(p.Results.API_range);
 if_rescale = str2num(p.Results.if_rescale);
 lambda_tuning_target = p.Results.lambda_tuning_target;
+correct_magnitude_only = str2num(p.Results.correct_magnitude_only);
 sep_sm_orbit = str2num(p.Results.sep_sm_orbit);
 
 dump_flag = 0;
@@ -158,7 +160,7 @@ for j=1:numpixels  %j=1:numpixels %space loop
         
         % Correct Rainfall
         [sum_rain_corrected, sum_rain_corrected_ens, optimized_fraction] = ...
-            correction(increment_sum,increment_sum_hold,increment_sum_ens, sum_rain_sp,sum_rain_sp2,lambda_flag, filter_flag, NUMEN, rain_perturbed_sum_ens, lambda_tuning_target);
+            correction(increment_sum,increment_sum_hold,increment_sum_ens, sum_rain_sp,sum_rain_sp2,lambda_flag, filter_flag, NUMEN, rain_perturbed_sum_ens, lambda_tuning_target, correct_magnitude_only);
         lambda(j) = optimized_fraction;
         
         % Rescale corrected rainfall

@@ -1,4 +1,4 @@
-function [sum_rain_corrected, sum_rain_corrected_ens, optimized_fraction] = correction(increment_sum,increment_sum_hold, increment_sum_ens, sum_rain_sp,sum_rain_indep,lambda_flag, filter_flag, NUMEN, rain_perturbed_sum_ens, lambda_tuning_target)
+function [sum_rain_corrected, sum_rain_corrected_ens, optimized_fraction] = correction(increment_sum,increment_sum_hold, increment_sum_ens, sum_rain_sp,sum_rain_indep,lambda_flag, filter_flag, NUMEN, rain_perturbed_sum_ens, lambda_tuning_target, correct_magnitude_only)
 
 % Initialize corrected rainfall (sum in each window) (Yixin)
 d = size(sum_rain_sp);
@@ -13,6 +13,13 @@ sum_rain_corrected_ens(1:ist, 1:NUMEN) = 0;
 % Set -999 increment time steps to 0, so that the objective function calculated during tuning lambda is exactly the same as post-calculation after SMART
 increment_sum_hold(increment_sum_hold < -500) = 0;
 %%%%%%%%%%%%% HACK END %%%%%%%%%%%
+
+% Whether correct rainfall only when orig_rain > 0
+if (correct_magnitude_only == 1)
+    increment_sum_hold(sum_rain_sp==0) = 0;
+    increment_sum(sum_rain_sp==0) = 0;
+    increment_sum_ens(sum_rain_sp==0, :) = 0;
+end
 
 increment_sum_hold_pr = increment_sum_hold(sum_rain_indep >= 0);
 increment_sum_hold_subset = increment_sum_hold_pr(increment_sum_hold_pr > -500);
