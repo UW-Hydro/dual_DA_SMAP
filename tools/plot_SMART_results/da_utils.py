@@ -10,6 +10,7 @@ import multiprocessing as mp
 import shutil
 import scipy.linalg as la
 import glob
+import properscoring as ps
 
 from tonic.models.vic.vic import VIC, default_vic_valgrind_error_code
 
@@ -3597,6 +3598,92 @@ def calculate_prec_threshold(out_nc, perc, da_prec, agg_freq):
         da_threshold = xr.open_dataset(out_nc)['threshold']
 
     return da_threshold
+
+
+def calculate_crps_prec(out_nc, da_truth, da_model, log=False, nproc=1):
+    ''' A wrap funciton that calculates CRPS for all domain and save to file; if
+        result file already existed, then simply read in the file.
+
+    Parameters
+    ----------
+    out_nc: <str>
+        RMSE result output netCDF file
+    ds_truth: <xr.DataArray>
+        Truth states/history
+    da_model: <xr.DataArray>
+        Model states/history whose RMSE is to be assessed (wrt. truth states);
+        This should be ensemble model results, with "N" as the ensemble dimension
+    log: <bool>
+        Whether to take log first before calculating RMSE
+    nproc: <int>
+        Number of processors for mp
+
+    Returns
+    ----------
+    da_crps: <xr.DataArray>
+        CRPS for the whole domain; dimension: [lat, lon]
+    '''
+
+    if not os.path.isfile(out_nc):  # if RMSE is not already calculated
+        # --- Take log if specified --- #
+        if log is True:
+            da_truth = np.log(da_truth + 1)
+            da_model = np.log(da_model + 1)
+        # --- Calculate CRPS for the whole domain --- #
+        results = {}
+        pool = mp.Pool(processes=nproc)
+        for lat in da_truth['lat'].values:
+            for lon in da_truth['lon'].values:
+                results[(lat, lon)] = pool.apply_async(
+                    crps, (da_truth.sel(lat=lat, lon=lon).values,
+                           da_model.sel(lat=lat, lon=lon).transpose('time', 'N').values))
+        pool.close()
+        pool.join()
+        # --- Get return values --- #
+        crps_domain = np.zeros([len(da_truth['lat']), len(da_truth['lon'])])
+        crps_domain[:] = np.nan
+        da_crps = xr.DataArray(
+            crps_domain, coords=[da_truth['lat'], da_truth['lon']],
+            dims=['lat', 'lon'])
+        for i, result in results.items():
+            lat = i[0]
+            lon = i[1]
+            da_crps.loc[lat, lon] = result.get()
+        # Save CRPS to netCDF file
+        ds_crps = xr.Dataset(
+            {'crps': da_crps})
+        ds_crps.to_netcdf(out_nc, format='NETCDF4_CLASSIC')
+    else:  # if already calculated
+        da_crps = xr.open_dataset(out_nc)['crps']
+
+    return da_crps
+
+
+def crps(truth, ensemble):
+    ''' Calculate mean CRPS of an ensemble time series
+    Parameters
+    ----------
+    truth: <np.array>
+        A 1-D array of truth time series
+        Dimension: [n]
+    ensemble: <np.array>
+        A 2-D array of ensemble time series
+        Dimension: [n, N], where N is ensemble size; n is time series length
+
+    Returns
+    ----------
+    crps: <float>
+        Time-series-mean CRPS
+
+    Require
+    ----------
+    import properscoring as ps
+    '''
+
+    array_crps = np.asarray([ps.crps_ensemble(truth[t], ensemble[t, :]) for t in range(len(truth))])
+    crps = array_crps.mean()
+
+    return crps
 
 
 
