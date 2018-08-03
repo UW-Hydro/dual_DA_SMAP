@@ -90,6 +90,24 @@ if filter_flag == 2 or filter_flag == 6:
         # Put in list
         list_run_SMART_prec_corr_ens.append(run_SMART_prec_corr_ens)
 
+# --- Load perturbed prec ensemble (if ensemble SMART) at original timestep --- #
+filter_flag = cfg['SMART_RUN']['filter_flag']
+if filter_flag == 2 or filter_flag == 6:
+    list_run_SMART_prec_pert_ens = []
+    for i in range(cfg['SMART_RUN']['NUMEN']):
+        perturbed_rainfall_ens_outfile = os.path.join(
+            cfg['CONTROL']['root_dir'],
+            cfg['OUTPUT']['output_basedir'],
+            'run_SMART',
+            'SMART_perturbed_rainfall.ens{}.mat'.format(i+1))
+        perturbed_rainfall_ens = loadmat(
+            perturbed_rainfall_ens_outfile)['RAIN_PERTURBED']['ens{}'.format(i+1)][0][0].squeeze()  # [nwindow, npixel]
+        # If npixel = 1, Matlab automatically squeezes that dimension. Here we readd this dimension
+        if len(perturbed_rainfall_ens.shape) == 1:
+            perturbed_rainfall_ens = perturbed_rainfall_ens.reshape(
+                [perturbed_rainfall_ens.shape[0], 1])
+        # Put in list
+        list_run_SMART_prec_pert_ens.append(run_SMART_prec_corr_ens)
 # Load in domain file
 ds_domain = xr.open_dataset(os.path.join(cfg['CONTROL']['root_dir'],
                                          cfg['DOMAIN']['domain_file']))
@@ -131,6 +149,45 @@ to_netcdf_forcing_file_compress(
     ds_force=ds_prec_corrected_window,
     out_nc=os.path.join(out_dir, 'prec_corrected_window.nc'),
     time_dim='window')
+
+
+# ============================================================ #
+# Save perturbed prec ensemble
+# ============================================================ #
+print('Saving perturbed precip ensemble...')
+# --- Precess perturbed prec data to da --- #
+if filter_flag == 2 or filter_flag == 6:
+    dict_prec_pert_ens = {}
+    for i in range(cfg['SMART_RUN']['NUMEN']):
+        dict_prec_pert_ens[i+1] = list_run_SMART_prec_pert_ens[i]
+    dict_da_prec_pert_ens = da_2D_to_3D_from_SMART(
+            dict_array_2D=dict_prec_pert_ens,
+            da_mask=da_mask,
+            out_time_varname='window',
+            out_time_coord=range(nwindow))
+    #  --- Save ensemble corrected precip, if applicable --- #
+    # Loop over all ensemble members
+    # --- If nproc == 1, do a regular ensemble loop --- #
+    if nproc == 1:
+        for i in range(cfg['SMART_RUN']['NUMEN']):
+            print('\tEnsemble {}'.format(i))
+            save_SMART_prec(start_time, end_time, cfg['SMART_RUN']['time_step'],
+                            dict_da_prec_pert_ens[i+1],
+                            out_dir, 'prec_perturbed.ens{}.'.format(i+1))
+    # --- If nproc > 1, use multiprocessing --- #
+    elif nproc > 1:
+        # --- Set up multiprocessing --- #
+        pool = mp.Pool(processes=nproc)
+        # --- Loop over each ensemble member --- #
+        for i in range(cfg['SMART_RUN']['NUMEN']):
+            print('\tEnsemble {}'.format(i))
+            pool.apply_async(save_SMART_prec,
+                             (start_time, end_time, cfg['SMART_RUN']['time_step'],
+                              dict_da_prec_pert_ens[i+1],
+                              out_dir, 'prec_perturbed.ens{}.'.format(i+1)))
+        # --- Finish multiprocessing --- #
+        pool.close()
+        pool.join()
 
 
 # ============================================================ #

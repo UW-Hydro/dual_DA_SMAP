@@ -15,10 +15,16 @@ from tonic.io import read_configobj
 # Parse in parameters from MOCOM
 # ======================================================== #
 cfg = read_configobj(sys.argv[1])
-Ksat = float(sys.argv[2])
-expt = float(sys.argv[3])
-statsfile = sys.argv[4]
-stor_dir = sys.argv[5]
+
+infilt = float(sys.argv[2])
+d1 = float(sys.argv[3])
+d2 = float(sys.argv[4])
+d3 = float(sys.argv[5])
+expt = float(sys.argv[6])
+Ksat = float(sys.argv[7])
+
+statsfile = sys.argv[8]
+stor_dir = sys.argv[9]
 
 # ======================================================== #
 # Parameter setting
@@ -58,8 +64,12 @@ if not os.path.exists(stor_dir):
 # ======================================================== #
 # --- (1) Replace new parameters in the param nc --- #
 ds_param = xr.open_dataset(vic_param_nc_template)
-ds_param['Ksat'][:] = Ksat
+ds_param['infilt'][:] = infilt
+ds_param['Ds'][:] = d1
+ds_param['Dsmax'][:] = d2
+ds_param['Ws'][:] = d3
 ds_param['expt'][:] = expt
+ds_param['Ksat'][:] = Ksat
 ds_param.to_netcdf(os.path.join(stor_dir, 'param.nc'), format='NETCDF4_CLASSIC')
 # --- Prepare global file --- #
 # Spinup period
@@ -206,6 +216,7 @@ with open(statsfile, 'w') as f:
 # Save additional info to stor_dir
 # ======================================================== #
 with open(os.path.join(stor_dir, 'params_stats.txt'), 'a') as f:
-    f.write('{:.8f} {:8f}\n{:8f} {:8f}\n'.format(Ksat, expt, kge_daily, kge_5D))
+    f.write('{:.8f} {:8f} {:8f} {:8f} {:8f} {:8f}\n'.format(infilt, d1, d2, d3, expt, Ksat))
+    f.write('{:8f} {:8f}\n'.format(kge_daily, kge_5D))
 
 

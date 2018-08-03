@@ -152,7 +152,7 @@ for j=1:numpixels  %j=1:numpixels %space loop
 %%%%%%%%%%%% END HACK %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
         % Calculate Increments
-        [increment_sum,increment_sum_hold,sum_rain,sum_rain_sp,sum_rain_sp_hold,sum_rain_sp2,increment_sum_ens, innovation(:, j), innovation_not_norm, rain_perturbed_sum_ens] = ...
+        [increment_sum,increment_sum_hold,sum_rain,sum_rain_sp,sum_rain_sp_hold,sum_rain_sp2,increment_sum_ens, innovation(:, j), innovation_not_norm, rain_perturbed_sum_ens, rain_perturbed_ens] = ...
             analysis(window_size,ist,filter_flag,transform_flag,API_model_flag,NUMEN,Q_fixed,P_inflation,...
             logn_var,phi,bb(j),rain_observed,rain_observed_hold,rain_indep,rain_true,if_rescale,sep_sm_orbit,sma_observed,smd_observed,...
             ta_observed,ta_observed_climatology,PET_observed,PET_observed_climatology,EVI_observed,...
@@ -195,6 +195,8 @@ for j=1:numpixels  %j=1:numpixels %space loop
         RAIN_SMART_SMOS(:,j) = sum_rain_corrected(:);
         RAIN_SMART_SMOS_ENS(:, :, j) = sum_rain_corrected_ens(:, :);
         INCREMENT_SUM(:, j) = increment_sum(:);
+        % Save perturbed rainfall ensemble as well (at orig. timestep without window-aggregation)
+        RAIN_PERTURBED_ENS(:, :, j) = rain_perturbed_ens(:, :);
         
         % Calculate calibration metric...use only when trying to calibrate API parameters again "rain_indep"
         % mask_sum_rain_sp2 = sum_rain_sp2 >=0; %need "independent" sat precip to be there (at least one)...for calibration
@@ -309,13 +311,22 @@ for j=1:numpixels  %j=1:numpixels %space loop
 end
 
 %% 
-save([output_dir '/SMART_corrected_rainfall.mat'], 'RAIN_SMART_SMOS');  % [ntime, npixel]
+% Save corrected rainfall
+save([output_dir '/SMART_corrected_rainfall.mat'], 'RAIN_SMART_SMOS');  % [nwindow, npixel]
 for i=1:NUMEN
     RAIN_CORRECTED = [];
     RAIN_CORRECTED.(sprintf('ens%d', i)) = RAIN_SMART_SMOS_ENS(:, i, :);
     save([output_dir sprintf('/SMART_corrected_rainfall.ens%d.mat', i)], ...
-    'RAIN_CORRECTED');  % [ntime, npixel]
+    'RAIN_CORRECTED');  % [nwindow, npixel]
 end
+% Save perturbed (but un-corrected) rainfall
+for i=1:NUMEN
+    RAIN_PERTURBED = [];
+    RAIN_PERTURBED.(sprintf('ens%d', i)) = RAIN_PERTURBED_ENS(:, i, :);
+    save([output_dir sprintf('/SMART_perturbed_rainfall.ens%d.mat', i)], ...
+    'RAIN_PERTURBED');  % [ntime, npixel]
+end
+% Save other results
 save([output_dir '/innovation.mat'], 'innovation');  % [ntime, npixel]
 save([output_dir '/lambda.mat'], 'lambda');  % [npixel]
 save([output_dir '/increment_sum.mat'], 'INCREMENT_SUM');  % [ntime, npixel]  

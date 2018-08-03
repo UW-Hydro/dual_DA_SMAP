@@ -20,11 +20,11 @@
 
 #module load gcc_4.4.7-impi_5.1.2
 #module load netcdf_fortran+c_4.4.3-gcc_4.4.7
-#source /sw/anaconda-2.3.0/bin/activate /civil/hydro/ymao/anaconda3/envs/vic_rvic
+#source /sw/anaconda-2.3.0/bin/activate /gscratch/hydro/ymao/anaconda3/envs/vic_rvic
 
 set bas = $1
 
-set optmize_cfg = /civil/hydro/ymao/data_assim/control/mocom/calib_v1/$bas/optimize.cfg
+set optmize_cfg = /gscratch/hydro/ymao/data_assim/control/mocom/calib_v1/$bas/optimize.cfg
 
 set run_ident  = v1   # char string used to separate run time files 
                      # created by this program, from those created by other
@@ -43,22 +43,22 @@ set num_tests  = 2   # number of test functions (stats) to be minimized
                      # $num_tests stats must follow the first value in the $R2FILE. 
                      # eg, NSE, NSElog, abs(ann vol err), abs(avg peak diff), rmse, NSC
 
-set num_param  = 2  # number of params used by the simulation
+set num_param  = 6  # number of params used by the simulation
                      # this is effectively hardwired, along with the order of the
                      # params, in the $run_script:  MUST UPDATE RUN SCRIPT IF CHANGED
 
-set run_script = /civil/hydro/ymao/data_assim/control/mocom/calib_v1/optimize.py
+set run_script = /gscratch/hydro/ymao/data_assim/control/mocom/calib_v1/optimize.py
                      # run script used to control model simulations. 
                      # called by main prog.
 
-set optim_log  = /civil/hydro/ymao/data_assim/output/mocom/calib_v1/$bas/log.txt  # log file -- records iterations, 
+set optim_log  = /gscratch/hydro/ymao/data_assim/output/mocom/calib_v1/$bas/log.txt  # log file -- records iterations, 
                                   # and the final optimized results
 
-set param_range_file = /civil/hydro/ymao/data_assim/control/mocom/calib_v1/param_limits.txt
+set param_range_file = /gscratch/hydro/ymao/data_assim/control/mocom/calib_v1/param_limits.txt
                        # test file that gives the
                        # param. name, max and min values
 
-set stor_dir  = /civil/hydro/ymao/data_assim/output/mocom/calib_v1/$bas/
+set stor_dir  = /gscratch/hydro/ymao/data_assim/output/mocom/calib_v1/$bas/
 # dir where discharge and param. info for all simulations are stored. 
 # No trailing "/" needed
 #
@@ -74,7 +74,7 @@ set max_attempts = 2000
 
 #echo $num_start $num_sets $num_param $num_tests $run_script $run_ident $optim_log $param_range_file $stor_dir
 
-/civil/hydro/ymao/data_assim/mocom/pcic/MOCOM.v3 $num_start $num_sets $num_param $num_tests "python $run_script $optmize_cfg" $run_ident $optim_log $param_range_file $stor_dir $max_attempts
+/gscratch/hydro/ymao/data_assim/mocom/pcic/MOCOM.v3 $num_start $num_sets $num_param $num_tests "python $run_script $optmize_cfg" $run_ident $optim_log $param_range_file $stor_dir $max_attempts
 
 
 

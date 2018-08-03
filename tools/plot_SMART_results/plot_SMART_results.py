@@ -296,12 +296,11 @@ for var in ['FAR', 'POD', 'TS']:
     plt.ylabel(r'$\Delta$ {}'.format(var), fontsize=20)
     plt.xlabel('Percentile threshold', fontsize=20)
     plt.legend(fontsize=16)
-    plt.ylim([-0.5, 0.5])
+    plt.ylim([-0.1, 0.1])
     # Save figure
     fig.savefig(os.path.join(output_subdir_maps,
                              '{}.domain_mediaon_delta.png'.format(var)), format='png',
             bbox_inches='tight', pad_inches=0)
-
 
 # --- Plot maps --- #
 for freq in list_freq:

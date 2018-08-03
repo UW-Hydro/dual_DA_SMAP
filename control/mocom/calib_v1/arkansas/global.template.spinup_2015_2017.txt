@@ -27,7 +27,7 @@ FROZEN_SOIL	FALSE	# calculate frozen soils
 #######################################################################
 # DOMAIN INFO
 #######################################################################
-DOMAIN  /civil/hydro/ymao/data_assim/param/vic/small_basins/domain.arkansas.nc
+DOMAIN  /gscratch/hydro/ymao/data_assim/param/vic/small_basins/domain.arkansas.nc
 DOMAIN_TYPE    LAT     lat
 DOMAIN_TYPE    LON     lon
 DOMAIN_TYPE    MASK    mask
@@ -39,7 +39,7 @@ DOMAIN_TYPE    XDIM    lon
 ######################################################################
 ## State Files and Parameters
 ########################################################################
-INIT_STATE  /civil/hydro/ymao/data_assim/output/vic/ArkRed/LAI_from_veglib/spinup.1979_2014.2014start/states/small_basins/state.2014start.20150101_00000.arkansas.nc
+INIT_STATE  /gscratch/hydro/ymao/data_assim/output/vic/ArkRed/LAI_from_veglib/spinup.1979_2014.2014start/states/small_basins/state.2014start.20150101_00000.arkansas.nc
 STATENAME   $state_dir/state  # Output state file path/prefix. The time (STATEYEAR,STATEMONTH,STATEDAY,STATESEC) will be appended to the prefix automatically in the format yyyymmdd.
 STATEYEAR   2018    # year to save model state
 STATEMONTH  01  # month to save model state
@@ -51,7 +51,7 @@ STATE_FORMAT           NETCDF4_CLASSIC  # State file format, valid options: NETC
 # Forcing Files and Parameters
 # netcdf forcing files will be of the form: <FORCING1>YYYY.nc
 #######################################################################
-FORCING1	  /civil/hydro/ymao/data_assim/tools/prepare_vic_forcing/output/GPM_ArkRed/force_with_NLDAS2/small_basins/arkansas/force.
+FORCING1	  /gscratch/hydro/ymao/data_assim/tools/prepare_vic_forcing/output/GPM_ArkRed/force_with_NLDAS2/small_basins/arkansas/force.
 FORCE_TYPE    AIR_TEMP 	   AIR_TEMP    # Average air temperature, C
 FORCE_TYPE    PREC 	       PREC   # Total precipitation (rain and snow), mm
 FORCE_TYPE    PRESSURE 	   PRESSURE   # Atmospheric pressure, kPa
@@ -65,7 +65,7 @@ WIND_H        10.0                # height of wind speed measurement
 # Land Surface Files and Parameters
 #######################################################################
 PARAMETERS      $param_nc
-BASEFLOW        ARNO # ARNO or NIJSSEN2001
+BASEFLOW        NIJSSEN2001 # ARNO or NIJSSEN2001
 NODES           3  # number of soil thermal nodes
 SNOW_BAND	    False
 

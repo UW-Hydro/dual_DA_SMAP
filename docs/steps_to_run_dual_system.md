@@ -55,6 +55,21 @@ For each state and precipitation ensemble member, run:
 
     `$ python postprocess_EnKF.single_ens.py <run_da_cfg> <mpi_proc> <ens_prec> <ens_state>`
 
+7. Analyze and plot post-processed ensemble runoff results
+    1) Calculate daily runoff (from each year to the whole period) for each ensemble member:
+
+        `$ cd ./src`
+        `$ python calculate_post_hist_daily.py <cfg> <ens_prec> <ens_state>`
+
+    2) Pre-calculate CRPS statistics (for post ensemble; the one for zero-update ensembles was calculated in step 4 already):
+
+        `$ cd ./tools/plot_analyze_results`
+        `$ python calculate_post_crps.py <cfg_plot_post> <var> <nproc>`
+
+    6) Calculate and plot all statistics
+
+        `$ ./tools/plot_analyze_results/plot_post_ens_maps.ipynb with <cfg_plot_EnKF>`
+
 
 ## Real-data:
 1. Generate ensemble precipitation (for state EnKF)

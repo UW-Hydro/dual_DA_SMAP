@@ -253,6 +253,7 @@ int main(int argc,char ** argv) {
       for ( int i = N_SET - N_Rmax; i < N_SET; i++ ) {
         if ( acontext[i].exec_state != amoebadone ) {
           FOUND_BETTER = FALSE;
+          fprintf(fopti, "AAAAAAAAAAAAAAAAAA run amoeba");
           amoeba(&acontext[i]);
         } else if ( !acontext[i].FOUND ) {
           /* simplex must be repopulated */

@@ -912,6 +912,7 @@ def calculate_nensk(out_nc, ds_truth, ds_model, var, depth_sm=None):
     ds_model: <xr.Dataset>
         Model states/history whose RMSE is to be assessed (wrt. truth states);
         This should be ensemble model results, with "N" as the ensemble dimension
+        NOTE: this should already be daily data!!
     var: <str>
         Variable, options:
             sm1; sm2; sm3
@@ -942,9 +943,9 @@ def calculate_nensk(out_nc, ds_truth, ds_model, var, depth_sm=None):
                 '1D', dim='time', how='sum') + 1)
             da_model = np.log(ds_model['OUT_RUNOFF'] + 1)
         elif var == 'baseflow_daily_log':
-            da_truth = np.log(ds_truth['OUT_BASEFLOW'] + 1)
-            da_model = np.log(ds_model['OUT_BASEFLOW'].resample(
+            da_truth = np.log(ds_truth['OUT_BASEFLOW'].resample(
                 '1D', dim='time', how='sum') + 1)
+            da_model = np.log(ds_model['OUT_BASEFLOW'] + 1)
         elif var == 'totrunoff_daily_log':
             da_truth = np.log(
                 ds_truth['OUT_RUNOFF'].resample('1D', dim='time', how='sum') + \
