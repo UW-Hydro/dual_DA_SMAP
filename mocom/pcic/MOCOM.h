@@ -30,7 +30,7 @@
 #define ALPHA 1.0
 #define BETA 0.5
 #define GAMMA 2.0
-#define INVALIDMAX 1e5
+#define INVALIDMAX 1e10
 #define MINVAL 1
 #define MAXVAL 0
 #define FALSE 0
@@ -49,6 +49,7 @@ typedef struct {
   char name[1024];
   float max;
   float min;
+  float init;
 } PARAM_RANGE;
 
 typedef struct {

@@ -247,13 +247,15 @@ int main(int argc,char ** argv) {
     /************************
     *  Main evolution loop  *
     ************************/
+    int c = 0;
     do {
       FOUND_BETTER = TRUE;
+      c++;
+
 
       for ( int i = N_SET - N_Rmax; i < N_SET; i++ ) {
         if ( acontext[i].exec_state != amoebadone ) {
           FOUND_BETTER = FALSE;
-          fprintf(fopti, "AAAAAAAAAAAAAAAAAA run amoeba");
           amoeba(&acontext[i]);
         } else if ( !acontext[i].FOUND ) {
           /* simplex must be repopulated */
@@ -344,9 +346,18 @@ void random_start_optimization(long *ran2seed)
 
   /*  Randomly generate and dispatch parameter sets  */
   for (int setcnt = 0; setcnt < N_RAND; setcnt++ ) {
-    for (int param = 0; param < N_PARAM; param++ )
-      set[setcnt].p[param] = ( (param_lim[param].max - param_lim[param].min) * ran2(ran2seed) )
-                                   + param_lim[param].min;
+    /* Use the input initial values as the first parameter set */
+    /* This ensures that the initial parameter set is included in the sample */
+    if (setcnt == 0) {
+        for (int param = 0; param < N_PARAM; param++ )
+            set[setcnt].p[param] = param_lim[param].init;
+    }
+    else {
+
+        for (int param = 0; param < N_PARAM; param++ )
+            set[setcnt].p[param] = ( (param_lim[param].max - param_lim[param].min) * ran2(ran2seed) )
+                                       + param_lim[param].min;
+    }
 
     /* next line calls subrt. that executes shell script to run model, route, assess, plot... */
     queue[setcnt] = dispatch_model(set[setcnt].p, set[setcnt].f, &set[setcnt].soln_num); 
@@ -391,7 +402,8 @@ void amoeba ( AMOEBA_CONTEXT * a )
 ***********************************************************************/
 switch(a->exec_state)  /* mwahahahaha. */
 {
-case amoebadone:  assert(0);  /* ruh-roh */
+case amoebadone: assert(0);  /* ruh-roh */
+
 case amoebauninitialized:
   
   a->FOUND  = FALSE;
@@ -509,7 +521,6 @@ void *dispatch_model( const float *p,
   DISPATCH_MODEL_STATE * state;
   //char cmdstr[4096], cmdstr_cur[4096];
   char cmdstr_cur[4096];
-
   state = malloc(sizeof(*state));
   state->statsfilename = malloc(4096);
   state->p = p;  /* don't need to copy this, as calling code isn't doing any fancy
@@ -719,7 +730,7 @@ void mocom_die(const char *format, ...) {
 
 
 PARAM_RANGE *set_param_limits(const char *fname, int Nparam) {
-/* Read in limits for all parameters */
+/* Read in limits for all parameters and initial value */
   FILE *fin;
   PARAM_RANGE *param_lim;
   int     i;
@@ -730,7 +741,7 @@ PARAM_RANGE *set_param_limits(const char *fname, int Nparam) {
     mocom_die("Unable to open parameter range file.");
 
   for( i = 0; i < Nparam; i++ ) {
-    fscanf(fin, "%s %f %f", param_lim[i].name, &param_lim[i].max, &param_lim[i].min);
+    fscanf(fin, "%s %f %f %f", param_lim[i].name, &param_lim[i].max, &param_lim[i].min, &param_lim[i].init);
     if (param_lim[i].max < param_lim[i].min)
       mocom_die("Parameter \"%s\" range is invalid: max (%f) is less than min (%f).\n", 
         param_lim[i].name, param_lim[i].max, param_lim[i].min);
