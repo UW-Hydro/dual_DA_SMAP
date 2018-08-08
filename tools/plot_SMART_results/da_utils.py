@@ -11,6 +11,8 @@ import shutil
 import scipy.linalg as la
 import glob
 import properscoring as ps
+from scipy import stats
+import pickle
 
 from tonic.models.vic.vic import VIC, default_vic_valgrind_error_code
 
@@ -3684,6 +3686,370 @@ def crps(truth, ensemble):
     crps = array_crps.mean()
 
     return crps
+
+
+def nensk(truth, ensemble):
+    ''' Calculate the ratio of temporal-mean ensemble skill to temporal-mean ensemble spread:
+            nensk = <ensk> / <ensp>
+    where <ensk> is temporal average of: ensk(t) = (ensmean - truth)^2
+          <ensp> is temperal average of: ensp(t) = mean((ens_i - ensmean)^2) = var(ens_i)
+
+    Parameters
+    ----------
+    truth: <np.array>
+        A 1-D array of truth time series
+        Dimension: [n]
+    ensemble: <np.array>
+        A 2-D array of ensemble time series
+        Dimension: [n, N], where N is ensemble size; n is time series length
+
+    Returns
+    ----------
+    nensk: <float>
+        Normalized ensemble skill
+    '''
+
+    ensk = np.square((ensemble.mean(axis=1) - truth))  # [n]
+    ensp = ensemble.var(axis=1)  # [n]
+    nensk = np.mean(ensk) / np.mean(ensp)
+
+    return nensk
+
+
+def calculate_nensk(out_nc, da_truth, da_model, log):
+    ''' A wrap funciton that calculates NENSK for all domain
+    and save to file; if result file already existed, then simply read in the file.
+
+    Parameters
+    ----------
+    out_nc: <str>
+        RMSE result output netCDF file
+    da_truth: <xr.DataArray>
+        Truth states/history
+    da_model: <xr.DataArray>
+        Model states/history whose NENSK is to be assessed (wrt. truth states);
+        This should be ensemble model results, with "N" as the ensemble dimension
+        NOTE: this should already be daily data!!
+    log: <bool>
+        True or False; whether to take log transformation
+
+    Returns
+    ----------
+    da_bias_norm_var: <xr.DataArray>
+        Variance of ensemble-normalized bias for the whole domain; dimension: [lat, lon]
+    '''
+
+    if not os.path.isfile(out_nc):  # if RMSE is not already calculated
+        # --- Take log if specified --- #
+        if log is True:
+            da_truth = np.log(da_truth + 1)
+            da_model = np.log(da_model + 1)
+        # --- Calculate nensk for the whole domain --- #
+        nensk_domain = np.asarray(
+            [nensk(
+                da_truth.sel(lat=lat, lon=lon).values,
+                da_model.sel(lat=lat, lon=lon).transpose('time', 'N').values)
+             for lat in da_truth['lat'].values
+             for lon in da_truth['lon'].values])
+        # --- Reshape results --- #
+        nensk_domain = nensk_domain.reshape(
+            [len(da_truth['lat']), len(da_truth['lon'])])
+        # --- Put results into da's --- #
+        da_nensk = xr.DataArray(
+            nensk_domain, coords=[da_truth['lat'], da_truth['lon']],
+            dims=['lat', 'lon'])
+        # Save RMSE to netCDF file
+        ds_nensk = xr.Dataset(
+            {'nensk': da_nensk})
+        ds_nensk.to_netcdf(out_nc, format='NETCDF4_CLASSIC')
+    else:  # if RMSE is already calculated
+        da_nensk = xr.open_dataset(out_nc)['nensk']
+
+    return da_nensk
+
+
+def get_z_values(ens, obs):
+    ''' Calculate cumulative probability corresponding to observed 
+        flow (F(obs)) from forecast ensemble CDF (F(x)).
+        These are z_i in Laio and Tamea 2007 Fig. 2.
+        https://doi.org/10.5194/hess-11-1267-2007
+        Input: ens = ensemble forecast for a single day
+                     numpy.array, num_ensemble_members x 1 
+               obs = observation for a single day, one value.
+        Output: z = cumulative probability of observation based on
+                    forecast ensemble, single value
+    '''
+#    # construct forecast CDF from ensemble weights
+#    cdf, ens_sort = construct_cdf(ens)
+#    # get z = F(obs) from forecast CDF
+#    z = cdf_simulated(obs, cdf, ens_sort)
+
+    if obs < min(ens):
+        z = 0
+    elif obs > max(ens):
+        z = 1
+    else:
+        z = stats.percentileofscore(ens, obs, 'mean') / 100
+    return z
+
+
+def get_z_values_timeseries(ens_ts, obs_ts):
+    ''' Calculate z values for a time series of ensemble
+    Parameters
+    ----------
+    ens_ts: <np.array>
+        An ensemble of timeseries
+        dim: [N, t] where N is ensemble size and t is timesteps
+    obs_ts: <np.array>
+        Time series of observations
+        dim: [t]
+        
+    Returns
+    ----------
+    z_alltimes: <np.array>
+        Quantile of observation in ensemble at all time series
+        dim: [t]
+    '''
+    
+    if len(obs_ts) != ens_ts.shape[1]:
+        raise ValueError('Ensemble and observed time series not the same length!')
+    
+    z_alltimes = \
+        np.asarray(
+            [get_z_values(ens_ts[:, t], obs_ts[t])
+             for t in range(len(obs_ts))])
+        
+    return z_alltimes
+
+
+def calc_reliability_bias(z_daily):
+    ''' Calculate alpha-reliability following Renard et al. 2010
+        (Eqn. 23) https://doi.org/11.1029/2009WR008328. See also
+        Laio and Tamea 2007
+        https://doi.org/10.5194/hess-11-1267-2007
+        Inputs: z_daily = daily z = F(obs) values. These correspond to
+                          "quantile of observed p-values" from
+                          Renard et al. 2010 Fig. 3,
+                          "observed p-values of x_t" from Renard et
+                          al. 2010 Eqn. 23b, and z_i from Laio and 
+                          Tamea 2007 Fig. 2.
+                          numpy.array 1 x num_days
+        Outputs: alpha_reliability
+                Range: -1 to 1; best-performance value = 0
+                positive value indicates over-prediction
+                negative value indicates under-prediction
+    '''
+    
+    z_daily = np.sort(z_daily)
+    n_sample = len(z_daily)
+    # assign ranks to daily z = F(obs) values.
+    # rank/# samples gives us the "theoretical quantile of U[0,1]"
+    # from Renard et al. 2010 Fig. 3, "theoretical p-values of x_t" 
+    # from Renard et al. 2010 Eqn. 23b, and R_i/n from Laio and Tamea 
+    # 2007 Fig. 2.
+    # Note: Renard et al. 2010 Fig.3 flipped the x and y axes from 
+    # Laio and Tamea 2007 Fig. 2.
+    R = np.arange(0, n_sample) / n_sample
+    # calculate alpha reliability index
+    alpha_direction = - 2 * np.mean(z_daily - R)
+    return alpha_direction
+
+
+def calc_alpha_reliability(z_daily):
+    ''' Calculate alpha-reliability following Renard et al. 2010
+        (Eqn. 23) https://doi.org/11.1029/2009WR008328. See also
+        Laio and Tamea 2007
+        https://doi.org/10.5194/hess-11-1267-2007
+        Inputs: z_daily = daily z = F(obs) values. These correspond to
+                          "quantile of observed p-values" from
+                          Renard et al. 2010 Fig. 3,
+                          "observed p-values of x_t" from Renard et
+                          al. 2010 Eqn. 23b, and z_i from Laio and 
+                          Tamea 2007 Fig. 2.
+                          numpy.array 1 x num_days
+        Outputs: alpha = alpha reliability index, single value
+    '''
+    
+    z_daily = np.sort(z_daily)
+    n_sample = len(z_daily)
+    # assign ranks to daily z = F(obs) values.
+    # rank/# samples gives us the "theoretical quantile of U[0,1]"
+    # from Renard et al. 2010 Fig. 3, "theoretical p-values of x_t" 
+    # from Renard et al. 2010 Eqn. 23b, and R_i/n from Laio and Tamea 
+    # 2007 Fig. 2.
+    # Note: Renard et al. 2010 Fig.3 flipped the x and y axes from 
+    # Laio and Tamea 2007 Fig. 2.
+    R = np.arange(0, n_sample) / n_sample
+    # calculate alpha reliability index
+    alpha = 1 - 2 * np.mean(abs(z_daily - R))
+    return alpha
+
+
+def calc_alpha_reliability_domain(out_nc, dict_z_domain, da_mask):
+    ''' A wrap funciton that calculates alpha reliability for all domain
+    and save to file; if result file already existed, then simply read in the file.
+
+    Parameters
+    ----------
+    out_nc: <str>
+        RMSE result output netCDF file
+    dict_z_domain: <dict>
+        {lat_lon: array of z values}
+    da_mask: <xr.DataArray>
+        Domain mask file; dim: [lat, lon]
+
+    Returns
+    ----------
+    da_alpha: <xr.DataArray>
+        alpha reliability for the whole domain; dimension: [lat, lon]
+    '''
+
+    if not os.path.isfile(out_nc):  # if not already calculated
+        # --- Calculate for the whole domain --- #
+        alpha_domain = np.asarray(
+            [calc_alpha_reliability(dict_z_domain['{}_{}'.format(lat, lon)])
+             if '{}_{}'.format(lat, lon) in dict_z_domain.keys() else np.nan
+             for lat in da_mask['lat'].values
+             for lon in da_mask['lon'].values])
+        # --- Reshape results --- #
+        alpha_domain = alpha_domain.reshape(
+            [len(da_mask['lat']), len(da_mask['lon'])])
+        # --- Put results into da's --- #
+        da_alpha = xr.DataArray(
+            alpha_domain, coords=[da_mask['lat'], da_mask['lon']],
+            dims=['lat', 'lon'])
+        # Save to netCDF file
+        ds_alpha = xr.Dataset(
+            {'alpha': da_alpha})
+        ds_alpha.to_netcdf(out_nc, format='NETCDF4_CLASSIC')
+    else:  # if RMSE is already calculated
+        da_alpha = xr.open_dataset(out_nc)['alpha']
+
+    return da_alpha
+
+
+def calculate_z_value_prec_domain(out_pickle, da_truth, da_model, nproc=1):
+    ''' A wrap funciton that calculates z value for all domain and save to file; if
+        result file already existed, then simply read in the file.
+        NOTE: if at a timestep all ensemble members AND obs are zero, this timestep
+        will be excluded from z-value calculation
+
+    Parameters
+    ----------
+    out_pickle: <str>
+        Output pickle file
+    ds_truth: <xr.DataArray>
+        Truth states/history
+    da_model: <xr.DataArray>
+        Model states/history whose RMSE is to be assessed (wrt. truth states);
+        This should be ensemble model results, with "N" as the ensemble dimension
+    nproc: <int>
+        Number of processors for mp
+
+    Returns
+    ----------
+    dict_z_domain: <dict>
+        {lat_lon: array of z values}
+    '''
+
+    if not os.path.isfile(out_pickle):  # if not already calculated
+        # --- Calculate CRPS for the whole domain --- #
+        pool = mp.Pool(processes=nproc)
+        results = {}
+        for lat in da_truth['lat'].values:
+            for lon in da_truth['lon'].values:
+                # Exclude timesteps wit all-zero ensemble and truth
+                ens =  da_model.sel(lat=lat, lon=lon).transpose('N', 'time').values
+                truth = da_truth.sel(lat=lat, lon=lon).values
+                valid_timesteps = ((ens>0).sum(axis=0) > 0) | (truth > 0)
+                ens_valid = ens[:, valid_timesteps]
+                truth_valid = truth[valid_timesteps]
+                # Calculate z value time series
+                results[(lat, lon)] = pool.apply_async(
+                    get_z_values_timeseries, 
+                    (ens_valid, truth_valid))
+        pool.close()
+        pool.join()
+        # --- Get return values --- #
+        dict_z_domain = {}  # {lat_lon: array}
+        for i, result in results.items():
+            lat = i[0]
+            lon = i[1]
+            dict_z_domain['{}_{}'.format(lat, lon)] = result.get()
+        # Save z values using pickle
+        with open(out_pickle, 'wb') as f:
+            pickle.dump(dict_z_domain, f)
+    else:  # if already calculated
+        with open(out_pickle, 'rb') as f:
+            dict_z_domain = pickle.load(f)
+
+    return dict_z_domain
+
+
+def calc_kesi_domain(out_nc, dict_z_domain, da_mask):
+    ''' A wrap funciton that calculates kesi (fraction of observed
+    timesteps within the ensemble range) for all domain
+    and save to file; if result file already existed, then simply read in the file.
+
+    Parameters
+    ----------
+    out_nc: <str>
+        result output netCDF file
+    dict_z_domain: <dict>
+        {lat_lon: array of z values}
+    da_mask: <xr.DataArray>
+        Domain mask file; dim: [lat, lon]
+
+    Returns
+    ----------
+    da_kesi: <xr.DataArray>
+        kesi for the whole domain; dimension: [lat, lon]
+    '''
+
+    if not os.path.isfile(out_nc):  # if not already calculated
+        # --- Calculate for the whole domain --- #
+        kesi_domain = np.asarray(
+            [calc_kesi(dict_z_domain['{}_{}'.format(lat, lon)])
+             if '{}_{}'.format(lat, lon) in dict_z_domain.keys() else np.nan
+             for lat in da_mask['lat'].values
+             for lon in da_mask['lon'].values])
+        # --- Reshape results --- #
+        kesi_domain = kesi_domain.reshape(
+            [len(da_mask['lat']), len(da_mask['lon'])])
+        # --- Put results into da's --- #
+        da_kesi = xr.DataArray(
+            kesi_domain, coords=[da_mask['lat'], da_mask['lon']],
+            dims=['lat', 'lon'])
+        # Save to netCDF file
+        ds_kesi = xr.Dataset(
+            {'kesi': da_kesi})
+        ds_kesi.to_netcdf(out_nc, format='NETCDF4_CLASSIC')
+    else:  # if RMSE is already calculated
+        da_kesi = xr.open_dataset(out_nc)['kesi']
+
+    return da_kesi
+
+
+def calc_kesi(z_alltimes):
+    ''' Calculate kesi (fraction of observed timesteps within the
+        ensemble range)
+        
+    Parameters
+    ----------
+    z_alltimes: <np.array>
+        z values of all timesteps; dim: [time]
+        
+    Returns
+    ----------
+    kesi: <float>
+        kesi
+    '''
+    
+    kesi = 1 - ((z_alltimes==1).sum() + (z_alltimes==0).sum()) \
+        / len(z_alltimes)
+        
+    return kesi
+
 
 
 

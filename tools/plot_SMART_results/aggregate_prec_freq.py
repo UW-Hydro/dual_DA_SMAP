@@ -60,13 +60,13 @@ da_prec = load_nc_and_concat_var_years(
         ['prec'].sel(time=slice(start_time, end_time))
 
 # --- Aggregate to the specified frequency --- #
-da_prec_agg = da_prec.resample('1D', dim='time', how='sum')
+da_prec_agg = da_prec.resample(freq, dim='time', how='sum')
 
 # --- Save aggregated precip to file --- #
 ds_prec_agg = xr.Dataset({'PREC': da_prec_agg})
 to_netcdf_history_file_compress(
     ds_prec_agg,
     os.path.join(post_dir,
-        'prec_{}.ens{}.{}_{}.nc'.format(prec_type, i, start_year, end_year)))
+        'prec_{}.ens{}.{}_{}.{}.nc'.format(prec_type, i, start_year, end_year, freq)))
 
 

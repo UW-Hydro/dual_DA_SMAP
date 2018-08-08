@@ -103,10 +103,11 @@ if (filter_flag == 2 or filter_flag == 6) and cfg['PLOT']['smart_output_from'] =
     dict_da_prec_allEns = {}  # {freq: prec_type: da}
     for freq in list_freq:
         dict_da_prec_allEns[freq] = {}
-        for prec_type in ['perturbed', 'corrected']:
+        for prec_type in ['corrected']:
             print('\t{}, {}'.format(freq, prec_type))
             out_nc = os.path.join(output_subdir_data,
                                   'prec_{}_allEns.{}.nc'.format(prec_type, freq))
+            print(out_nc)
             if not os.path.isfile(out_nc):  # if not already loaded
                 list_da_prec = []
                 for i in range(cfg['SMART_RUN']['NUMEN']):
@@ -121,7 +122,7 @@ if (filter_flag == 2 or filter_flag == 6) and cfg['PLOT']['smart_output_from'] =
                     else:  # if not the SMART timestep, should have already pre-aggregated precip data
                         da_prec = xr.open_dataset(
                             os.path.join(smart_outdir,
-                                         'prec_{}.ens{}.{}_{}.nc'.format(prec_type, i+1, start_year, end_year)))['PREC']
+                                         'prec_{}.ens{}.{}_{}.{}.nc'.format(prec_type, i+1, start_year, end_year, freq)))['PREC']
                     list_da_prec.append(da_prec)
                 # Concat all ensemble members
                 da_prec_allEns = xr.concat(list_da_prec, dim='N')
