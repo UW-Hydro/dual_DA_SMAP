@@ -9,6 +9,7 @@ from bokeh.plotting import figure, output_file, save
 from bokeh.io import reset_output
 import bokeh
 import properscoring as ps
+from scipy import stats
 
 
 def read_RVIC_output(filepath, output_format='array', outlet_ind=-1):
@@ -241,4 +242,141 @@ def nensk(truth, ensemble):
     return nensk
 
 
+def get_z_values(ens, obs):
+    ''' Calculate cumulative probability corresponding to observed
+        flow (F(obs)) from forecast ensemble CDF (F(x)).
+        These are z_i in Laio and Tamea 2007 Fig. 2.
+        https://doi.org/10.5194/hess-11-1267-2007
+        Input: ens = ensemble forecast for a single day
+                     numpy.array, num_ensemble_members x 1
+               obs = observation for a single day, one value.
+        Output: z = cumulative probability of observation based on
+                    forecast ensemble, single value
+    '''
+#    # construct forecast CDF from ensemble weights
+#    cdf, ens_sort = construct_cdf(ens)
+#    # get z = F(obs) from forecast CDF
+#    z = cdf_simulated(obs, cdf, ens_sort)
+
+    if obs < min(ens):
+        z = 0
+    elif obs > max(ens):
+        z = 1
+    else:
+        z = stats.percentileofscore(ens, obs, 'mean') / 100
+    return z
+
+
+def get_z_values_timeseries(ens_ts, obs_ts):
+    ''' Calculate z values for a time series of ensemble
+    Parameters
+    ----------
+    ens_ts: <np.array>
+        An ensemble of timeseries
+        dim: [N, t] where N is ensemble size and t is timesteps
+    obs_ts: <np.array>
+        Time series of observations
+        dim: [t]
+
+    Returns
+    ----------
+    z_alltimes: <np.array>
+        Quantile of observation in ensemble at all time series
+        dim: [t]
+    '''
+
+    if len(obs_ts) != ens_ts.shape[1]:
+        raise ValueError('Ensemble and observed time series not the same length!')
+
+    z_alltimes = \
+        np.asarray(
+            [get_z_values(ens_ts[:, t], obs_ts[t])
+             for t in range(len(obs_ts))])
+
+    return z_alltimes
+
+
+
+def calc_reliability_bias(z_daily):
+    ''' Calculate alpha-reliability following Renard et al. 2010
+        (Eqn. 23) https://doi.org/11.1029/2009WR008328. See also
+        Laio and Tamea 2007
+        https://doi.org/10.5194/hess-11-1267-2007
+        Inputs: z_daily = daily z = F(obs) values. These correspond to
+                          "quantile of observed p-values" from
+                          Renard et al. 2010 Fig. 3,
+                          "observed p-values of x_t" from Renard et
+                          al. 2010 Eqn. 23b, and z_i from Laio and
+                          Tamea 2007 Fig. 2.
+                          numpy.array 1 x num_days
+        Outputs: alpha_reliability
+                Range: -1 to 1; best-performance value = 0
+                positive value indicates over-prediction
+                negative value indicates under-prediction
+    '''
+
+    z_daily = np.sort(z_daily)
+    n_sample = len(z_daily)
+    # assign ranks to daily z = F(obs) values.
+    # rank/# samples gives us the "theoretical quantile of U[0,1]"
+    # from Renard et al. 2010 Fig. 3, "theoretical p-values of x_t"
+    # from Renard et al. 2010 Eqn. 23b, and R_i/n from Laio and Tamea
+    # 2007 Fig. 2.
+    # Note: Renard et al. 2010 Fig.3 flipped the x and y axes from
+    # Laio and Tamea 2007 Fig. 2.
+    R = np.arange(0, n_sample) / n_sample
+    # calculate alpha reliability index
+    alpha_direction = - 2 * np.mean(z_daily - R)
+    return alpha_direction
+
+
+def calc_alpha_reliability(z_daily):
+    ''' Calculate alpha-reliability following Renard et al. 2010
+        (Eqn. 23) https://doi.org/11.1029/2009WR008328. See also
+        Laio and Tamea 2007
+        https://doi.org/10.5194/hess-11-1267-2007
+        Inputs: z_daily = daily z = F(obs) values. These correspond to
+                          "quantile of observed p-values" from
+                          Renard et al. 2010 Fig. 3,
+                          "observed p-values of x_t" from Renard et
+                          al. 2010 Eqn. 23b, and z_i from Laio and
+                          Tamea 2007 Fig. 2.
+                          numpy.array 1 x num_days
+        Outputs: alpha = alpha reliability index, single value
+    '''
+
+    z_daily = np.sort(z_daily)
+    n_sample = len(z_daily)
+    # assign ranks to daily z = F(obs) values.
+    # rank/# samples gives us the "theoretical quantile of U[0,1]"
+    # from Renard et al. 2010 Fig. 3, "theoretical p-values of x_t"
+    # from Renard et al. 2010 Eqn. 23b, and R_i/n from Laio and Tamea
+    # 2007 Fig. 2.
+    # Note: Renard et al. 2010 Fig.3 flipped the x and y axes from
+    # Laio and Tamea 2007 Fig. 2.
+    R = np.arange(0, n_sample) / n_sample
+    # calculate alpha reliability index
+    alpha = 1 - 2 * np.mean(abs(z_daily - R))
+    return alpha
+
+
+def calc_kesi(z_alltimes):
+    ''' Calculate kesi (fraction of observed timesteps within the
+        ensemble range)
+
+    Parameters
+    ----------
+    z_alltimes: <np.array>
+        z values of all timesteps; dim: [time]
+
+    Returns
+    ----------
+    kesi: <float>
+        kesi
+    '''
+
+    kesi = 1 - ((z_alltimes==1).sum() + (z_alltimes==0).sum()) \
+        / len(z_alltimes)
+
+    return kesi
 
