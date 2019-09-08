@@ -369,7 +369,7 @@ def calculate_rmse(out_nc, ds_truth, ds_model,
         Model states/history whose RMSE is to be assessed (wrt. truth states)
     var: <str>
         Variable, options:
-            sm1; sm2; sm3; runoff_daily; baseflow_daily; totrunoff_daily; swe;
+            sm1; sm2; sm3; totsum; runoff_daily; baseflow_daily; totrunoff_daily; swe;
             runoff_daily_log; baseflow_daily_log; totrunoff_daily_log
         NOTE: sm's and swe are from states; runoff's are from history file
     depth_sm: <xr.DataArray>
@@ -389,6 +389,9 @@ def calculate_rmse(out_nc, ds_truth, ds_model,
         elif var == 'sm3':
             da_truth = ds_truth['SOIL_MOISTURE'].sel(nlayer=2) / depth_sm
             da_model = ds_model['SOIL_MOISTURE'].sel(nlayer=2) / depth_sm
+        elif var == 'totsm':
+            da_truth = ds_truth['SOIL_MOISTURE'].sum(dim='nlayer') / depth_sm
+            da_model = ds_model['SOIL_MOISTURE'].sum(dim='nlayer') / depth_sm
         elif var == 'swe':
             da_truth = ds_truth['SWE']
             da_model = ds_model['SWE']
@@ -938,6 +941,21 @@ def calculate_nensk(out_nc, ds_truth, ds_model, var, depth_sm=None):
         elif var == 'sm3':
             da_truth = ds_truth['SOIL_MOISTURE'].sel(nlayer=2) / depth_sm
             da_model = ds_model['SOIL_MOISTURE'].sel(nlayer=2) / depth_sm
+        elif var == 'runoff_daily':
+            da_truth = ds_truth['OUT_RUNOFF'].resample(
+                '1D', dim='time', how='sum')
+            da_model = ds_model['OUT_RUNOFF']
+        elif var == 'baseflow_daily':
+            da_truth = ds_truth['OUT_BASEFLOW'].resample(
+                '1D', dim='time', how='sum')
+            da_model = ds_model['OUT_BASEFLOW']
+        elif var == 'totrunoff_daily':
+            da_truth = \
+                ds_truth['OUT_RUNOFF'].resample('1D', dim='time', how='sum') + \
+                ds_truth['OUT_BASEFLOW'].resample('1D', dim='time', how='sum')
+            da_model = \
+                ds_model['OUT_RUNOFF'] + \
+                ds_model['OUT_BASEFLOW']
         elif var == 'runoff_daily_log':
             da_truth = np.log(ds_truth['OUT_RUNOFF'].resample(
                 '1D', dim='time', how='sum') + 1)

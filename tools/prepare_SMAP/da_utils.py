@@ -97,7 +97,7 @@ def calculate_smap_domain_from_vic_domain(da_vic_domain, da_smap_example, is_sma
     smap_lon_lower = lons_smap[smap_lon_lower_ind]
     # lon upper
     smap_lon_upper_ind = np.searchsorted(np.sort(smap_lon_edges), vic_domain_lon_range[1]) - 1
-    smap_lon_upper = lons_smap[smap_lon_upper_ind]
+    smap_lon_upper = lons_smap_from_centers
     # --- Construct the SMAP domain needed --- #
     if is_smap_domain is True:
         da_smap_domain_example = da_smap_example.sel(

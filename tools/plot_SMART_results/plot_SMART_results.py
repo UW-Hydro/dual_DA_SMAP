@@ -22,6 +22,7 @@ import matplotlib.pyplot as plt
 from bokeh.plotting import figure, output_file, save
 from bokeh.io import reset_output
 import bokeh
+import cartopy.crs as ccrs
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -60,6 +61,8 @@ start_year = start_time.year
 end_year = end_time.year
 time_step = cfg['SMART_RUN']['time_step']  # [hour]
 window_size = cfg['SMART_RUN']['window_size']  # number of timesteps
+
+list_freq = ['3H', '1D', '3D']
 
 
 # ============================================================ #
@@ -288,6 +291,7 @@ for var in ['FAR', 'POD', 'TS']:
 list_color = ['r', 'b', 'orange']
 for var in ['FAR', 'POD', 'TS']:
     fig = plt.figure(figsize=(8, 4))
+    ax = plt.axes()
     plt.plot(list_perc, np.zeros(len(list_perc)), '--', color='Grey')
     for i, freq in enumerate(list_freq):
         plt.plot(list_perc, dict_list_delta[var][freq], '.-', color=list_color[i],
@@ -295,201 +299,144 @@ for var in ['FAR', 'POD', 'TS']:
     # Makes plot look better
     plt.ylabel(r'$\Delta$ {}'.format(var), fontsize=20)
     plt.xlabel('Percentile threshold', fontsize=20)
-    plt.legend(fontsize=16)
+#    plt.legend(fontsize=16)
     plt.ylim([-0.1, 0.1])
+    for tick in ax.xaxis.get_major_ticks():
+        tick.label.set_fontsize(16)
+    for tick in ax.yaxis.get_major_ticks():
+        tick.label.set_fontsize(16)
     # Save figure
     fig.savefig(os.path.join(output_subdir_maps,
                              '{}.domain_mediaon_delta.png'.format(var)), format='png',
             bbox_inches='tight', pad_inches=0)
 
-# --- Plot maps --- #
-for freq in list_freq:
-    for perc in list_perc:
-        for var in ['FAR', 'POD', 'TS']:
-            # Orig. precipitation
-            fig = plt.figure(figsize=(14, 7))
-            cs = dict_orig[freq][perc][var].plot(
-                add_colorbar=False, cmap='viridis', vmin=0, vmax=1)
-            cbar = plt.colorbar(cs).set_label(var, fontsize=20)
-            plt.title('{} of original precip., {}, percentile threshold = {}th\n'
-                      'domain median = {:.2f}'.format(
-                          var, freq, perc,
-                          float(dict_orig[freq][perc][var].median().values)),
-                      fontsize=20)
-            fig.savefig(os.path.join(output_subdir_maps,
-                                     '{}.prec_orig.{}.q{}.png'.format(var, freq, perc)),
-                        format='png',
-                        bbox_inches='tight', pad_inches=0)
-
-            # Corrected. precipitation
-            fig = plt.figure(figsize=(14, 7))
-            cs = dict_corrected[freq][perc][var].plot(
-                add_colorbar=False, cmap='viridis', vmin=0, vmax=1)
-            cbar = plt.colorbar(cs).set_label(var, fontsize=20)
-            plt.title('{} of corrected precip., {}, percentile threshold = {}th\n'
-                      'domain median = {:.2f}'.format(
-                          var, freq, perc,
-                          float(dict_corrected[freq][perc][var].median().values)),
-                      fontsize=20)
-            fig.savefig(os.path.join(output_subdir_maps,
-                                     '{}.prec_corrected.{}.q{}.png'.format(var, freq, perc)),
-                        format='png',
-                        bbox_inches='tight', pad_inches=0)
-
-            # Improvement
-            if var == 'FAR':
-                da_improv = dict_orig[freq][perc][var] - dict_corrected[freq][perc][var]
-            else:
-                da_improv = dict_corrected[freq][perc][var] - dict_orig[freq][perc][var]
-            fig = plt.figure(figsize=(14, 7))
-            cs = da_improv.plot(add_colorbar=False, cmap='bwr_r', vmin=-0.1, vmax=0.1)
-            cbar = plt.colorbar(cs, extend='both').set_label(var, fontsize=20)
-            plt.title('{} improvement, {}, percentile threshold = {}th\n'
-                      'domain median = {:.2f}'.format(
-                          var, freq, perc,
-                          float(da_improv.median().values)),
-                      fontsize=20)
-            fig.savefig(os.path.join(output_subdir_maps,
-                                     '{}.improv.{}.q{}.png'.format(var, freq, perc)),
-                        format='png',
-                        bbox_inches='tight', pad_inches=0)
+## --- Plot maps --- #
+#for freq in list_freq:
+#    for perc in list_perc:
+#        for var in ['FAR', 'POD', 'TS']:
+#            # Orig. precipitation
+#            fig = plt.figure(figsize=(14, 7))
+#            cs = dict_orig[freq][perc][var].plot(
+#                add_colorbar=False, cmap='viridis', vmin=0, vmax=1)
+#            cbar = plt.colorbar(cs).set_label(var, fontsize=20)
+#            plt.title('{} of original precip., {}, percentile threshold = {}th\n'
+#                      'domain median = {:.2f}'.format(
+#                          var, freq, perc,
+#                          float(dict_orig[freq][perc][var].median().values)),
+#                      fontsize=20)
+#            fig.savefig(os.path.join(output_subdir_maps,
+#                                     '{}.prec_orig.{}.q{}.png'.format(var, freq, perc)),
+#                        format='png',
+#                        bbox_inches='tight', pad_inches=0)
+#
+#            # Corrected. precipitation
+#            fig = plt.figure(figsize=(14, 7))
+#            cs = dict_corrected[freq][perc][var].plot(
+#                add_colorbar=False, cmap='viridis', vmin=0, vmax=1)
+#            cbar = plt.colorbar(cs).set_label(var, fontsize=20)
+#            plt.title('{} of corrected precip., {}, percentile threshold = {}th\n'
+#                      'domain median = {:.2f}'.format(
+#                          var, freq, perc,
+#                          float(dict_corrected[freq][perc][var].median().values)),
+#                      fontsize=20)
+#            fig.savefig(os.path.join(output_subdir_maps,
+#                                     '{}.prec_corrected.{}.q{}.png'.format(var, freq, perc)),
+#                        format='png',
+#                        bbox_inches='tight', pad_inches=0)
+#
+#            # Improvement
+#            if var == 'FAR':
+#                da_improv = dict_orig[freq][perc][var] - dict_corrected[freq][perc][var]
+#            else:
+#                da_improv = dict_corrected[freq][perc][var] - dict_orig[freq][perc][var]
+#            fig = plt.figure(figsize=(14, 7))
+#            cs = da_improv.plot(add_colorbar=False, cmap='bwr_r', vmin=-0.1, vmax=0.1)
+#            cbar = plt.colorbar(cs, extend='both').set_label(var, fontsize=20)
+#            plt.title('{} improvement, {}, percentile threshold = {}th\n'
+#                      'domain median = {:.2f}'.format(
+#                          var, freq, perc,
+#                          float(da_improv.median().values)),
+#                      fontsize=20)
+#            fig.savefig(os.path.join(output_subdir_maps,
+#                                     '{}.improv.{}.q{}.png'.format(var, freq, perc)),
+#                        format='png',
+#                        bbox_inches='tight', pad_inches=0)
         
         
 # ============================================================ #
 # Plot precipitation RMSE maps
 # ============================================================ #
 print('Plotting RMSE...')
-# --- Calculate RMSE --- #
-# 3H
-out_nc = os.path.join(output_subdir_data, 'rmse.orig.prec.3H.nc')
-da_rmse_orig_3H = calculate_rmse_prec(
-    out_nc, da_prec_orig, da_prec_truth,
-    agg_freq='3H', log=False).where(da_mask)
-out_nc = os.path.join(output_subdir_data, 'rmse.corrected.prec.3H.nc')
-da_rmse_corrected_3H = calculate_rmse_prec(
-    out_nc, da_prec_corrected, da_prec_truth,
-    agg_freq='3H', log=False).where(da_mask)
-# 1D
-out_nc = os.path.join(output_subdir_data, 'rmse.orig.prec.1D.nc')
-da_rmse_orig_1D = calculate_rmse_prec(
-    out_nc, da_prec_orig, da_prec_truth,
-    agg_freq='1D', log=False).where(da_mask)
-out_nc = os.path.join(output_subdir_data, 'rmse.corrected.prec.1D.nc')
-da_rmse_corrected_1D = calculate_rmse_prec(
-    out_nc, da_prec_corrected, da_prec_truth,
-    agg_freq='1D', log=False).where(da_mask)
-# 3D
-out_nc = os.path.join(output_subdir_data, 'rmse.orig.prec.3D.nc')
-da_rmse_orig_3D = calculate_rmse_prec(
-    out_nc, da_prec_orig, da_prec_truth,
-    agg_freq='3D', log=False).where(da_mask)
-out_nc = os.path.join(output_subdir_data, 'rmse.corrected.prec.3D.nc')
-da_rmse_corrected_3D = calculate_rmse_prec(
-    out_nc, da_prec_corrected, da_prec_truth,
-    agg_freq='3D', log=False).where(da_mask)
+for freq in list_freq:
+    # --- Calculate RMSE --- #
+    out_nc = os.path.join(output_subdir_data, 'rmse.orig.prec.{}.nc'.format(freq))
+    da_rmse_orig = calculate_rmse_prec(
+        out_nc, da_prec_orig, da_prec_truth,
+        agg_freq=freq, log=False).where(da_mask)
+    out_nc = os.path.join(output_subdir_data, 'rmse.corrected.prec.{}.nc'.format(freq))
+    da_rmse_corrected = calculate_rmse_prec(
+        out_nc, da_prec_corrected, da_prec_truth,
+        agg_freq=freq, log=False).where(da_mask)
+    # --- Calculate PER --- #
+    da_per_rmse = (1 - da_rmse_corrected / da_rmse_orig) * 100
 
-# --- Calculate PER --- #
-da_per_rmse_3H = (1 - da_rmse_corrected_3H / da_rmse_orig_3H) * 100
-da_per_rmse_1D = (1 - da_rmse_corrected_1D / da_rmse_orig_1D) * 100
-da_per_rmse_3D = (1 - da_rmse_corrected_3D / da_rmse_orig_3D) * 100
+    # --- Plot maps --- #
+    # Orig. precipitation
+    fig = plt.figure(figsize=(14, 7))
+    cs = da_rmse_orig.plot(add_colorbar=False, cmap='viridis', vmin=0, vmax=5)
+    cbar = plt.colorbar(cs, extend='max').set_label('RMSE (mm/3hours)', fontsize=20)
+    plt.title('RMSE of original precip., 3 hours\n'
+              'domain median = {:.2f} mm/3hours'.format(
+                  float(da_rmse_orig.median().values)), fontsize=20)
+    fig.savefig(os.path.join(output_subdir_maps, 'rmse.prec_orig.{}.png'.format(freq)), format='png',
+                bbox_inches='tight', pad_inches=0)
+    # Corrected precipitation
+    fig = plt.figure(figsize=(14, 7))
+    cs = da_rmse_corrected.plot(add_colorbar=False, cmap='viridis', vmin=0, vmax=5)
+    cbar = plt.colorbar(cs, extend='max').set_label('RMSE (mm/3hours)', fontsize=20)
+    plt.title('RMSE of corrected precip., 3 hours\n'
+              'domain median = {:.2f} mm/3hours'.format(
+                  float(da_rmse_corrected.median().values)), fontsize=20)
+    fig.savefig(os.path.join(output_subdir_maps, 'rmse.prec_corrected.{}.png'.format(freq)), format='png',
+                bbox_inches='tight', pad_inches=0)
+    # PER
+    fig = plt.figure(figsize=(14, 7))
+    ax = plt.axes(projection=ccrs.PlateCarree())
+    cs = da_per_rmse.where(da_mask==1).plot.pcolormesh(
+            'lon', 'lat', ax=ax,
+            add_colorbar=False,
+            add_labels=False,
+            cmap='RdBu',
+            vmin=-20, vmax=20,
+            transform=ccrs.PlateCarree())
+    plt.text(0.03, 0.13,
+            '{:.1f}%'.format(
+                da_per_rmse.where(da_mask==1).median().values),
+             horizontalalignment='left',
+             verticalalignment='top',
+             transform=ax.transAxes, fontsize=40)
+    fig.savefig(os.path.join(output_subdir_maps, 'per.rmse.{}.png'.format(freq)), format='png',
+                bbox_inches='tight', pad_inches=0)
 
-
-# --- Plot maps - 3 hourly --- #
-# Orig. precipitation
-fig = plt.figure(figsize=(14, 7))
-cs = da_rmse_orig_3H.plot(add_colorbar=False, cmap='viridis', vmin=0, vmax=5)
-cbar = plt.colorbar(cs, extend='max').set_label('RMSE (mm/3hours)', fontsize=20)
-plt.title('RMSE of original precip., 3 hours\n'
-          'domain median = {:.2f} mm/3hours'.format(
-              float(da_rmse_orig_3H.median().values)), fontsize=20)
-fig.savefig(os.path.join(output_subdir_maps, 'rmse.prec_orig.3H.png'), format='png',
+# --- Plot colorbar --- #
+fig = plt.figure(figsize=(12, 6))
+ax = plt.axes(projection=ccrs.PlateCarree())
+cs = da_per_rmse.where(da_mask==1).plot.pcolormesh(
+    'lon', 'lat', ax=ax,
+    add_colorbar=False,
+    add_labels=False,
+    cmap='RdBu',
+    vmin=-20, vmax=20,
+    transform=ccrs.PlateCarree())
+cbar = plt.colorbar(cs, extend='both', orientation='horizontal')
+cbar.set_label('Percent error reduction (%)', fontsize=28)
+for t in cbar.ax.get_xticklabels():
+    t.set_fontsize(28)
+fig.savefig(os.path.join(output_subdir_maps,
+                         'per.colorbar.png'),
+            format='png',
             bbox_inches='tight', pad_inches=0)
 
-# Corrected precipitation
-fig = plt.figure(figsize=(14, 7))
-cs = da_rmse_corrected_3H.plot(add_colorbar=False, cmap='viridis', vmin=0, vmax=5)
-cbar = plt.colorbar(cs, extend='max').set_label('RMSE (mm/3hours)', fontsize=20)
-plt.title('RMSE of corrected precip., 3 hours\n'
-          'domain median = {:.2f} mm/3hours'.format(
-              float(da_rmse_corrected_3H.median().values)), fontsize=20)
-fig.savefig(os.path.join(output_subdir_maps, 'rmse.prec_corrected.3H.png'), format='png',
-            bbox_inches='tight', pad_inches=0)
-
-# PER
-fig = plt.figure(figsize=(14, 7))
-cs = da_per_rmse_3H.plot(
-    add_colorbar=False, cmap='bwr_r', vmin=-20, vmax=20)
-cbar = plt.colorbar(cs, extend='both').set_label('Precent error reduction (%)', fontsize=20)
-plt.title('Percent error reduction (PER) of rmse, 3H\n'
-          'domain median = {:.1f}%'.format(da_per_rmse_3H.median().values),
-          fontsize=20)
-fig.savefig(os.path.join(output_subdir_maps, 'per.rmse.3H.png'), format='png',
-            bbox_inches='tight', pad_inches=0)
-
-
-# --- Plot maps - 1 day --- #
-# Orig. precipitation
-fig = plt.figure(figsize=(14, 7))
-cs = da_rmse_orig_1D.plot(add_colorbar=False, cmap='viridis', vmin=0, vmax=5)
-cbar = plt.colorbar(cs, extend='max').set_label('RMSE (mm/day)', fontsize=20)
-plt.title('RMSE of original precip., 1 day\n'
-          'domain median = {:.2f} mm/day'.format(
-              float(da_rmse_orig_1D.median().values)), fontsize=20)
-fig.savefig(os.path.join(output_subdir_maps, 'rmse.prec_orig.1D.png'), format='png',
-            bbox_inches='tight', pad_inches=0)
-
-# Corrected precipitation
-fig = plt.figure(figsize=(14, 7))
-cs = da_rmse_corrected_1D.plot(add_colorbar=False, cmap='viridis', vmin=0, vmax=5)
-cbar = plt.colorbar(cs, extend='max').set_label('RMSE (mm/day)', fontsize=20)
-plt.title('RMSE of corrected precip., 1 day\n'
-          'domain median = {:.2f} mm/day'.format(
-              float(da_rmse_corrected_1D.median().values)), fontsize=20)
-fig.savefig(os.path.join(output_subdir_maps, 'rmse.prec_corrected.1D.png'), format='png',
-            bbox_inches='tight', pad_inches=0)
-
-# PER
-fig = plt.figure(figsize=(14, 7))
-cs = da_per_rmse_1D.plot(
-    add_colorbar=False, cmap='bwr_r', vmin=-20, vmax=20)
-cbar = plt.colorbar(cs, extend='both').set_label('Precent error reduction (%)', fontsize=20)
-plt.title('Percent error reduction (PER) of rmse, 1 day\n'
-          'domain median = {:.1f}%'.format(da_per_rmse_1D.median().values),
-          fontsize=20)
-fig.savefig(os.path.join(output_subdir_maps, 'per.rmse.1D.png'), format='png',
-            bbox_inches='tight', pad_inches=0)
-
-# --- Plot maps - 3 days --- #
-# Orig. precipitation
-fig = plt.figure(figsize=(14, 7))
-cs = da_rmse_orig_3D.plot(add_colorbar=False, cmap='viridis', vmin=0, vmax=10)
-cbar = plt.colorbar(cs, extend='max').set_label('RMSE (mm/3days)', fontsize=20)
-plt.title('RMSE of original precip., 3 days\n'
-          'domain median = {:.2f} mm/3days'.format(
-              float(da_rmse_orig_3D.median().values)), fontsize=20)
-fig.savefig(os.path.join(output_subdir_maps, 'rmse.prec_orig.3D.png'), format='png',
-            bbox_inches='tight', pad_inches=0)
-
-# Corrected precipitation
-fig = plt.figure(figsize=(14, 7))
-cs = da_rmse_corrected_3D.plot(add_colorbar=False, cmap='viridis', vmin=0, vmax=10)
-cbar = plt.colorbar(cs, extend='max').set_label('RMSE (mm/3days)', fontsize=20)
-plt.title('RMSE of corrected precip., 1 day\n'
-          'domain median = {:.2f} mm/3days'.format(
-              float(da_rmse_corrected_3D.median().values)), fontsize=20)
-fig.savefig(os.path.join(output_subdir_maps, 'rmse.prec_corrected.3D.png'), format='png',
-            bbox_inches='tight', pad_inches=0)
-
-# PER
-fig = plt.figure(figsize=(14, 7))
-cs = da_per_rmse_3D.plot(
-    add_colorbar=False, cmap='bwr_r', vmin=-20, vmax=20)
-cbar = plt.colorbar(cs, extend='both').set_label('Precent error reduction (%)', fontsize=20)
-plt.title('Percent error reduction (PER) of rmse, 3 days\n'
-          'domain median = {:.1f}%'.format(da_per_rmse_3D.median().values),
-          fontsize=20)
-fig.savefig(os.path.join(output_subdir_maps, 'per.rmse.3D.png'), format='png',
-            bbox_inches='tight', pad_inches=0)
 
 # ============================================================ #
 # Plot precipitation RMSE_log maps
@@ -632,136 +579,77 @@ fig.savefig(os.path.join(output_subdir_maps, 'per.rmseLog.3D.png'), format='png'
 # ============================================================ #
 print('Plotting corr coef...')
 # --- Calculate corrcoef --- #
-# 3H
-out_nc = os.path.join(output_subdir_data, 'corrcoef.orig.prec.3H.nc')
-da_corrcoef_orig_3H = calculate_corrcoef_prec(
-    out_nc, da_prec_orig, da_prec_truth,
-    agg_freq='3H', log=False).where(da_mask)
-out_nc = os.path.join(output_subdir_data, 'corrcoef.corrected.prec.3H.nc')
-da_corrcoef_corrected_3H = calculate_corrcoef_prec(
-    out_nc, da_prec_corrected, da_prec_truth,
-    agg_freq='3H', log=False).where(da_mask)
-# 1D
-out_nc = os.path.join(output_subdir_data, 'corrcoef.orig.prec.1D.nc')
-da_corrcoef_orig_1D = calculate_corrcoef_prec(
-    out_nc, da_prec_orig, da_prec_truth,
-    agg_freq='1D', log=False).where(da_mask)
-out_nc = os.path.join(output_subdir_data, 'corrcoef.corrected.prec.1D.nc')
-da_corrcoef_corrected_1D = calculate_corrcoef_prec(
-    out_nc, da_prec_corrected, da_prec_truth,
-    agg_freq='1D', log=False).where(da_mask)
-# 3D
-out_nc = os.path.join(output_subdir_data, 'corrcoef.orig.prec.3D.nc')
-da_corrcoef_orig_3D = calculate_corrcoef_prec(
-    out_nc, da_prec_orig, da_prec_truth,
-    agg_freq='3D', log=False).where(da_mask)
-out_nc = os.path.join(output_subdir_data, 'corrcoef.corrected.prec.3D.nc')
-da_corrcoef_corrected_3D = calculate_corrcoef_prec(
-    out_nc, da_prec_corrected, da_prec_truth,
-    agg_freq='3D', log=False).where(da_mask)
+for freq in list_freq:
+    # Calculate orig. corrcoef
+    out_nc = os.path.join(output_subdir_data, 'corrcoef.orig.prec.{}.nc'.format(freq))
+    da_corrcoef_orig = calculate_corrcoef_prec(
+        out_nc, da_prec_orig, da_prec_truth,
+        agg_freq=freq, log=False).where(da_mask)
+    # Calculate corrected corrcoef
+    out_nc = os.path.join(output_subdir_data, 'corrcoef.corrected.prec.{}.nc'.format(freq))
+    da_corrcoef_corrected = calculate_corrcoef_prec(
+        out_nc, da_prec_corrected, da_prec_truth,
+        agg_freq=freq, log=False).where(da_mask)
+    # --- Calculate absolute improvement of corrcoef --- #
+    da_corrcoef_improv = da_corrcoef_corrected - da_corrcoef_orig
 
-# --- Calculate absolute improvement of corrcoef --- #
-da_corrcoef_improv_3H = da_corrcoef_corrected_3H - da_corrcoef_orig_3H
-da_corrcoef_improv_1D = da_corrcoef_corrected_1D - da_corrcoef_orig_1D
-da_corrcoef_improv_3D = da_corrcoef_corrected_3D - da_corrcoef_orig_3D
+    # --- Plot maps - 3 hourly --- #
+    # Orig. precipitation
+    fig = plt.figure(figsize=(14, 7))
+    cs = da_corrcoef_orig.plot(add_colorbar=False, cmap='viridis', vmin=0, vmax=1)
+    cbar = plt.colorbar(cs, extend='max').set_label('Correlation coefficent', fontsize=20)
+    plt.title('corrcoef of original precip., {}\n'
+              'domain median = {:.2f}'.format(
+                  freq,
+                  float(da_corrcoef_orig.median().values)), fontsize=20)
+    fig.savefig(os.path.join(output_subdir_maps, 'corrcoef.prec_orig.{}.png'.format(freq)), format='png',
+                bbox_inches='tight', pad_inches=0)
+    # Corrected precipitation
+    fig = plt.figure(figsize=(14, 7))
+    cs = da_corrcoef_corrected.plot(add_colorbar=False, cmap='viridis', vmin=0, vmax=1)
+    cbar = plt.colorbar(cs, extend='max').set_label('Correlation coefficient', fontsize=20)
+    plt.title('corrcoef of corrected precip., {}\n'
+              'domain median = {:.2f}'.format(
+                  freq,
+                  float(da_corrcoef_corrected.median().values)), fontsize=20)
+    fig.savefig(os.path.join(output_subdir_maps, 'corrcoef.prec_corrected.{}.png'.format(freq)), format='png',
+                bbox_inches='tight', pad_inches=0)
+    # Diff
+    fig = plt.figure(figsize=(14, 7))
+    ax = plt.axes(projection=ccrs.PlateCarree())
+    cs = da_corrcoef_improv.where(da_mask==1).plot.pcolormesh(
+            'lon', 'lat', ax=ax,
+            add_colorbar=False,
+            add_labels=False,
+            cmap='RdBu',
+            vmin=-0.1, vmax=0.1,
+            transform=ccrs.PlateCarree())
+    plt.text(0.03, 0.13,
+            '{:.2f}'.format(
+                da_corrcoef_improv.where(da_mask==1).median().values),
+            horizontalalignment='left',
+            verticalalignment='top',
+            transform=ax.transAxes, fontsize=40)
+    fig.savefig(os.path.join(output_subdir_maps, 'corrcoef.improv.{}.png'.format(freq)), format='png',
+                bbox_inches='tight', pad_inches=0)
 
-
-# --- Plot maps - 3 hourly --- #
-# Orig. precipitation
-fig = plt.figure(figsize=(14, 7))
-cs = da_corrcoef_orig_3H.plot(add_colorbar=False, cmap='viridis', vmin=0, vmax=5)
-cbar = plt.colorbar(cs, extend='max').set_label('Correlation coefficent', fontsize=20)
-plt.title('corrcoef of original precip., 3 hours\n'
-          'domain median = {:.2f}'.format(
-              float(da_corrcoef_orig_3H.median().values)), fontsize=20)
-fig.savefig(os.path.join(output_subdir_maps, 'corrcoef.prec_orig.3H.png'), format='png',
-            bbox_inches='tight', pad_inches=0)
-
-# Corrected precipitation
-fig = plt.figure(figsize=(14, 7))
-cs = da_corrcoef_corrected_3H.plot(add_colorbar=False, cmap='viridis', vmin=0, vmax=5)
-cbar = plt.colorbar(cs, extend='max').set_label('Correlation coefficient', fontsize=20)
-plt.title('corrcoef of corrected precip., 3 hours\n'
-          'domain median = {:.2f}'.format(
-              float(da_corrcoef_corrected_3H.median().values)), fontsize=20)
-fig.savefig(os.path.join(output_subdir_maps, 'corrcoef.prec_corrected.3H.png'), format='png',
-            bbox_inches='tight', pad_inches=0)
-
-# Diff
-fig = plt.figure(figsize=(14, 7))
-cs = da_corrcoef_improv_3H.plot(
-    add_colorbar=False, cmap='bwr_r', vmin=-0.1, vmax=0.1)
-cbar = plt.colorbar(cs, extend='both').set_label('Diff. correlation coefficient', fontsize=20)
-plt.title('Improvement of corrcoef, 3H\n'
-          'domain median = {:.2f}'.format(da_corrcoef_improv_3H.median().values),
-          fontsize=20)
-fig.savefig(os.path.join(output_subdir_maps, 'corrcoef.improv.3H.png'), format='png',
-            bbox_inches='tight', pad_inches=0)
-
-
-# --- Plot maps - 1 day --- #
-# Orig. precipitation
-fig = plt.figure(figsize=(14, 7))
-cs = da_corrcoef_orig_1D.plot(add_colorbar=False, cmap='viridis', vmin=0, vmax=5)
-cbar = plt.colorbar(cs, extend='max').set_label('Correlation coefficent', fontsize=20)
-plt.title('corrcoef of original precip., 1 day\n'
-          'domain median = {:.2f}'.format(
-              float(da_corrcoef_orig_1D.median().values)), fontsize=20)
-fig.savefig(os.path.join(output_subdir_maps, 'corrcoef.prec_orig.1D.png'), format='png',
-            bbox_inches='tight', pad_inches=0)
-
-# Corrected precipitation
-fig = plt.figure(figsize=(14, 7))
-cs = da_corrcoef_corrected_1D.plot(add_colorbar=False, cmap='viridis', vmin=0, vmax=5)
-cbar = plt.colorbar(cs, extend='max').set_label('Correlation coefficient', fontsize=20)
-plt.title('corrcoef of corrected precip., 1 day\n'
-          'domain median = {:.2f}'.format(
-              float(da_corrcoef_corrected_1D.median().values)), fontsize=20)
-fig.savefig(os.path.join(output_subdir_maps, 'corrcoef.prec_corrected.1D.png'), format='png',
-            bbox_inches='tight', pad_inches=0)
-
-# Diff
-fig = plt.figure(figsize=(14, 7))
-cs = da_corrcoef_improv_1D.plot(
-    add_colorbar=False, cmap='bwr_r', vmin=-0.1, vmax=0.1)
-cbar = plt.colorbar(cs, extend='both').set_label('Diff. correlation coefficient', fontsize=20)
-plt.title('Improvement of corrcoef, 1 day\n'
-          'domain median = {:.2f}'.format(da_corrcoef_improv_1D.median().values),
-          fontsize=20)
-fig.savefig(os.path.join(output_subdir_maps, 'corrcoef.improv.1D.png'), format='png',
-            bbox_inches='tight', pad_inches=0)
-
-
-# --- Plot maps - 3 days --- #
-# Orig. precipitation
-fig = plt.figure(figsize=(14, 7))
-cs = da_corrcoef_orig_3D.plot(add_colorbar=False, cmap='viridis', vmin=0, vmax=5)
-cbar = plt.colorbar(cs, extend='max').set_label('Correlation coefficent', fontsize=20)
-plt.title('corrcoef of original precip., 3 days\n'
-          'domain median = {:.2f}'.format(
-              float(da_corrcoef_orig_3D.median().values)), fontsize=20)
-fig.savefig(os.path.join(output_subdir_maps, 'corrcoef.prec_orig.3D.png'), format='png',
-            bbox_inches='tight', pad_inches=0)
-
-# Corrected precipitation
-fig = plt.figure(figsize=(14, 7))
-cs = da_corrcoef_corrected_3D.plot(add_colorbar=False, cmap='viridis', vmin=0, vmax=5)
-cbar = plt.colorbar(cs, extend='max').set_label('Correlation coefficient', fontsize=20)
-plt.title('corrcoef of corrected precip., 3 days\n'
-          'domain median = {:.2f}'.format(
-              float(da_corrcoef_corrected_3D.median().values)), fontsize=20)
-fig.savefig(os.path.join(output_subdir_maps, 'corrcoef.prec_corrected.3D.png'), format='png',
-            bbox_inches='tight', pad_inches=0)
-
-# Diff
-fig = plt.figure(figsize=(14, 7))
-cs = da_corrcoef_improv_3D.plot(
-    add_colorbar=False, cmap='bwr_r', vmin=-0.1, vmax=0.1)
-cbar = plt.colorbar(cs, extend='both').set_label('Diff. correlation coefficient', fontsize=20)
-plt.title('Improvement of corrcoef, 3 days\n'
-          'domain median = {:.2f}'.format(da_corrcoef_improv_3D.median().values),
-          fontsize=20)
-fig.savefig(os.path.join(output_subdir_maps, 'corrcoef.improv.3D.png'), format='png',
+# --- Plot colorbar --- #
+fig = plt.figure(figsize=(12, 6))
+ax = plt.axes(projection=ccrs.PlateCarree())
+cs = da_corrcoef_improv.where(da_mask==1).plot.pcolormesh(
+    'lon', 'lat', ax=ax,
+    add_colorbar=False,
+    add_labels=False,
+    cmap='RdBu',
+    vmin=-0.1, vmax=0.1,
+    transform=ccrs.PlateCarree())
+cbar = plt.colorbar(cs, extend='both', orientation='horizontal')
+cbar.set_label('Correlation coefficient improvement (-)', fontsize=20)
+for t in cbar.ax.get_xticklabels():
+    t.set_fontsize(16)
+fig.savefig(os.path.join(output_subdir_maps,
+                         'corrcoef.improv.colorbar.png'),
+            format='png',
             bbox_inches='tight', pad_inches=0)
 
 

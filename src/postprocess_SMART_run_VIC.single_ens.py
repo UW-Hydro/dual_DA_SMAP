@@ -45,7 +45,7 @@ vic_exe = VIC(os.path.join(cfg['CONTROL']['root_dir'], cfg['RUN_VIC']['vic_exe']
 # ============================================================ #
 # Check whether REMAP section is in the cfg file
 # ============================================================ #
-if 'REMAP' in cfg:
+if 'RUN_VIC' in cfg:
     pass
 else:
     raise ValueError('Must have [REMAP] section in the cfg file to post-regrid'
@@ -76,9 +76,13 @@ elif cfg['RUN_VIC']['smart_output_from'] == 'remap':
     smart_outdir = os.path.join(
         cfg['CONTROL']['root_dir'], cfg['OUTPUT']['output_basedir'], 'post_final_remapped')
 
+if 'run_vic_subdir' in cfg['RUN_VIC']:
+    run_vic_subdir = cfg['RUN_VIC']['run_vic_subdir']
+else:
+    run_vic_subdir = 'run_vic'
 output_basedir = setup_output_dirs(
                          smart_outdir,
-                         mkdirs=['run_vic'])['run_vic']
+                         mkdirs=[run_vic_subdir])[run_vic_subdir]
 
 dirs = setup_output_dirs(output_basedir,
                          mkdirs=['global', 'history', 'forcings',

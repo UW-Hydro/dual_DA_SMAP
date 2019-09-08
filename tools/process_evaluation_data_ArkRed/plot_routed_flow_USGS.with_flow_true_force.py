@@ -54,9 +54,9 @@ end_time = pd.to_datetime(cfg['ROUTE']['end_time'])
 start_year = start_time.year
 end_year = end_time.year
 
-# --- Zero-update --- #
-# Zero-update ensemble nc; "{}" will be replaced by ensemble index
-zero_update_ensemble_basenc = cfg['ROUTE']['zero_update_ensemble_basenc']
+## --- Zero-update --- #
+## Zero-update ensemble nc; "{}" will be replaced by ensemble index
+#zero_update_ensemble_basenc = cfg['ROUTE']['zero_update_ensemble_basenc']
 
 # --- Domain file ("mask" and "area" will be used) --- #
 domain_nc = cfg['DOMAIN']['domain_nc']
@@ -119,15 +119,15 @@ for i in range(N):
 # Concat all ensemble members
 da_ensemble = xr.concat(list_da_ensemble, dim='N')
 
-# --- Load zero-update data --- #
-list_da_ensemble = []
-for i in range(N):
-    filename = zero_update_ensemble_basenc.format(i+1)
-    df, dict_outlet = read_RVIC_output(filename)
-    da = xr.DataArray(df, dims=['time', 'site'])
-    list_da_ensemble.append(da)
-# Concat all ensemble members
-da_zero_update_ensemble = xr.concat(list_da_ensemble, dim='N')
+## --- Load zero-update data --- #
+#list_da_ensemble = []
+#for i in range(N):
+#    filename = zero_update_ensemble_basenc.format(i+1)
+#    df, dict_outlet = read_RVIC_output(filename)
+#    da = xr.DataArray(df, dims=['time', 'site'])
+#    list_da_ensemble.append(da)
+## Concat all ensemble members
+#da_zero_update_ensemble = xr.concat(list_da_ensemble, dim='N')
 
 # --- Load flow forced by true prec --- #
 df_true_force, dict_outlet = read_RVIC_output(flow_true_force_nc)
@@ -135,19 +135,19 @@ df_true_force, dict_outlet = read_RVIC_output(flow_true_force_nc)
 # --- Shift all routed data data to local time --- #
 df_openloop.index = df_openloop.index - pd.DateOffset(hours=time_lag)
 da_ensemble['time'] = pd.to_datetime(da_ensemble['time'].values) - pd.DateOffset(hours=time_lag)
-da_zero_update_ensemble['time'] = \
-    pd.to_datetime(da_zero_update_ensemble['time'].values) - pd.DateOffset(hours=time_lag)
+#da_zero_update_ensemble['time'] = \
+#    pd.to_datetime(da_zero_update_ensemble['time'].values) - pd.DateOffset(hours=time_lag)
 df_true_force.index = df_true_force.index - pd.DateOffset(hours=time_lag)
 
 # --- Average all routed data to daily (of local time) --- #
 df_openloop_daily = df_openloop.resample('1D', how='mean')
 da_ensemble_daily = da_ensemble.resample('1D', dim='time', how='mean')
-da_zero_update_ensemble_daily = da_zero_update_ensemble.resample('1D', dim='time', how='mean')
+#da_zero_update_ensemble_daily = da_zero_update_ensemble.resample('1D', dim='time', how='mean')
 df_true_force_daily = df_true_force.resample('1D', how='mean')
 
-# --- Calculate ensemble mean --- #
-da_ensMean_daily = da_ensemble_daily.mean(dim='N')
-da_zero_update_ensMean_daily = da_zero_update_ensemble_daily.mean(dim='N')
+# --- Calculate ensemble median --- #
+da_ensMean_daily = da_ensemble_daily.median(dim='N')
+#da_zero_update_ensMean_daily = da_zero_update_ensemble_daily.mean(dim='N')
 
 
 # ===================================================== #
@@ -239,8 +239,8 @@ for site in dict_sites.keys():
     ts_ensMean = da_ensMean_daily.sel(site=site).to_series()[ts_usgs.index].dropna()
     ensemble_daily = da_ensemble_daily.sel(
         site=site, time=ts_usgs.index).transpose('time', 'N').values
-    zero_update_ensemble_daily = da_zero_update_ensemble_daily.sel(
-        site=site, time=ts_usgs.index).transpose('time', 'N').values
+#    zero_update_ensemble_daily = da_zero_update_ensemble_daily.sel(
+#        site=site, time=ts_usgs.index).transpose('time', 'N').values
     # PER(RMSE)
     rmse_openloop = rmse(ts_openloop, ts_usgs)
     rmse_ensMean = rmse(ts_ensMean, ts_usgs)
@@ -253,10 +253,10 @@ for site in dict_sites.keys():
     rmseLog_true_force = rmse(np.log(ts_true_force+1), np.log(ts_usgs+1))
     per_logRMSE = (1 - rmseLog_ensMean / rmseLog_openloop) * 100
     per_logRMSE_true_force = (1 - rmseLog_true_force / rmseLog_openloop) * 100
-    # PSR
-    crps_ens = crps(ts_usgs, ensemble_daily)
-    crps_zero_update = crps(ts_usgs, zero_update_ensemble_daily)
-    psr = (1 - crps_ens / crps_zero_update) * 100
+#    # PSR
+#    crps_ens = crps(ts_usgs, ensemble_daily)
+#    crps_zero_update = crps(ts_usgs, zero_update_ensemble_daily)
+#    psr = (1 - crps_ens / crps_zero_update) * 100
     # Normalized ensemble skill (NENSK)
     nensk_ens = nensk(ts_usgs, ensemble_daily)
     # KGE improvement
@@ -292,13 +292,14 @@ for site in dict_sites.keys():
              horizontalalignment='left',
              verticalalignment='top', transform=ax.transAxes, fontsize=16)
     plt.text(0.7, 0.84,
-             "all-time KGE_improve = {:.2f}\n".format(kge_improv),
+             "all-time KGE_improve = {:.2f}\n"
+             "         (KGE_openloop = {:.2f})".format(kge_improv, kge_openloop),
              horizontalalignment='left',
              verticalalignment='top', transform=ax.transAxes, fontsize=16)
-    plt.text(0.7, 0.78,
-             "all-time PSR = {:.1f}%\n".format(psr),
-             horizontalalignment='left',
-             verticalalignment='top', transform=ax.transAxes, fontsize=16)
+#    plt.text(0.7, 0.78,
+#             "all-time PSR = {:.1f}%\n".format(psr),
+#             horizontalalignment='left',
+#             verticalalignment='top', transform=ax.transAxes, fontsize=16)
     plt.text(0.7, 0.72,
              "all-time NENSK = {:.2f}\n".format(nensk_ens),
              horizontalalignment='left',
@@ -324,34 +325,34 @@ for site in dict_sites.keys():
     fig.savefig(os.path.join(output_dir, 'flow_daily.improve.with_true_force.zoomin.{}.png'.format(site)),
                 format='png', bbox_inches='tight', pad_inches=0)
     
-    # --- Interactive --- #
-    output_file(os.path.join(output_dir, 'flow_daily.improve.with_true_force.{}.html'.format(site)))
-    p = figure(title=('Streamflow at {}\n'
-                      'PER(RMSE)={:.1f}%, PER(RMSElog)={:.1f}%, KGE_improve={:.2f}, '
-                      'PSR = {:.1f}%, NENSK={:.2f}').format(
-                    site, per_RMSE, per_logRMSE, kge_improv, psr, nensk_ens),
-               x_axis_label="Time", y_axis_label="Streamflow (thousand csv)",
-               x_axis_type='datetime', width=1000, height=500)
-    # plot ensemble
-    for i in range(N):
-        label = 'Ensemble updated' if i == 0 else '_nolegend_'
-        ts = da_ensemble_daily.sel(N=i, site=site).to_series() / 1000
-        p.line(ts.index, ts.values, color="blue", line_dash="solid",
-               alpha=0.2, line_width=2, legend=label)
-    p.line(ts_ensMean.index, (ts_ensMean/1000).values, color="blue", line_dash="solid",
-           line_width=2, legend=label)
-    # plot USGS
-    p.line(ts_usgs.index, (ts_usgs/1000).values, color="black", line_dash="solid",
-           legend="USGS", line_width=2)
-    # plot open-loop
-    p.line(ts_openloop.index, (ts_openloop/1000).values, color="magenta", line_dash="dashed",
-           legend='Open-loop',
-           line_width=2)
-    # plot true force
-    p.line(ts_true_force.index, (ts_true_force/1000).values, color="green", line_dash="dashed",
-           legend='Forced by true precip',
-           line_width=2)
-    # Save
-    save(p)
+#    # --- Interactive --- #
+#    output_file(os.path.join(output_dir, 'flow_daily.improve.with_true_force.{}.html'.format(site)))
+#    p = figure(title=('Streamflow at {}\n'
+#                      'PER(RMSE)={:.1f}%, PER(RMSElog)={:.1f}%, KGE_improve={:.2f}, '
+#                      'PSR = {:.1f}%, NENSK={:.2f}').format(
+#                    site, per_RMSE, per_logRMSE, kge_improv, psr, nensk_ens),
+#               x_axis_label="Time", y_axis_label="Streamflow (thousand csv)",
+#               x_axis_type='datetime', width=1000, height=500)
+#    # plot ensemble
+#    for i in range(N):
+#        label = 'Ensemble updated' if i == 0 else '_nolegend_'
+#        ts = da_ensemble_daily.sel(N=i, site=site).to_series() / 1000
+#        p.line(ts.index, ts.values, color="blue", line_dash="solid",
+#               alpha=0.2, line_width=2, legend=label)
+#    p.line(ts_ensMean.index, (ts_ensMean/1000).values, color="blue", line_dash="solid",
+#           line_width=2, legend=label)
+#    # plot USGS
+#    p.line(ts_usgs.index, (ts_usgs/1000).values, color="black", line_dash="solid",
+#           legend="USGS", line_width=2)
+#    # plot open-loop
+#    p.line(ts_openloop.index, (ts_openloop/1000).values, color="magenta", line_dash="dashed",
+#           legend='Open-loop',
+#           line_width=2)
+#    # plot true force
+#    p.line(ts_true_force.index, (ts_true_force/1000).values, color="green", line_dash="dashed",
+#           legend='Forced by true precip',
+#           line_width=2)
+#    # Save
+#    save(p)
 
 
