@@ -250,15 +250,19 @@ int main(int argc,char ** argv) {
     int c = 0;
     do {
       FOUND_BETTER = TRUE;
+      fprintf(fopti, "\nAAAAAAAAAAAAAAA c=%i, N_SET - N_Rmax = %i, N_SET=%i\n", c, N_SET - N_Rmax, N_SET);
       c++;
 
 
       for ( int i = N_SET - N_Rmax; i < N_SET; i++ ) {
+        fprintf(fopti, "BBBBBBBBBBBBBB i=%i\n", i);
         if ( acontext[i].exec_state != amoebadone ) {
+          fprintf(fopti, "11111111111111\n");
           FOUND_BETTER = FALSE;
           amoeba(&acontext[i]);
         } else if ( !acontext[i].FOUND ) {
           /* simplex must be repopulated */
+          fprintf(fopti, "22222222222222\n");
           FOUND_BETTER = FALSE;
           populate_simplex(acontext[i].test_set, ran2seed);
           acontext[i].exec_state = amoebauninitialized;
@@ -405,6 +409,7 @@ switch(a->exec_state)  /* mwahahahaha. */
 case amoebadone: assert(0);  /* ruh-roh */
 
 case amoebauninitialized:
+  fprintf(fopti, "SSSSSSSSSSSSSSSSSSSSSSSS amoebauninitialized\n");
   
   a->FOUND  = FALSE;
 
@@ -425,9 +430,11 @@ case amoebauninitialized:
 
   a->exec_state = amoeba1;
 case amoeba1: if (!check_model(a->dispatch_state)) return;  /* all of these should normally be returning on fall-through */
+  fprintf(fopti, "SSSSSSSSSSSSSSSSSSSSSSSS amoeba1, check_model=%d\n", check_model(a->dispatch_state));
   retrieve_model(a->dispatch_state);
 
   if ( less_than_or_equal(a->r.f,a->test_set[0].f,N_TEST_FUNCS) ) {
+    fprintf(fopti, "I got here!!! Point 1\n");
     /** Solution better than best point, so try additional extrapolation by a factor of GAMMA **/
     for ( int j = 0; j < N_PARAM; j++ ) a->rr.p[j] = GAMMA*a->r.p[j] + (1.0-GAMMA)*a->pbar[j];
 
@@ -436,6 +443,7 @@ case amoeba1: if (!check_model(a->dispatch_state)) return;  /* all of these shou
 
     a->exec_state = amoeba2;
 case amoeba2: if (!check_model(a->dispatch_state)) return;
+  fprintf(fopti, "SSSSSSSSSSSSSSSSSSSSSSSS amoeba2\n");
     retrieve_model(a->dispatch_state);
 
     if ( less_than(a->rr.f,a->test_set[0].f,N_TEST_FUNCS) ) {
@@ -448,6 +456,7 @@ case amoeba2: if (!check_model(a->dispatch_state)) return;
       a->FOUND = TRUE;
     }
   } else if (less_than_or_equal(a->test_set[N_PARAM-1].f,a->r.f,N_TEST_FUNCS) ) {
+    fprintf(fopti, "I got here!!! Point 2\n");
     if ( less_than(a->r.f,a->parent.f,N_TEST_FUNCS) ) {
       /* Solution better than parent, possibly as good as 2nd highest point */
       a->spawn = a->r;
@@ -460,6 +469,7 @@ case amoeba2: if (!check_model(a->dispatch_state)) return;
     a->dispatch_state = dispatch_model( a->rr.p, a->rr.f, &a->rr.soln_num );
     a->exec_state = amoeba3;
 case amoeba3: if (!check_model(a->dispatch_state)) return;
+  fprintf(fopti, "SSSSSSSSSSSSSSSSSSSSSSSS amoeba3\n");
     retrieve_model(a->dispatch_state);
     
     if ( less_than(a->rr.f,a->parent.f,N_TEST_FUNCS) ) { /* Contraction yielded smaller point? */
@@ -477,6 +487,7 @@ case amoeba3: if (!check_model(a->dispatch_state)) return;
         a->dispatch_state = dispatch_model( a->rrr.p, a->rrr.f, &a->rrr.soln_num);
         a->exec_state = amoeba4;
 case amoeba4: if (!check_model(a->dispatch_state)) return;
+  fprintf(fopti, "SSSSSSSSSSSSSSSSSSSSSSSS amoeba4\n");
         retrieve_model(a->dispatch_state);
 
         /* IMPORTANT intentionally changing spawn not parent here and using comparison to parent, as parent is retained across repopulation!!  BUG #0009:  this used to compare to parent rather than the retained new point, thus unconditionally clobbering, exactly equivalent to running the loop backwards and short-circuiting; this does not make sense, so comparing to retained spawn now */
@@ -489,6 +500,7 @@ case amoeba4: if (!check_model(a->dispatch_state)) return;
       }
     }
   } else {
+    fprintf(fopti, "I got here!!! Point 3\n");
     /* Reflection yielded a lower high point */
     a->spawn = a->r;
     a->FOUND = TRUE;
@@ -521,6 +533,7 @@ void *dispatch_model( const float *p,
   DISPATCH_MODEL_STATE * state;
   //char cmdstr[4096], cmdstr_cur[4096];
   char cmdstr_cur[4096];
+
   state = malloc(sizeof(*state));
   state->statsfilename = malloc(4096);
   state->p = p;  /* don't need to copy this, as calling code isn't doing any fancy
@@ -592,6 +605,7 @@ void *dispatch_model( const float *p,
     //    exit(10);   // will exit after first run of model
 
   }
+
   return state;
 }
 

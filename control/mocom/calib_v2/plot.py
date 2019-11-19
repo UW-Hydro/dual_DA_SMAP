@@ -63,21 +63,24 @@ ts_routed_5D = ts_routed.resample('5D', how='sum')
 ts_usgs_5D = ts_usgs.resample('5D', how='sum')
 kge_5D = kge(ts_routed_5D, ts_usgs_5D)
 
-# --- Plot time series --- #
-fig = plt.figure(figsize=(20, 6))
-# Routed
-(ts_routed / 1000).plot(
-    color='magenta', style='-',
-    label='Open-loop, KGE_daily={:.2f} KGE_5D={:.2f}'.format(kge_daily, kge_5D))
-# USGS
-(ts_usgs / 1000).plot(color='black', label='USGS')
-# Make plot better
-plt.ylabel('Streamflow (thousand cfs)', fontsize=16)
-plt.legend(fontsize=16)
-plt.title(site, fontsize=16)
-# Save to file
-fig.savefig(os.path.join(out_plot_dir, '{}.{}.flow_daily.png'.format(site, soln_num)),
-            format='png', bbox_inches='tight', pad_inches=0)
+# --- Plet time series - both for 2016 and 2017 summer --- #
+for year in [2016, 2017]:
+    fig = plt.figure(figsize=(20, 6))
+    plot_start_time = '{}-03-01'.format(year)
+    plot_end_time = '{}-09-30'.format(year)
+    # Routed
+    (ts_routed / 1000).truncate(before=plot_start_time, after=plot_end_time).plot(
+        color='magenta', style='-',
+        label='Open-loop, KGE_daily={:.2f} KGE_5D={:.2f}'.format(kge_daily, kge_5D))
+    # USGS
+    (ts_usgs / 1000).truncate(before=plot_start_time, after=plot_end_time).plot(color='black', label='USGS')
+    # Make plot better
+    plt.ylabel('Streamflow (thousand cfs)', fontsize=16)
+    plt.legend(fontsize=16)
+    plt.title(site, fontsize=16)
+    # Save to file
+    fig.savefig(os.path.join(out_plot_dir, '{}.{}.flow_daily.{}.png'.format(site, soln_num, year)),
+                format='png', bbox_inches='tight', pad_inches=0)
 
 
 

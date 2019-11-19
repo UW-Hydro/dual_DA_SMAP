@@ -1,4 +1,4 @@
-function [sum_rain_corrected, sum_rain_corrected_ens, optimized_fraction] = correction(increment_sum,increment_sum_hold, increment_sum_ens, sum_rain_sp,sum_rain_indep,lambda_flag, filter_flag, NUMEN, rain_perturbed_sum_ens, lambda_tuning_target, correct_magnitude_only)
+function [sum_rain_corrected, sum_rain_corrected_ens, optimized_fraction] = correction(increment_sum,increment_sum_hold, increment_sum_ens, sum_rain_sp,sum_rain_indep,lambda_flag, filter_flag, NUMEN, rain_perturbed_sum_ens, lambda_tuning_target, correct_magnitude_only, correct_magnitude_only_threshold)
 
 % Initialize corrected rainfall (sum in each window) (Yixin)
 d = size(sum_rain_sp);
@@ -14,11 +14,11 @@ sum_rain_corrected_ens(1:ist, 1:NUMEN) = 0;
 increment_sum_hold(increment_sum_hold < -500) = 0;
 %%%%%%%%%%%%% HACK END %%%%%%%%%%%
 
-% Whether correct rainfall only when orig_rain > 0
+% Whether correct rainfall only when orig_rain > threshold
 if (correct_magnitude_only == 1)
-    increment_sum_hold(sum_rain_sp==0) = 0;
-    increment_sum(sum_rain_sp==0) = 0;
-    increment_sum_ens(sum_rain_sp==0, :) = 0;
+    increment_sum_hold(sum_rain_sp<=correct_magnitude_only_threshold) = 0;
+    increment_sum(sum_rain_sp<=correct_magnitude_only_threshold) = 0;
+    increment_sum_ens(sum_rain_sp<=correct_magnitude_only_threshold, :) = 0;
 end
 
 increment_sum_hold_pr = increment_sum_hold(sum_rain_indep >= 0);

@@ -293,6 +293,7 @@ with open(os.path.join(out_dir, 'run.m'), 'w') as f:
     f.write('    \'if_rescale\', \'{}\', ...\n'.format(cfg['SMART_RUN']['if_rescale']))
     f.write('    \'lambda_tuning_target\', \'{}\', ...\n'.format(cfg['SMART_RUN']['lambda_tuning_target']))
     f.write('    \'correct_magnitude_only\', \'{}\', ...\n'.format(cfg['SMART_RUN']['correct_magnitude_only']))
+    f.write('    \'correct_magnitude_only_threshold\', \'{}\', ...\n'.format(cfg['SMART_RUN']['correct_magnitude_only_threshold']))
     f.write('    \'sep_sm_orbit\', \'{}\')\n'.format(cfg['SMART_RUN']['sep_sm_orbit']))
 
 

@@ -17,6 +17,7 @@ run_ident=`grep "set run_ident" $run_csh | awk '{print $4}'`  # ID
 
 log=`grep "set optim_log" $run_csh | awk '{print $4}'`
 log="${log/\$bas/$bas}"
+log="${log/\$\{bas\}/$bas}"
 log=${log/\$run_ident/$run_ident}
 
 num_sets=`grep "set num_sets" $run_csh | awk '{print $4}'`  # Total number of param sets in the populatin
@@ -25,9 +26,12 @@ num_param=`grep "set num_param" $run_csh | awk '{print $4}'`  # Number of parame
 
 stor_dir=`grep "set stor_dir" $run_csh | awk '{print $4}'`  # MOCOM output basedir
 stor_dir="${stor_dir/\$bas/$bas}"
+stor_dir="${stor_dir/\$\{bas\}/$bas}"
 
 optimize_cfg=`grep "set optimize_cfg" $run_csh | awk '{print $4}'`  # MOCOM output basedir
 optimize_cfg="${optimize_cfg/\$bas/$bas}"
+optimize_cfg="${optimize_cfg/\$\{bas\}/$bas}"
+
 
 # ======================================================== #
 # Set up output dir

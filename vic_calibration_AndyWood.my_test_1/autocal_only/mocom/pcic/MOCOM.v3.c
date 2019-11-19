@@ -145,7 +145,7 @@ int main(int argc,char ** argv) {
             argv[2],argv[3],argv[4],argv[5],argv[6],argv[7],argv[8],argv[9],argv[10]) ;
 
   /**  Seed the random number generator  **/
-  tmptime     = time(&currtime) * -1;
+  tmptime     = 1001; //time(&currtime) * -1;
   ran2seed    = &tmptime;
   ran2(ran2seed);
   ran2seed[0] = 1;  /* huh? */
@@ -247,15 +247,24 @@ int main(int argc,char ** argv) {
     /************************
     *  Main evolution loop  *
     ************************/
+    int c = 0;
     do {
       FOUND_BETTER = TRUE;
+      fprintf(fopti, "\nAAAAAAAAAAAAAAA c=%i, N_SET - N_Rmax = %i, N_SET=%i\n", c, N_SET - N_Rmax, N_SET);
+      c++;
+
 
       for ( int i = N_SET - N_Rmax; i < N_SET; i++ ) {
+        fprintf(fopti, "BBBBBBBBBBBBBB i=%i\n", i);
+        fprintf(fopti, "------------- acontext[i].exec_state = %d, acontext[i].FOUND = %d\n", acontext[i].exec_state, acontext[i].FOUND);
         if ( acontext[i].exec_state != amoebadone ) {
+          fprintf(fopti, "11111111111111\n");
           FOUND_BETTER = FALSE;
+          fprintf(fopti, "dispatch_state soln_num = %d\n", &((&acontext[i])->dispatch_state)->soln_num);
           amoeba(&acontext[i]);
         } else if ( !acontext[i].FOUND ) {
           /* simplex must be repopulated */
+          fprintf(fopti, "22222222222222\n");
           FOUND_BETTER = FALSE;
           populate_simplex(acontext[i].test_set, ran2seed);
           acontext[i].exec_state = amoebauninitialized;
@@ -343,9 +352,18 @@ void random_start_optimization(long *ran2seed)
 
   /*  Randomly generate and dispatch parameter sets  */
   for (int setcnt = 0; setcnt < N_RAND; setcnt++ ) {
-    for (int param = 0; param < N_PARAM; param++ )
-      set[setcnt].p[param] = ( (param_lim[param].max - param_lim[param].min) * ran2(ran2seed) )
-                                   + param_lim[param].min;
+    /* Use the input initial values as the first parameter set */
+    /* This ensures that the initial parameter set is included in the sample */
+    if (setcnt == 0) {
+        for (int param = 0; param < N_PARAM; param++ )
+            set[setcnt].p[param] = param_lim[param].init;
+    }
+    else {
+
+        for (int param = 0; param < N_PARAM; param++ )
+            set[setcnt].p[param] = ( (param_lim[param].max - param_lim[param].min) * ran2(ran2seed) )
+                                       + param_lim[param].min;
+    }
 
     /* next line calls subrt. that executes shell script to run model, route, assess, plot... */
     queue[setcnt] = dispatch_model(set[setcnt].p, set[setcnt].f, &set[setcnt].soln_num); 
@@ -390,8 +408,10 @@ void amoeba ( AMOEBA_CONTEXT * a )
 ***********************************************************************/
 switch(a->exec_state)  /* mwahahahaha. */
 {
-case amoebadone:  assert(0);  /* ruh-roh */
+case amoebadone: assert(0);  /* ruh-roh */
+
 case amoebauninitialized:
+  fprintf(fopti, "SSSSSSSSSSSSSSSSSSSSSSSS amoebauninitialized\n");
   
   a->FOUND  = FALSE;
 
@@ -412,9 +432,14 @@ case amoebauninitialized:
 
   a->exec_state = amoeba1;
 case amoeba1: if (!check_model(a->dispatch_state)) return;  /* all of these should normally be returning on fall-through */
+  fprintf(fopti, "SSSSSSSSSSSSSSSSSSSSSSSS amoeba1, check_model=%d\n", check_model(a->dispatch_state));
   retrieve_model(a->dispatch_state);
+  fprintf(fopti, "============ after retrieve_model, soln_num = %d\n", *(a->dispatch_state->soln_num));
+  fprintf(fopti, "============ before going into if else, functions = %f, %f\n", a->r.f[0], a->r.f[1]);
+  
 
   if ( less_than_or_equal(a->r.f,a->test_set[0].f,N_TEST_FUNCS) ) {
+    fprintf(fopti, "I got here!!! Point 1\n");
     /** Solution better than best point, so try additional extrapolation by a factor of GAMMA **/
     for ( int j = 0; j < N_PARAM; j++ ) a->rr.p[j] = GAMMA*a->r.p[j] + (1.0-GAMMA)*a->pbar[j];
 
@@ -423,7 +448,9 @@ case amoeba1: if (!check_model(a->dispatch_state)) return;  /* all of these shou
 
     a->exec_state = amoeba2;
 case amoeba2: if (!check_model(a->dispatch_state)) return;
+  fprintf(fopti, "SSSSSSSSSSSSSSSSSSSSSSSS amoeba2\n");
     retrieve_model(a->dispatch_state);
+    fprintf(fopti, "============ after retrieve_model, soln_num = %d\n", *(a->dispatch_state->soln_num));
 
     if ( less_than(a->rr.f,a->test_set[0].f,N_TEST_FUNCS) ) {
       /* Use additional extrapolation value since better stats than previous*/
@@ -435,6 +462,7 @@ case amoeba2: if (!check_model(a->dispatch_state)) return;
       a->FOUND = TRUE;
     }
   } else if (less_than_or_equal(a->test_set[N_PARAM-1].f,a->r.f,N_TEST_FUNCS) ) {
+    fprintf(fopti, "I got here!!! Point 2\n");
     if ( less_than(a->r.f,a->parent.f,N_TEST_FUNCS) ) {
       /* Solution better than parent, possibly as good as 2nd highest point */
       a->spawn = a->r;
@@ -447,7 +475,9 @@ case amoeba2: if (!check_model(a->dispatch_state)) return;
     a->dispatch_state = dispatch_model( a->rr.p, a->rr.f, &a->rr.soln_num );
     a->exec_state = amoeba3;
 case amoeba3: if (!check_model(a->dispatch_state)) return;
+  fprintf(fopti, "SSSSSSSSSSSSSSSSSSSSSSSS amoeba3\n");
     retrieve_model(a->dispatch_state);
+    fprintf(fopti, "============ after retrieve_model, soln_num = %d\n", *(a->dispatch_state->soln_num));
     
     if ( less_than(a->rr.f,a->parent.f,N_TEST_FUNCS) ) { /* Contraction yielded smaller point? */
       a->spawn = a->rr;
@@ -464,7 +494,9 @@ case amoeba3: if (!check_model(a->dispatch_state)) return;
         a->dispatch_state = dispatch_model( a->rrr.p, a->rrr.f, &a->rrr.soln_num);
         a->exec_state = amoeba4;
 case amoeba4: if (!check_model(a->dispatch_state)) return;
+  fprintf(fopti, "SSSSSSSSSSSSSSSSSSSSSSSS amoeba4\n");
         retrieve_model(a->dispatch_state);
+        fprintf(fopti, "============ after retrieve_model, soln_num = %d\n", *(a->dispatch_state->soln_num));
 
         /* IMPORTANT intentionally changing spawn not parent here and using comparison to parent, as parent is retained across repopulation!!  BUG #0009:  this used to compare to parent rather than the retained new point, thus unconditionally clobbering, exactly equivalent to running the loop backwards and short-circuiting; this does not make sense, so comparing to retained spawn now */
 
@@ -476,6 +508,7 @@ case amoeba4: if (!check_model(a->dispatch_state)) return;
       }
     }
   } else {
+    fprintf(fopti, "I got here!!! Point 3\n");
     /* Reflection yielded a lower high point */
     a->spawn = a->r;
     a->FOUND = TRUE;
@@ -508,6 +541,8 @@ void *dispatch_model( const float *p,
   DISPATCH_MODEL_STATE * state;
   //char cmdstr[4096], cmdstr_cur[4096];
   char cmdstr_cur[4096];
+
+  fprintf(fopti, "========== input soln_num to dispatch_model = %d\n", *soln_num);
 
   state = malloc(sizeof(*state));
   state->statsfilename = malloc(4096);
@@ -580,6 +615,9 @@ void *dispatch_model( const float *p,
     //    exit(10);   // will exit after first run of model
 
   }
+
+  fprintf(fopti, "========== soln_num after dispatch_model = %d\n", *(state->soln_num));
+
   return state;
 }
 
@@ -718,7 +756,7 @@ void mocom_die(const char *format, ...) {
 
 
 PARAM_RANGE *set_param_limits(const char *fname, int Nparam) {
-/* Read in limits for all parameters */
+/* Read in limits for all parameters and initial value */
   FILE *fin;
   PARAM_RANGE *param_lim;
   int     i;
@@ -729,7 +767,7 @@ PARAM_RANGE *set_param_limits(const char *fname, int Nparam) {
     mocom_die("Unable to open parameter range file.");
 
   for( i = 0; i < Nparam; i++ ) {
-    fscanf(fin, "%s %f %f", param_lim[i].name, &param_lim[i].max, &param_lim[i].min);
+    fscanf(fin, "%s %f %f %f", param_lim[i].name, &param_lim[i].max, &param_lim[i].min, &param_lim[i].init);
     if (param_lim[i].max < param_lim[i].min)
       mocom_die("Parameter \"%s\" range is invalid: max (%f) is less than min (%f).\n", 
         param_lim[i].name, param_lim[i].max, param_lim[i].min);

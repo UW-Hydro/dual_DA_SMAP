@@ -40,7 +40,7 @@ DOMAIN_TYPE    XDIM    lon
 ## State Files and Parameters
 ########################################################################
 # $init_state
-STATENAME /civil/hydro/ymao/data_assim/output/vic/ArkRed/NLDAS2.LAI_from_veglib/spinup.1979_2014.coldstart/states/state.coldstart  # Output state file path/prefix. The time (STATEYEAR,STATEMONTH,STATEDAY,STATESEC) will be appended to the prefix automatically in the format yyyymmdd.
+STATENAME /civil/hydro/ymao/data_assim/output/vic/ArkRed/LAI_from_veglib/spinup.1979_2014.coldstart/states/state.coldstart  # Output state file path/prefix. The time (STATEYEAR,STATEMONTH,STATEDAY,STATESEC) will be appended to the prefix automatically in the format yyyymmdd.
 STATEYEAR   2015    # year to save model state
 STATEMONTH  1  # month to save model state
 STATEDAY    1  # day to save model state
@@ -72,8 +72,8 @@ SNOW_BAND	    False
 #######################################################################
 # Output Files and Parameters
 #######################################################################
-RESULT_DIR  /civil/hydro/ymao/data_assim/output/vic/ArkRed/NLDAS2.LAI_from_veglib/spinup.1979_2014.coldstart/history/
-LOG_DIR	    /civil/hydro/ymao/data_assim/output/vic/ArkRed/NLDAS2.LAI_from_veglib/spinup.1979_2014.coldstart/logs/
+RESULT_DIR  /civil/hydro/ymao/data_assim/output/vic/ArkRed/LAI_from_veglib/spinup.1979_2014.coldstart/history/
+LOG_DIR	    /civil/hydro/ymao/data_assim/output/vic/ArkRed/LAI_from_veglib/spinup.1979_2014.coldstart/logs/
 OUTFILE     fluxes
 AGGFREQ     NMONTHS 1
 HISTFREQ    NYEARS 1

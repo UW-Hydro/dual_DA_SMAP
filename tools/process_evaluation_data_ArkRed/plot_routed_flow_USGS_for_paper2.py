@@ -141,8 +141,8 @@ da_ensemble['time'] = pd.to_datetime(da_ensemble['time'].values) - pd.DateOffset
 df_openloop_daily = df_openloop.resample('1D', how='mean')
 da_ensemble_daily = da_ensemble.resample('1D', dim='time', how='mean')
 
-# --- Calculate ensemble mean --- #
-da_ensMean_daily = da_ensemble_daily.mean(dim='N')
+# --- Calculate ensemble median --- #
+da_ensMean_daily = da_ensemble_daily.median(dim='N')
 
 
 # In[6]:
@@ -212,15 +212,18 @@ for site in dict_sites.keys():
         for i in range(N):
             ts = da_ensemble_daily.sel(N=i, site=site).to_series() / 1000
             ts.truncate(before=plot_start_time, after=plot_end_time).plot(
-                color='blue', alpha=0.1)
+                color='blue', alpha=0.05)
+        # Ensemble mean
+        (ts_ensMean / 1000).truncate(before=plot_start_time, after=plot_end_time).plot(
+                color='blue', linewidth=2)
         # USGS
         (ts_usgs / 1000).truncate(
             before=plot_start_time, after=plot_end_time).plot(
-            style='-', color='black')
+            style='-', color='black', linewidth=2)
         # Openloop
         (ts_openloop / 1000).truncate(
             before=plot_start_time, after=plot_end_time).plot(
-            color='magenta', style='-')
+            color='magenta', style='--', linewidth=2)
         # Add text
         plt.text(0.7, 0.96,
                  "all-time PER(RMSE) = {:.1f}%\n".format(per_RMSE),
@@ -236,14 +239,14 @@ for site in dict_sites.keys():
                  "all-time NENSK = {:.2f}\n".format(nensk_ens),
                  horizontalalignment='left',
                  verticalalignment='top', transform=ax.transAxes, fontsize=16)
-        plt.text(0.7, 0.66,
-                 r"all-time $\xi$ = {:.2f}".format(kesi),
-                 horizontalalignment='left',
-                 verticalalignment='top', transform=ax.transAxes, fontsize=16)
-        plt.text(0.7, 0.60,
-                 r"all-time $\alpha$ = {:.2f}".format(alpha),
-                 horizontalalignment='left',
-                 verticalalignment='top', transform=ax.transAxes, fontsize=16)
+#        plt.text(0.7, 0.66,
+#                 r"all-time $\xi$ = {:.2f}".format(kesi),
+#                 horizontalalignment='left',
+#                 verticalalignment='top', transform=ax.transAxes, fontsize=16)
+#        plt.text(0.7, 0.60,
+#                 r"all-time $\alpha$ = {:.2f}".format(alpha),
+#                 horizontalalignment='left',
+#                 verticalalignment='top', transform=ax.transAxes, fontsize=16)
 
         # Make plot better
         plt.ylabel('Streamflow (thousand cfs)', fontsize=24)
