@@ -1,0 +1,9 @@
+Two more recent versions of MOCOM sent by PCIC/Katrina Bennett around 2009.  The 
+apr-dm one seems most recent.
+
+PCIC apparently found some bug fixes that were important, so this should be used. 
+
+compile with gcc -std=c11 -o MOCOM MOCOM.c 
+
+My note (Yixin), compling on Hyak: gcc -std=c99 -o MOCOM.v3 MOCOM.v3.c
+

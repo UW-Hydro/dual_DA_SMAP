@@ -29,7 +29,7 @@ from tonic.io import read_configobj
 from da_utils import (load_nc_and_concat_var_years, setup_output_dirs,
                       da_2D_to_3D_from_SMART, da_3D_to_2D_for_SMART,
                       correct_prec_from_SMART, rmse, to_netcdf_forcing_file_compress,
-                      rescale_and_save_SMART_prec)
+                      rescale_and_save_SMART_prec, save_SMART_prec)
 
 
 # ============================================================ #
@@ -44,10 +44,10 @@ nproc = int(sys.argv[2])
 # ============================================================ #
 # Process some input variables
 # ============================================================ #
-start_date = pd.datetime.strptime(cfg['SMART_RUN']['start_date'], "%Y-%m-%d")
-end_date = pd.datetime.strptime(cfg['SMART_RUN']['end_date'], "%Y-%m-%d")
-start_year = start_date.year
-end_year = end_date.year
+start_time = pd.to_datetime(cfg['SMART_RUN']['start_time'])
+end_time = pd.to_datetime(cfg['SMART_RUN']['end_time'])
+start_year = start_time.year
+end_year = end_time.year
 
 
 # ============================================================ #
@@ -62,8 +62,8 @@ da_prec_orig = load_nc_and_concat_var_years(
                     start_year=start_year,
                     end_year=end_year,
                     dict_vars={'prec_orig': cfg['PREC']['prec_orig_varname']})\
-                  ['prec_orig']
-    
+                  ['prec_orig'].sel(time=slice(start_time, end_time))
+
 # --- Load corrected window-averaged prec --- #
 run_SMART_outfile = os.path.join(cfg['CONTROL']['root_dir'],
                                  cfg['OUTPUT']['output_basedir'],
@@ -74,22 +74,45 @@ run_SMART_prec_corr = loadmat(run_SMART_outfile)['RAIN_SMART_SMOS']  # [nwindow,
 # --- Load corrected window-averaged prec ensemble (if ensemble SMART) --- #
 filter_flag = cfg['SMART_RUN']['filter_flag']
 if filter_flag == 2 or filter_flag == 6:
-    run_SMART_ens_outfile = os.path.join(
-        cfg['CONTROL']['root_dir'],
-        cfg['OUTPUT']['output_basedir'],
-        'run_SMART',
-        'SMART_corrected_rainfall_ens.mat')
-    run_SMART_prec_corr_ens = loadmat(
-        run_SMART_ens_outfile)['RAIN_SMART_SMOS_ENS']  # [nwindow, nens, npixel]
-    # If npixel = 1, Matlab automatically squeezes that dimension. Here we readd this dimension
-    if len(run_SMART_prec_corr_ens.shape) == 2:
-        run_SMART_prec_corr_ens = run_SMART_prec_corr_ens.reshape(
-            [run_SMART_prec_corr_ens.shape[0], run_SMART_prec_corr_ens.shape[1], 1])
+    list_run_SMART_prec_corr_ens = []
+    for i in range(cfg['SMART_RUN']['NUMEN']):
+        run_SMART_ens_outfile = os.path.join(
+            cfg['CONTROL']['root_dir'],
+            cfg['OUTPUT']['output_basedir'],
+            'run_SMART',
+            'SMART_corrected_rainfall.ens{}.mat'.format(i+1))
+        run_SMART_prec_corr_ens = loadmat(
+            run_SMART_ens_outfile)['RAIN_CORRECTED']['ens{}'.format(i+1)][0][0].squeeze()  # [nwindow, npixel]
+        # If npixel = 1, Matlab automatically squeezes that dimension. Here we readd this dimension
+        if len(run_SMART_prec_corr_ens.shape) == 1:
+            run_SMART_prec_corr_ens = run_SMART_prec_corr_ens.reshape(
+                [run_SMART_prec_corr_ens.shape[0], 1])
+        # Put in list
+        list_run_SMART_prec_corr_ens.append(run_SMART_prec_corr_ens)
 
+# --- Load perturbed prec ensemble (if ensemble SMART) at original timestep --- #
+filter_flag = cfg['SMART_RUN']['filter_flag']
+if filter_flag == 2 or filter_flag == 6:
+    list_run_SMART_prec_pert_ens = []
+    for i in range(cfg['SMART_RUN']['NUMEN']):
+        perturbed_rainfall_ens_outfile = os.path.join(
+            cfg['CONTROL']['root_dir'],
+            cfg['OUTPUT']['output_basedir'],
+            'run_SMART',
+            'SMART_perturbed_rainfall.ens{}.mat'.format(i+1))
+        perturbed_rainfall_ens = loadmat(
+            perturbed_rainfall_ens_outfile)['RAIN_PERTURBED']['ens{}'.format(i+1)][0][0].squeeze()  # [nwindow, npixel]
+        # If npixel = 1, Matlab automatically squeezes that dimension. Here we readd this dimension
+        if len(perturbed_rainfall_ens.shape) == 1:
+            perturbed_rainfall_ens = perturbed_rainfall_ens.reshape(
+                [perturbed_rainfall_ens.shape[0], 1])
+        # Put in list
+        list_run_SMART_prec_pert_ens.append(run_SMART_prec_corr_ens)
 # Load in domain file
 ds_domain = xr.open_dataset(os.path.join(cfg['CONTROL']['root_dir'],
                                          cfg['DOMAIN']['domain_file']))
 da_mask = ds_domain['mask']
+
 
 # ============================================================ #
 # Process and save window-averaged SMART-corrected prec
@@ -108,7 +131,7 @@ da_prec_corr_window = da_2D_to_3D_from_SMART(
 if filter_flag == 2 or filter_flag == 6:
     dict_prec_SMART_window_ens = {}
     for i in range(cfg['SMART_RUN']['NUMEN']):
-        dict_prec_SMART_window_ens[i+1] = run_SMART_prec_corr_ens[:, i, :]
+        dict_prec_SMART_window_ens[i+1] = list_run_SMART_prec_corr_ens[i]
     dict_da_prec_corr_window_ens = da_2D_to_3D_from_SMART(
             dict_array_2D=dict_prec_SMART_window_ens,
             da_mask=da_mask,
@@ -129,39 +152,118 @@ to_netcdf_forcing_file_compress(
 
 
 # ============================================================ #
-# Rescale orig. prec at orig. timestep based on SMART outputs
-# and save to netCDF file
+# Save perturbed prec ensemble
 # ============================================================ #
-print('Rescaling original prec. and saving to netCDF...')
-# --- Rescale SMART-corrected precip --- #
-rescale_and_save_SMART_prec(da_prec_orig, cfg['SMART_RUN']['window_size'],
-                            da_prec_corr_window, start_date,
-                            out_dir, 'prec_corrected.')
-
-# --- If ensemble SMART, rescale each ensemble member --- #
+print('Saving perturbed precip ensemble...')
+# --- Precess perturbed prec data to da --- #
 if filter_flag == 2 or filter_flag == 6:
+    dict_prec_pert_ens = {}
+    for i in range(cfg['SMART_RUN']['NUMEN']):
+        dict_prec_pert_ens[i+1] = list_run_SMART_prec_pert_ens[i]
+    dict_da_prec_pert_ens = da_2D_to_3D_from_SMART(
+            dict_array_2D=dict_prec_pert_ens,
+            da_mask=da_mask,
+            out_time_varname='window',
+            out_time_coord=range(nwindow))
+    #  --- Save ensemble corrected precip, if applicable --- #
+    # Loop over all ensemble members
     # --- If nproc == 1, do a regular ensemble loop --- #
     if nproc == 1:
         for i in range(cfg['SMART_RUN']['NUMEN']):
-            print('Rescale and save ensemble {}...'.format(i+1))
-            rescale_and_save_SMART_prec(
-                da_prec_orig, cfg['SMART_RUN']['window_size'],
-                dict_da_prec_corr_window_ens[i+1],
-                start_date,
-                out_dir, 'prec_corrected.ens{}.'.format(i+1))
+            print('\tEnsemble {}'.format(i))
+            save_SMART_prec(start_time, end_time, cfg['SMART_RUN']['time_step'],
+                            dict_da_prec_pert_ens[i+1],
+                            out_dir, 'prec_perturbed.ens{}.'.format(i+1))
     # --- If nproc > 1, use multiprocessing --- #
     elif nproc > 1:
         # --- Set up multiprocessing --- #
         pool = mp.Pool(processes=nproc)
         # --- Loop over each ensemble member --- #
         for i in range(cfg['SMART_RUN']['NUMEN']):
-            print('Rescale and save ensemble {}...'.format(i+1))
-            pool.apply_async(rescale_and_save_SMART_prec,
-                (da_prec_orig, cfg['SMART_RUN']['window_size'],
-                dict_da_prec_corr_window_ens[i+1],
-                start_date,
-                out_dir, 'prec_corrected.ens{}.'.format(i+1)))
+            print('\tEnsemble {}'.format(i))
+            pool.apply_async(save_SMART_prec,
+                             (start_time, end_time, cfg['SMART_RUN']['time_step'],
+                              dict_da_prec_pert_ens[i+1],
+                              out_dir, 'prec_perturbed.ens{}.'.format(i+1)))
         # --- Finish multiprocessing --- #
         pool.close()
         pool.join()
+
+
+# ============================================================ #
+# Rescale orig. prec at orig. timestep based on SMART outputs
+# and save to netCDF file;
+# This rescaling step is only needed if window_size > 1
+# ============================================================ #
+print('Rescaling original prec. and saving to netCDF...')
+
+# --- If window_size == 1, skip rescaling and directly save
+print('window_size = 1, skip rescaling')
+if cfg['SMART_RUN']['window_size'] == 1:
+    # Save deterministic SMART-corrected precip
+    save_SMART_prec(start_time, end_time, cfg['SMART_RUN']['time_step'],
+                    da_prec_corr_window, out_dir, 'prec_corrected.')
+    # Save ensemble corrected precip, if applicable
+    if filter_flag == 2 or filter_flag == 6:
+        # Loop over all ensemble members
+        # --- If nproc == 1, do a regular ensemble loop --- #
+        if nproc == 1:
+            for i in range(cfg['SMART_RUN']['NUMEN']):
+                print('\tEnsemble {}'.format(i))
+                save_SMART_prec(start_time, end_time, cfg['SMART_RUN']['time_step'],
+                                dict_da_prec_corr_window_ens[i+1],
+                                out_dir, 'prec_corrected.ens{}.'.format(i+1))
+        # --- If nproc > 1, use multiprocessing --- #
+        elif nproc > 1:
+            # --- Set up multiprocessing --- #
+            pool = mp.Pool(processes=nproc)
+            # --- Loop over each ensemble member --- #
+            for i in range(cfg['SMART_RUN']['NUMEN']):
+                print('\tEnsemble {}'.format(i))
+                pool.apply_async(save_SMART_prec,
+                                 (start_time, end_time, cfg['SMART_RUN']['time_step'],
+                                  dict_da_prec_corr_window_ens[i+1],
+                                  out_dir, 'prec_corrected.ens{}.'.format(i+1)))
+            # --- Finish multiprocessing --- #
+            pool.close()
+            pool.join()
+
+
+# --- If window_size > 1, rescale and save --- #
+else:
+    # --- Rescale SMART-corrected precip --- #
+    da_prec_corrected = rescale_and_save_SMART_prec(
+        da_prec_orig, cfg['SMART_RUN']['window_size'],
+        cfg['SMART_RUN']['time_step'],
+        da_prec_corr_window, start_time,
+        out_dir, 'prec_corrected.')
+    
+    # --- If ensemble SMART, rescale each ensemble member --- #
+    if filter_flag == 2 or filter_flag == 6:
+        # --- If nproc == 1, do a regular ensemble loop --- #
+        if nproc == 1:
+            for i in range(cfg['SMART_RUN']['NUMEN']):
+                print('Rescale and save ensemble {}...'.format(i+1))
+                rescale_and_save_SMART_prec(
+                    da_prec_orig, cfg['SMART_RUN']['window_size'],
+                    cfg['SMART_RUN']['time_step'],
+                    dict_da_prec_corr_window_ens[i+1],
+                    start_time,
+                    out_dir, 'prec_corrected.ens{}.'.format(i+1))
+        # --- If nproc > 1, use multiprocessing --- #
+        elif nproc > 1:
+            # --- Set up multiprocessing --- #
+            pool = mp.Pool(processes=nproc)
+            # --- Loop over each ensemble member --- #
+            for i in range(cfg['SMART_RUN']['NUMEN']):
+                print('Rescale and save ensemble {}...'.format(i+1))
+                pool.apply_async(rescale_and_save_SMART_prec,
+                    (da_prec_orig, cfg['SMART_RUN']['window_size'],
+                     cfg['SMART_RUN']['time_step'],
+                     dict_da_prec_corr_window_ens[i+1],
+                     start_time,
+                     out_dir, 'prec_corrected.ens{}.'.format(i+1)))
+            # --- Finish multiprocessing --- #
+            pool.close()
+            pool.join()
  

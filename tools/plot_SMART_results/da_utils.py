@@ -10,6 +10,9 @@ import multiprocessing as mp
 import shutil
 import scipy.linalg as la
 import glob
+import properscoring as ps
+from scipy import stats
+import pickle
 
 from tonic.models.vic.vic import VIC, default_vic_valgrind_error_code
 
@@ -3396,4 +3399,657 @@ def correct_prec_from_SMART(da_prec_orig, window_size, da_prec_corr_window,
                 prec_corr_this_window
     
     return da_prec_corrected
+
+
+def calculate_rmse_prec(out_nc, da_truth, da_model,
+                        agg_freq, log):
+    ''' A wrap funciton that calculates RMSE for all domain and save to file; if
+        result file already existed, then simply read in the file.
+
+    Parameters
+    ----------
+    out_nc: <str>
+        RMSE result output netCDF file
+    da_truth: <xr.Dataset>
+        Truth precip
+    da_model: <xr.Dataset>
+        Corrected prec whose RMSE is to be assessed (wrt. truth)
+    agg_freq: <str>
+        Aggregation frequency for rmse calculation;
+        e.g., '3H', '3D'
+    log: <bool>
+        Whether to take log first before calculating RMSE (but after aggregating)
+    '''
+
+    if not os.path.isfile(out_nc):  # if RMSE is not already calculated
+        # --- Aggregate --- #
+        da_truth_agg = da_truth.resample(dim='time', how='sum', freq=agg_freq)
+        da_model_agg = da_model.resample(dim='time', how='sum', freq=agg_freq)
+        # --- Take log if specified --- #
+        if log is True:
+            da_truth_agg = np.log(da_truth_agg + 1)
+            da_model_agg = np.log(da_model_agg + 1)
+        # --- Calculate RMSE --- #
+        # Determine the total number of loops
+        lat_coord = da_truth['lat']
+        lon_coord = da_truth['lon']
+        nloop = len(lat_coord) * len(lon_coord)
+        # Reshape variables
+        truth = da_truth_agg.values.reshape(
+            [len(da_truth_agg['time']), nloop])  # [time, nloop]
+        model = da_model_agg.values.reshape(
+            [len(da_model_agg['time']), nloop])  # [time, nloop]
+        # Calculate RMSE for all grid cells
+        rmse_model = np.array(list(map(
+                     lambda j: rmse(truth[:, j], model[:, j]),
+                    range(nloop))))  # [nloop]
+        # Reshape RMSE's
+        rmse_model = rmse_model.reshape(
+            [len(lat_coord), len(lon_coord)])  # [lat, lon]
+        # Put results into da's
+        da_rmse_model = xr.DataArray(
+            rmse_model, coords=[lat_coord, lon_coord],
+            dims=['lat', 'lon'])  # [mm/mm]
+        # Save RMSE to netCDF file
+        ds_rmse_model = xr.Dataset(
+            {'rmse': da_rmse_model})
+        ds_rmse_model.to_netcdf(out_nc, format='NETCDF4_CLASSIC')
+    else:  # if RMSE is already calculated
+        da_rmse_model = xr.open_dataset(out_nc)['rmse']
+
+    return da_rmse_model
+
+
+def calculate_corrcoef_prec(out_nc, da_truth, da_model,
+                            agg_freq, log):
+    ''' A wrap funciton that calculates corrcoef for all domain and save to file; if
+        result file already existed, then simply read in the file.
+
+    Parameters
+    ----------
+    out_nc: <str>
+        corrcoef result output netCDF file
+    da_truth: <xr.Dataset>
+        Truth precip
+    da_model: <xr.Dataset>
+        Corrected prec whose corrcoef is to be assessed (wrt. truth)
+    agg_freq: <str>
+        Aggregation frequency for corrcoef calculation;
+        e.g., '3H', '3D'
+    log: <bool>
+        Whether to take log first before calculating corrcoef (but after aggregating)
+    '''
+
+    if not os.path.isfile(out_nc):  # if corrcoef is not already calculated
+        # --- Aggregate --- #
+        da_truth_agg = da_truth.resample(dim='time', how='sum', freq=agg_freq)
+        da_model_agg = da_model.resample(dim='time', how='sum', freq=agg_freq)
+        # --- Take log if specified --- #
+        if log is True:
+            da_truth_agg = np.log(da_truth_agg + 1)
+            da_model_agg = np.log(da_model_agg + 1)
+        # --- Calculate corrcoef --- #
+        # Determine the total number of loops
+        lat_coord = da_truth['lat']
+        lon_coord = da_truth['lon']
+        nloop = len(lat_coord) * len(lon_coord)
+        # Reshape variables
+        truth = da_truth_agg.values.reshape(
+            [len(da_truth_agg['time']), nloop])  # [time, nloop]
+        model = da_model_agg.values.reshape(
+            [len(da_model_agg['time']), nloop])  # [time, nloop]
+        # Calculate corrcoef for all grid cells
+        corrcoef_model = np.array(list(map(
+                     lambda j: np.corrcoef(truth[:, j], model[:, j])[0, 1],
+                    range(nloop))))  # [nloop]
+        # Reshape corrcoef's
+        corrcoef_model = corrcoef_model.reshape(
+            [len(lat_coord), len(lon_coord)])  # [lat, lon]
+        # Put results into da's
+        da_corrcoef_model = xr.DataArray(
+            corrcoef_model, coords=[lat_coord, lon_coord],
+            dims=['lat', 'lon'])  # [mm/mm]
+        # Save corrcoef to netCDF file
+        ds_corrcoef_model = xr.Dataset(
+            {'corrcoef': da_corrcoef_model})
+        ds_corrcoef_model.to_netcdf(out_nc, format='NETCDF4_CLASSIC')
+    else:  # if corrcoef is already calculated
+        da_corrcoef_model = xr.open_dataset(out_nc)['corrcoef']
+
+    return da_corrcoef_model
+
+
+def calculate_categ_metrics(da_threshold, da_truth, da_model, agg_freq):
+    ''' Calculates FAR, POD and TS
+    
+    Parameters
+    ----------
+    da_truth: <xr.Dataset>
+        Truth precip
+    da_model: <xr.Dataset>
+        Corrected prec
+    agg_freq: <str>
+        Aggregation frequency for corrcoef calculation;
+        e.g., '3H', '3D'
+    da_threshold: <xr.DataArray>
+        Prec event threshold (mm/agg_period)
+    
+    Returns
+    ----------
+    da_far, da_pod, da_ts: <xr.DataArray>
+        2D FAR, POD and TS
+    '''
+    
+    # --- Aggregate --- #
+    da_truth_agg = da_truth.resample(dim='time', how='sum', freq=agg_freq)
+    da_model_agg = da_model.resample(dim='time', how='sum', freq=agg_freq)
+    # --- Calculate H (true pos), F (false pos) and M (missed event) --- #
+    da_truth_pos = da_truth_agg > da_threshold
+    da_model_pos = da_model_agg > da_threshold
+    H = (da_truth_pos & da_model_pos).sum(dim='time')
+    F = ((~da_truth_pos) & da_model_pos).sum(dim='time')
+    M = (da_truth_pos & (~da_model_pos)).sum(dim='time')
+    # --- Calculate metrics --- #
+    da_far = F / (H + F)
+    da_pod = H / (H + M)
+    da_ts = H / (H + F + M)
+    
+    return da_far, da_pod, da_ts
+
+
+def calculate_prec_threshold(out_nc, perc, da_prec, agg_freq):
+    ''' A wrap funciton that calculates percentile threshold for all domain and save to file; if
+        result file already existed, then simply read in the file.
+
+    Parameters
+    ----------
+    out_nc: <str>
+        RMSE result output netCDF file
+    perc: <float> (0-100)
+        Percentile threshold to distinguish rainfall event
+    da_prec: <xr.Dataset>
+        Prec data (first dim must be time)
+    agg_freq: <str>
+        Aggregation frequency for rmse calculation;
+        e.g., '3H', '3D'
+    
+    Returns
+    ----------
+    da_threshold: <xr.DataArray>
+        Prec event threshold (mm/agg_period)
+    '''
+
+    if not os.path.isfile(out_nc):  # if not already calculated
+        # --- Aggregate --- #
+        da_prec_agg = da_prec.resample(dim='time', how='sum', freq=agg_freq)
+        # --- Calculate threshold --- #
+        threshold = np.nanpercentile(
+            da_prec_agg.where(da_prec_agg>0).values,
+            q=perc, axis=0)
+        # Put results into da's
+        lat_coord = da_prec['lat']
+        lon_coord = da_prec['lon']
+        da_threshold = xr.DataArray(
+            threshold, coords=[lat_coord, lon_coord],
+            dims=['lat', 'lon'])  # [mm/agg_period]
+        # Save RMSE to netCDF file
+        ds_threshold = xr.Dataset(
+            {'threshold': da_threshold})
+        ds_threshold.to_netcdf(out_nc, format='NETCDF4_CLASSIC')
+    else:  # if RMSE is already calculated
+        da_threshold = xr.open_dataset(out_nc)['threshold']
+
+    return da_threshold
+
+
+def calculate_crps_prec(out_nc, da_truth, da_model, log=False, nproc=1):
+    ''' A wrap funciton that calculates CRPS for all domain and save to file; if
+        result file already existed, then simply read in the file.
+
+    Parameters
+    ----------
+    out_nc: <str>
+        RMSE result output netCDF file
+    ds_truth: <xr.DataArray>
+        Truth states/history
+    da_model: <xr.DataArray>
+        Model states/history whose RMSE is to be assessed (wrt. truth states);
+        This should be ensemble model results, with "N" as the ensemble dimension
+    log: <bool>
+        Whether to take log first before calculating RMSE
+    nproc: <int>
+        Number of processors for mp
+
+    Returns
+    ----------
+    da_crps: <xr.DataArray>
+        CRPS for the whole domain; dimension: [lat, lon]
+    '''
+
+    if not os.path.isfile(out_nc):  # if RMSE is not already calculated
+        # --- Take log if specified --- #
+        if log is True:
+            da_truth = np.log(da_truth + 1)
+            da_model = np.log(da_model + 1)
+        # --- Calculate CRPS for the whole domain --- #
+        results = {}
+        pool = mp.Pool(processes=nproc)
+        for lat in da_truth['lat'].values:
+            for lon in da_truth['lon'].values:
+                results[(lat, lon)] = pool.apply_async(
+                    crps, (da_truth.sel(lat=lat, lon=lon).values,
+                           da_model.sel(lat=lat, lon=lon).transpose('time', 'N').values))
+        pool.close()
+        pool.join()
+        # --- Get return values --- #
+        crps_domain = np.zeros([len(da_truth['lat']), len(da_truth['lon'])])
+        crps_domain[:] = np.nan
+        da_crps = xr.DataArray(
+            crps_domain, coords=[da_truth['lat'], da_truth['lon']],
+            dims=['lat', 'lon'])
+        for i, result in results.items():
+            lat = i[0]
+            lon = i[1]
+            da_crps.loc[lat, lon] = result.get()
+        # Save CRPS to netCDF file
+        ds_crps = xr.Dataset(
+            {'crps': da_crps})
+        ds_crps.to_netcdf(out_nc, format='NETCDF4_CLASSIC')
+    else:  # if already calculated
+        da_crps = xr.open_dataset(out_nc)['crps']
+
+    return da_crps
+
+
+def crps(truth, ensemble):
+    ''' Calculate mean CRPS of an ensemble time series
+    Parameters
+    ----------
+    truth: <np.array>
+        A 1-D array of truth time series
+        Dimension: [n]
+    ensemble: <np.array>
+        A 2-D array of ensemble time series
+        Dimension: [n, N], where N is ensemble size; n is time series length
+
+    Returns
+    ----------
+    crps: <float>
+        Time-series-mean CRPS
+
+    Require
+    ----------
+    import properscoring as ps
+    '''
+
+    array_crps = np.asarray([ps.crps_ensemble(truth[t], ensemble[t, :]) for t in range(len(truth))])
+    crps = array_crps.mean()
+
+    return crps
+
+
+def nensk(truth, ensemble):
+    ''' Calculate the ratio of temporal-mean ensemble skill to temporal-mean ensemble spread:
+            nensk = <ensk> / <ensp>
+    where <ensk> is temporal average of: ensk(t) = (ensmean - truth)^2
+          <ensp> is temperal average of: ensp(t) = mean((ens_i - ensmean)^2) = var(ens_i)
+
+    Parameters
+    ----------
+    truth: <np.array>
+        A 1-D array of truth time series
+        Dimension: [n]
+    ensemble: <np.array>
+        A 2-D array of ensemble time series
+        Dimension: [n, N], where N is ensemble size; n is time series length
+
+    Returns
+    ----------
+    nensk: <float>
+        Normalized ensemble skill
+    '''
+
+    ensk = np.square((ensemble.mean(axis=1) - truth))  # [n]
+    ensp = ensemble.var(axis=1)  # [n]
+    nensk = np.mean(ensk) / np.mean(ensp)
+
+    return nensk
+
+
+def calculate_nensk(out_nc, da_truth, da_model, log):
+    ''' A wrap funciton that calculates NENSK for all domain
+    and save to file; if result file already existed, then simply read in the file.
+
+    Parameters
+    ----------
+    out_nc: <str>
+        RMSE result output netCDF file
+    da_truth: <xr.DataArray>
+        Truth states/history
+    da_model: <xr.DataArray>
+        Model states/history whose NENSK is to be assessed (wrt. truth states);
+        This should be ensemble model results, with "N" as the ensemble dimension
+        NOTE: this should already be daily data!!
+    log: <bool>
+        True or False; whether to take log transformation
+
+    Returns
+    ----------
+    da_bias_norm_var: <xr.DataArray>
+        Variance of ensemble-normalized bias for the whole domain; dimension: [lat, lon]
+    '''
+
+    if not os.path.isfile(out_nc):  # if RMSE is not already calculated
+        # --- Take log if specified --- #
+        if log is True:
+            da_truth = np.log(da_truth + 1)
+            da_model = np.log(da_model + 1)
+        # --- Calculate nensk for the whole domain --- #
+        nensk_domain = np.asarray(
+            [nensk(
+                da_truth.sel(lat=lat, lon=lon).values,
+                da_model.sel(lat=lat, lon=lon).transpose('time', 'N').values)
+             for lat in da_truth['lat'].values
+             for lon in da_truth['lon'].values])
+        # --- Reshape results --- #
+        nensk_domain = nensk_domain.reshape(
+            [len(da_truth['lat']), len(da_truth['lon'])])
+        # --- Put results into da's --- #
+        da_nensk = xr.DataArray(
+            nensk_domain, coords=[da_truth['lat'], da_truth['lon']],
+            dims=['lat', 'lon'])
+        # Save RMSE to netCDF file
+        ds_nensk = xr.Dataset(
+            {'nensk': da_nensk})
+        ds_nensk.to_netcdf(out_nc, format='NETCDF4_CLASSIC')
+    else:  # if RMSE is already calculated
+        da_nensk = xr.open_dataset(out_nc)['nensk']
+
+    return da_nensk
+
+
+def get_z_values(ens, obs):
+    ''' Calculate cumulative probability corresponding to observed 
+        flow (F(obs)) from forecast ensemble CDF (F(x)).
+        These are z_i in Laio and Tamea 2007 Fig. 2.
+        https://doi.org/10.5194/hess-11-1267-2007
+        Input: ens = ensemble forecast for a single day
+                     numpy.array, num_ensemble_members x 1 
+               obs = observation for a single day, one value.
+        Output: z = cumulative probability of observation based on
+                    forecast ensemble, single value
+    '''
+#    # construct forecast CDF from ensemble weights
+#    cdf, ens_sort = construct_cdf(ens)
+#    # get z = F(obs) from forecast CDF
+#    z = cdf_simulated(obs, cdf, ens_sort)
+
+    if obs < min(ens):
+        z = 0
+    elif obs > max(ens):
+        z = 1
+    else:
+        z = stats.percentileofscore(ens, obs, 'mean') / 100
+    return z
+
+
+def get_z_values_timeseries(ens_ts, obs_ts):
+    ''' Calculate z values for a time series of ensemble
+    Parameters
+    ----------
+    ens_ts: <np.array>
+        An ensemble of timeseries
+        dim: [N, t] where N is ensemble size and t is timesteps
+    obs_ts: <np.array>
+        Time series of observations
+        dim: [t]
+        
+    Returns
+    ----------
+    z_alltimes: <np.array>
+        Quantile of observation in ensemble at all time series
+        dim: [t]
+    '''
+    
+    if len(obs_ts) != ens_ts.shape[1]:
+        raise ValueError('Ensemble and observed time series not the same length!')
+    
+    z_alltimes = \
+        np.asarray(
+            [get_z_values(ens_ts[:, t], obs_ts[t])
+             for t in range(len(obs_ts))])
+        
+    return z_alltimes
+
+
+def calc_reliability_bias(z_daily):
+    ''' Calculate alpha-reliability following Renard et al. 2010
+        (Eqn. 23) https://doi.org/11.1029/2009WR008328. See also
+        Laio and Tamea 2007
+        https://doi.org/10.5194/hess-11-1267-2007
+        Inputs: z_daily = daily z = F(obs) values. These correspond to
+                          "quantile of observed p-values" from
+                          Renard et al. 2010 Fig. 3,
+                          "observed p-values of x_t" from Renard et
+                          al. 2010 Eqn. 23b, and z_i from Laio and 
+                          Tamea 2007 Fig. 2.
+                          numpy.array 1 x num_days
+        Outputs: alpha_reliability
+                Range: -1 to 1; best-performance value = 0
+                positive value indicates over-prediction
+                negative value indicates under-prediction
+    '''
+    
+    z_daily = np.sort(z_daily)
+    n_sample = len(z_daily)
+    # assign ranks to daily z = F(obs) values.
+    # rank/# samples gives us the "theoretical quantile of U[0,1]"
+    # from Renard et al. 2010 Fig. 3, "theoretical p-values of x_t" 
+    # from Renard et al. 2010 Eqn. 23b, and R_i/n from Laio and Tamea 
+    # 2007 Fig. 2.
+    # Note: Renard et al. 2010 Fig.3 flipped the x and y axes from 
+    # Laio and Tamea 2007 Fig. 2.
+    R = np.arange(0, n_sample) / n_sample
+    # calculate alpha reliability index
+    alpha_direction = - 2 * np.mean(z_daily - R)
+    return alpha_direction
+
+
+def calc_alpha_reliability(z_daily):
+    ''' Calculate alpha-reliability following Renard et al. 2010
+        (Eqn. 23) https://doi.org/11.1029/2009WR008328. See also
+        Laio and Tamea 2007
+        https://doi.org/10.5194/hess-11-1267-2007
+        Inputs: z_daily = daily z = F(obs) values. These correspond to
+                          "quantile of observed p-values" from
+                          Renard et al. 2010 Fig. 3,
+                          "observed p-values of x_t" from Renard et
+                          al. 2010 Eqn. 23b, and z_i from Laio and 
+                          Tamea 2007 Fig. 2.
+                          numpy.array 1 x num_days
+        Outputs: alpha = alpha reliability index, single value
+    '''
+    
+    z_daily = np.sort(z_daily)
+    n_sample = len(z_daily)
+    # assign ranks to daily z = F(obs) values.
+    # rank/# samples gives us the "theoretical quantile of U[0,1]"
+    # from Renard et al. 2010 Fig. 3, "theoretical p-values of x_t" 
+    # from Renard et al. 2010 Eqn. 23b, and R_i/n from Laio and Tamea 
+    # 2007 Fig. 2.
+    # Note: Renard et al. 2010 Fig.3 flipped the x and y axes from 
+    # Laio and Tamea 2007 Fig. 2.
+    R = np.arange(0, n_sample) / n_sample
+    # calculate alpha reliability index
+    alpha = 1 - 2 * np.mean(abs(z_daily - R))
+    return alpha
+
+
+def calc_alpha_reliability_domain(out_nc, dict_z_domain, da_mask):
+    ''' A wrap funciton that calculates alpha reliability for all domain
+    and save to file; if result file already existed, then simply read in the file.
+
+    Parameters
+    ----------
+    out_nc: <str>
+        RMSE result output netCDF file
+    dict_z_domain: <dict>
+        {lat_lon: array of z values}
+    da_mask: <xr.DataArray>
+        Domain mask file; dim: [lat, lon]
+
+    Returns
+    ----------
+    da_alpha: <xr.DataArray>
+        alpha reliability for the whole domain; dimension: [lat, lon]
+    '''
+
+    if not os.path.isfile(out_nc):  # if not already calculated
+        # --- Calculate for the whole domain --- #
+        alpha_domain = np.asarray(
+            [calc_alpha_reliability(dict_z_domain['{}_{}'.format(lat, lon)])
+             if '{}_{}'.format(lat, lon) in dict_z_domain.keys() else np.nan
+             for lat in da_mask['lat'].values
+             for lon in da_mask['lon'].values])
+        # --- Reshape results --- #
+        alpha_domain = alpha_domain.reshape(
+            [len(da_mask['lat']), len(da_mask['lon'])])
+        # --- Put results into da's --- #
+        da_alpha = xr.DataArray(
+            alpha_domain, coords=[da_mask['lat'], da_mask['lon']],
+            dims=['lat', 'lon'])
+        # Save to netCDF file
+        ds_alpha = xr.Dataset(
+            {'alpha': da_alpha})
+        ds_alpha.to_netcdf(out_nc, format='NETCDF4_CLASSIC')
+    else:  # if RMSE is already calculated
+        da_alpha = xr.open_dataset(out_nc)['alpha']
+
+    return da_alpha
+
+
+def calculate_z_value_prec_domain(out_pickle, da_truth, da_model, nproc=1):
+    ''' A wrap funciton that calculates z value for all domain and save to file; if
+        result file already existed, then simply read in the file.
+        NOTE: if at a timestep all ensemble members AND obs are zero, this timestep
+        will be excluded from z-value calculation
+
+    Parameters
+    ----------
+    out_pickle: <str>
+        Output pickle file
+    ds_truth: <xr.DataArray>
+        Truth states/history
+    da_model: <xr.DataArray>
+        Model states/history whose RMSE is to be assessed (wrt. truth states);
+        This should be ensemble model results, with "N" as the ensemble dimension
+    nproc: <int>
+        Number of processors for mp
+
+    Returns
+    ----------
+    dict_z_domain: <dict>
+        {lat_lon: array of z values}
+    '''
+
+    if not os.path.isfile(out_pickle):  # if not already calculated
+        # --- Calculate CRPS for the whole domain --- #
+        pool = mp.Pool(processes=nproc)
+        results = {}
+        for lat in da_truth['lat'].values:
+            for lon in da_truth['lon'].values:
+                # Exclude timesteps wit all-zero ensemble and truth
+                ens =  da_model.sel(lat=lat, lon=lon).transpose('N', 'time').values
+                truth = da_truth.sel(lat=lat, lon=lon).values
+                valid_timesteps = ((ens>0).sum(axis=0) > 0) | (truth > 0)
+                ens_valid = ens[:, valid_timesteps]
+                truth_valid = truth[valid_timesteps]
+                # Calculate z value time series
+                results[(lat, lon)] = pool.apply_async(
+                    get_z_values_timeseries, 
+                    (ens_valid, truth_valid))
+        pool.close()
+        pool.join()
+        # --- Get return values --- #
+        dict_z_domain = {}  # {lat_lon: array}
+        for i, result in results.items():
+            lat = i[0]
+            lon = i[1]
+            dict_z_domain['{}_{}'.format(lat, lon)] = result.get()
+        # Save z values using pickle
+        with open(out_pickle, 'wb') as f:
+            pickle.dump(dict_z_domain, f)
+    else:  # if already calculated
+        with open(out_pickle, 'rb') as f:
+            dict_z_domain = pickle.load(f)
+
+    return dict_z_domain
+
+
+def calc_kesi_domain(out_nc, dict_z_domain, da_mask):
+    ''' A wrap funciton that calculates kesi (fraction of observed
+    timesteps within the ensemble range) for all domain
+    and save to file; if result file already existed, then simply read in the file.
+
+    Parameters
+    ----------
+    out_nc: <str>
+        result output netCDF file
+    dict_z_domain: <dict>
+        {lat_lon: array of z values}
+    da_mask: <xr.DataArray>
+        Domain mask file; dim: [lat, lon]
+
+    Returns
+    ----------
+    da_kesi: <xr.DataArray>
+        kesi for the whole domain; dimension: [lat, lon]
+    '''
+
+    if not os.path.isfile(out_nc):  # if not already calculated
+        # --- Calculate for the whole domain --- #
+        kesi_domain = np.asarray(
+            [calc_kesi(dict_z_domain['{}_{}'.format(lat, lon)])
+             if '{}_{}'.format(lat, lon) in dict_z_domain.keys() else np.nan
+             for lat in da_mask['lat'].values
+             for lon in da_mask['lon'].values])
+        # --- Reshape results --- #
+        kesi_domain = kesi_domain.reshape(
+            [len(da_mask['lat']), len(da_mask['lon'])])
+        # --- Put results into da's --- #
+        da_kesi = xr.DataArray(
+            kesi_domain, coords=[da_mask['lat'], da_mask['lon']],
+            dims=['lat', 'lon'])
+        # Save to netCDF file
+        ds_kesi = xr.Dataset(
+            {'kesi': da_kesi})
+        ds_kesi.to_netcdf(out_nc, format='NETCDF4_CLASSIC')
+    else:  # if RMSE is already calculated
+        da_kesi = xr.open_dataset(out_nc)['kesi']
+
+    return da_kesi
+
+
+def calc_kesi(z_alltimes):
+    ''' Calculate kesi (fraction of observed timesteps within the
+        ensemble range)
+        
+    Parameters
+    ----------
+    z_alltimes: <np.array>
+        z values of all timesteps; dim: [time]
+        
+    Returns
+    ----------
+    kesi: <float>
+        kesi
+    '''
+    
+    kesi = 1 - ((z_alltimes==1).sum() + (z_alltimes==0).sum()) \
+        / len(z_alltimes)
+        
+    return kesi
+
+
+
 

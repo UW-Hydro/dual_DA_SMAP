@@ -185,6 +185,17 @@ da_max_moist = calculate_max_soil_moist_domain(
                     os.path.join(cfg['CONTROL']['root_dir'],
                                  cfg['VIC']['vic_global_template']))
 da_max_moist_n = convert_max_moist_n_state(da_max_moist, nveg, nsnow)
+# Pre-generated, spatially-correlated state perturbation noise
+if 'state_perturb_spatial_corr' in cfg['EnKF'] and\
+    cfg['EnKF']['state_perturb_spatial_corr'] is True:
+    state_perturb_spatial_corr = True
+    state_perturb_random_field_dir = os.path.join(
+        cfg['CONTROL']['root_dir'],
+        cfg['EnKF']['state_perturb_random_field_dir'])
+else:
+    state_perturb_spatial_corr = False
+    state_perturb_random_field_dir = None
+
 # If linear model subsitution, no max moist limit
 if linear_model:
     da_max_moist_n[:, :, :] = 99999
@@ -245,7 +256,9 @@ if not linear_model:
          save_cellAvg_state_only=save_cellAvg_state_only,
          output_temp_dir=dirs['temp'],
          restart=restart,
-         dict_diagnose=dict_diagnose)
+         dict_diagnose=dict_diagnose,
+         state_perturb_spatial_corr=state_perturb_spatial_corr,
+         state_perturb_random_field_dir=state_perturb_random_field_dir)
 else:
     dict_ens_list_history_files = EnKF_VIC(
          N=cfg['EnKF']['N'],

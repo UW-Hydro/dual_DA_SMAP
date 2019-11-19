@@ -1,6 +1,6 @@
-function [increment_sum,increment_sum_hold,sum_rain,sum_rain_sp,sum_rain_sp_hold,sum_rain_indep,increment_sum_ens, innovation1, innovation1_not_norm, rain_perturbed_sum_ens] =...
+function [increment_sum,increment_sum_hold,sum_rain,sum_rain_sp,sum_rain_sp_hold,sum_rain_indep,increment_sum_ens, innovation1, innovation1_not_norm, rain_perturbed_sum_ens, rain_perturbed_ens] =...
     analysis(window_size,ist,filter_flag,transform_flag,API_model_flag,NUMEN,Q_fixed,P_inflation_fixed,...
-    logn_var_constant,bb,rain_observed,rain_observed_hold,rain_indep,rain_true,sep_sm_orbit,sma_observed,smd_observed,...
+    logn_var_constant,phi,bb,rain_observed,rain_observed_hold,rain_indep,rain_true,if_rescale,sep_sm_orbit,sma_observed,smd_observed,...
     ta_observed,ta_observed_climatology,PET_observed,PET_observed_climatology,EVI_observed,...
     API_mean,R_DQX, API_range, slope_parameter_API, time_step)
 
@@ -57,18 +57,18 @@ end
 % a single product, and then rescale
 if sep_sm_orbit == 0
     % Merge products
-    sm_observed(1:ist) = -1;
+    sm_observed(1:ist) = nan;
     for k=1:ist
-        if (sma_observed(k) >= 0 && smd_observed(k) >= 0 );
+        if (~isnan(sma_observed(k)) && ~isnan(smd_observed(k)) );
             sm_observed(k) =  0.5*(smd_observed(k) + sma_observed(k));
         end;
-        if (sma_observed(k) < 0 && smd_observed(k) >= 0 );
+        if (isnan(sma_observed(k)) && ~isnan(smd_observed(k)) );
             sm_observed(k) =  smd_observed(k); end;
-        if (sma_observed(k) >= 0 && smd_observed(k) < 0 );
+        if (~isnan(sma_observed(k)) && isnan(smd_observed(k)) );
             sm_observed(k) =  sma_observed(k); end;
     end
     % Rescale
-    [sm_observed_trans, R_API, API_COEFF] = rescale(sm_observed, time_step, ...
+    [sm_observed_trans, R_API, API_COEFF, API_model] = rescale(sm_observed, time_step, ...
         transform_flag, API_model_flag, ist, rain_observed, API_mean, API_range, lag, ...
         slope_parameter_API, ta_observed_climatology, ...
         PET_observed_climatology, total_mean_TA, total_mean_PET, bb, ...
@@ -77,39 +77,45 @@ if sep_sm_orbit == 0
 % separately; sm_observed only serves as an indicator for update timesteps
 else
     % Rescale ascending & descending separately
-    [sma_observed_trans, R_API_a, API_COEFF_a] = rescale(sma_observed, time_step, ...
+    [sma_observed_trans, R_API_a, API_COEFF_a, API_model] = rescale(sma_observed, time_step, ...
         transform_flag, API_model_flag, ist, rain_observed, API_mean, API_range, lag, ...
         slope_parameter_API, ta_observed_climatology, ...
         PET_observed_climatology, total_mean_TA, total_mean_PET, bb, ...
         EVI_observed, R_DQX);
-    [smd_observed_trans, R_API_d, API_COEFF_d] = rescale(smd_observed, time_step, ...
+    [smd_observed_trans, R_API_d, API_COEFF_d, API_model] = rescale(smd_observed, time_step, ...
         transform_flag, API_model_flag, ist, rain_observed, API_mean, API_range, lag, ...
         slope_parameter_API, ta_observed_climatology, ...
         PET_observed_climatology, total_mean_TA, total_mean_PET, bb, ...
         EVI_observed, R_DQX);
     % Put rescaled ascending & desceinding sm together
-    sm_observed_trans(1:ist) = -1;
+    sm_observed_trans(1:ist) = nan;
     R_API(1:ist) = 0;
-    API_COEFF(1:ist) = 0;
-    sm_observed(1:ist) = -1;
+    API_COEFF(1:ist) = API_mean;
+    sm_observed(1:ist) = nan;
     for k=1:ist
-        if (sma_observed(k) >= 0 && smd_observed(k) >= 0 );
+        if (~isnan(sma_observed(k)) && ~isnan(smd_observed(k)) );
             fprintf('Error: When sep_sm_orbit, ascending and descending products cannot appear on the same timestep!');
             exit(1);
         end;
-        if (sma_observed(k) < 0 && smd_observed(k) >= 0 );
+        if (isnan(sma_observed(k)) && ~isnan(smd_observed(k)) );
             sm_observed_trans(k) =  smd_observed_trans(k);
             R_API(k) = R_API_d(k);
             API_COEFF(k) = API_COEFF_d(k);
-            sm_observed(k) = 999;
+            sm_observed(k) = smd_observed(k);
         end;
-        if (sma_observed(k) >= 0 && smd_observed(k) < 0 );
+        if (~isnan(sma_observed(k)) && isnan(smd_observed(k)) );
             sm_observed_trans(k) =  sma_observed_trans(k);
             R_API(k) = R_API_a(k);
             API_COEFF(k) = API_COEFF_a(k);
-            sm_observed(k) = 999;
+            sm_observed(k) = sma_observed(k);
         end;
     end
+end
+
+% If not rescale, reset SM and R to unscaled values
+if if_rescale == 0
+    R_API(:) = R_DQX.^2;
+    sm_observed_trans = sm_observed;
 end
 
 % ----- Run filter ----- %
@@ -140,7 +146,7 @@ end
 
 % Identify update days
 if (filter_flag == 5 || filter_flag == 6) 
-    update_days = find(sm_observed_trans>=0);
+    update_days = find(~isnan(sm_observed_trans));
 end
 
 while (converge_flag == 0)
@@ -174,7 +180,7 @@ while (converge_flag == 0)
             % skip;
             % If filter_flag == 5 and no sm measurement at this time point,
             % go back in time until last update and update the gaps
-            if (sm_observed(k) < 0)
+            if (isnan(sm_observed(k)))
                 increment(k)=-999;
                 innovation1(k)=-999;
                 innovation1_not_norm(k)=-999;
@@ -213,12 +219,18 @@ while (converge_flag == 0)
     
     % rainfall correction with EnKF or EnKS
     if (filter_flag== 2 || filter_flag == 6)
+        % Generate mult_factor time series for each ensemble member
+        mult_factor(1:ist, 1:NUMEN) = 0;  % [time, ens]
+        for e=1:NUMEN
+            mult_factor(:, e) = generate_prec_lognormal_multiplier(...
+                logn_var, phi, ist);
+        end
+        
         for k=2:ist
             
             % Propagate ensemble and add state perturbation (Yixin)
             API_COEFF_V(k,:) = ones*API_COEFF(k);
-            mult_factor = exp(randn(1,NUMEN)*sqrt(log(logn_var + 1)) - log(logn_var + 1)/2);
-            rain_perturbed_ens(k, :) = mult_factor * rain_observed(k);
+            rain_perturbed_ens(k, :) = mult_factor(k, :) * rain_observed(k);
             temp_total(1:NUMEN)=nan;
             for e=1:NUMEN
                 temp_total(e) = API_short(API_filter_EnKF(k-1,e),API_COEFF_V(k,e),bb,1);
@@ -235,7 +247,7 @@ while (converge_flag == 0)
             % skip;
             % If filter_flag == 6 and no sm measurement at this time point,
             % go back in time until last update and update the gaps
-            if (sm_observed(k) < 0)
+            if (isnan(sm_observed(k)))
                 increment(k)=-999;
                 innovation1(k)=-999;
                 innovation1_not_norm(k)=-999;
@@ -265,6 +277,12 @@ while (converge_flag == 0)
                     temp(temp >= 0)=nan;
                     [junk,index]=max(temp);
                     last_update = update_days(index);                 
+                    % Set upper limit to the earliest timestep to fill to
+                    % 10 days
+                    max_steps_to_fill = 10 * (24 / time_step);
+                    if (k - last_update > max_steps_to_fill)
+                        last_update = k - max_steps_to_fill;
+                    end
                     for m=k-1:-1:last_update + 1
                         % Use priors to generated K_EnKF
                         CYM = cov(API_filter_EnKF_prior(k,:),API_filter_EnKF_prior(m,:));
@@ -284,7 +302,7 @@ while (converge_flag == 0)
         for k=2:ist
             API_filter(k) = sign(API_filter(k-1))*(API_COEFF(k)-1)*abs(API_filter(k-1))^bb + API_filter(k-1)  + rain_observed(k);
             K(k) = 1.00;
-            if (sm_observed(k) < 0)
+            if (isnan(sm_observed(k)))
                 increment(k)=-999;
                 innovation1(k)=-999;
                 innovation1_not_norm(k)=-999;
@@ -305,8 +323,9 @@ while (converge_flag == 0)
     % filtering only...no smoothing back correction...has not been
     % completely de-bugged...use with caution
     if (filter_flag==4 || filter_flag == 7)
+        mult_factor = generate_prec_lognormal_multiplier(...
+            logn_var, phi, ist);
         for k=2:ist
-            mult_factor = exp(randn(1,NUMEN)*sqrt(log(logn_var + 1))-log(logn_var + 1)/2);
             add_factor = randn(1,NUMEN);
             rain = rain_observed(k);
             
@@ -318,7 +337,7 @@ while (converge_flag == 0)
                    %      temp_total(e) = API_short(API_filter_PART(k-1,e),API_COEFF_V(k,e),bb,24);
                    %end
                 end
-                API_filter_PART(k,:) = temp_total + mult_factor*rain_observed(k) + sqrt(Q)*randn(1,NUMEN) + sqrt(P_inflation)*rain_observed(k)*randn(1,NUMEN);
+                API_filter_PART(k,:) = temp_total + mult_factor(k)*rain_observed(k) + sqrt(Q)*randn(1,NUMEN) + sqrt(P_inflation)*rain_observed(k)*randn(1,NUMEN);
                 
                 %older
                 %temp = (API_COEFF(k)-1).*abs(API_filter_PART(k-1,:)).^bb;
@@ -336,7 +355,7 @@ while (converge_flag == 0)
                     %     temp_total(e) = API_short(API_filter_PART(k-1,e),API_COEFF_V(k,e),bb,24);
                     %end
                 end
-                API_filter_PART(k,:) = temp_total + mult_factor*rain + add_factor*sqrt(Q);
+                API_filter_PART(k,:) = temp_total + mult_factor(k)*rain + add_factor*sqrt(Q);
                 
                 %older
                 %temp = (API_COEFF(k)-1).*abs(API_filter_PART(k-1,:)).^bb;
@@ -350,7 +369,7 @@ while (converge_flag == 0)
             
             background = mean(API_filter_PART(k,:));
             P(k) = var(API_filter_PART(k,:));
-            if (sm_observed(k) < 0)
+            if (isnan(sm_observed(k)))
                 increment(k)=-999;
                 innovation1(k)=-999;
                 innovation1_not_norm(k)=-999;
@@ -383,7 +402,7 @@ while (converge_flag == 0)
                 innovation_last = innovation1(k);
                 
                 API_filter_PART(k,:) = API_filter_PART(k,outIndex);
-                if (filter_flag == 7); increment(k) = (mult_factor*rain + add_factor*sqrt(Q))*WEIGHT' - rain; end;
+                if (filter_flag == 7); increment(k) = (mult_factor(k)*rain + add_factor*sqrt(Q))*WEIGHT' - rain; end;
                 if (filter_flag == 4); increment(k) = mean(API_filter_PART(k,:) - background); end;
             end
         end
@@ -396,8 +415,8 @@ while (converge_flag == 0)
     %THIS HELPS SOMETIMES
     %increment(innovation1 < -2 & innovation1 > -999) = -999;
     
-    innovation_mean = mean(innovation1((sm_observed >= 0)));
-    innovation_var = var(innovation1((sm_observed >= 0)));
+    innovation_mean = mean(innovation1((~isnan(sm_observed))));
+    innovation_var = var(innovation1((~isnan(sm_observed))));
     innovation_ac = innovation_cross_sum/count_updates;
     innovation_lag1_covar = count_updates/(count_updates - 1) * (innovation_ac - innovation_mean*innovation_mean);
     innovation_lag1_corr = (innovation_lag1_covar/innovation_var);

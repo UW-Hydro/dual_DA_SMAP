@@ -1,0 +1,5 @@
+Generate spatially correlated random fields:
+
+Step 1: Run gen_random_fields.R - need to manually change the Parameter part in the code
+Step 2: Run process_random_fields.py - need to manually change the Parameter part in the code
+

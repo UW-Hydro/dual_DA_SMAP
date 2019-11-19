@@ -1,0 +1,15 @@
+mocom-ua.aww was the original code from UW as modified & upgraded by A. Wood.  PCIC
+later went through the code and report to have fixed several bugs, though this is 
+unverified by code review.  The arguments to the code change differ slightly, and PCIC
+added a daily stats calculator so that if daily flows are available, they could also be used.  
+
+=================
+
+Two more recent versions of MOCOM sent by PCIC/Katrina Bennett around 2009.  The 
+apr-dm one seems most recent.
+
+PCIC apparently found some bug fixes that were important, so this should be used. 
+
+The src_bin/ dir has the apr-dm/ codes
+
+

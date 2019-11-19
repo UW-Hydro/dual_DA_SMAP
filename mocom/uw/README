@@ -1,0 +1,5 @@
+as of about aug '06, MOCOM-UA_newer.c was what UW had; but Keith sent in MOCOM-UA_newer.KC_aug2006.c 
+which has an additional restart option.  I got this after I'd modified the original one, so I didn't 
+end up using keith's newer version.
+
+-AWW-aug2006

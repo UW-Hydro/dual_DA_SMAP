@@ -53,7 +53,7 @@ def setup_output_dirs(out_basedir, mkdirs=['results', 'state',
     return dirs
 
 
-def calculate_smap_domain_from_vic_domain(da_vic_domain, da_smap_example):
+def calculate_smap_domain_from_vic_domain(da_vic_domain, da_smap_example, is_smap_domain=False):
     ''' Calculate the smallest SMAP domain needed to cover the entire VIC domain.
         Note: here the entire input VIC domain is going to be covered without considering
         its 0/1 masks.
@@ -65,6 +65,9 @@ def calculate_smap_domain_from_vic_domain(da_vic_domain, da_smap_example):
         considering its 0/1 masks.
     da_smap_example: <xr.DataArray>
         An example SMAP DataArray. This typically can be the extracted SMAP data for one day.
+    is_smap_domain: <bool>
+        whether da_smap_example is a smap domain already (only have lat lon) or not (have time
+        also); default: False
     
     Returns
     ----------
@@ -94,11 +97,16 @@ def calculate_smap_domain_from_vic_domain(da_vic_domain, da_smap_example):
     smap_lon_lower = lons_smap[smap_lon_lower_ind]
     # lon upper
     smap_lon_upper_ind = np.searchsorted(np.sort(smap_lon_edges), vic_domain_lon_range[1]) - 1
-    smap_lon_upper = lons_smap[smap_lon_upper_ind]
+    smap_lon_upper = lons_smap_from_centers
     # --- Construct the SMAP domain needed --- #
-    da_smap_domain_example = da_smap_example[0, :, :].sel(
-        lat=slice(smap_lat_upper+0.05, smap_lat_lower-0.05),
-        lon=slice(smap_lon_lower-0.05, smap_lon_upper+0.05))
+    if is_smap_domain is True:
+        da_smap_domain_example = da_smap_example.sel(
+            lat=slice(smap_lat_upper+0.05, smap_lat_lower-0.05),
+            lon=slice(smap_lon_lower-0.05, smap_lon_upper+0.05))
+    else:
+        da_smap_domain_example = da_smap_example[0, :, :].sel(
+            lat=slice(smap_lat_upper+0.05, smap_lat_lower-0.05),
+            lon=slice(smap_lon_lower-0.05, smap_lon_upper+0.05))
     mask = np.ones([len(da_smap_domain_example['lat']), len(da_smap_domain_example['lon'])]).astype('int')
     da_smap_domain = xr.DataArray(
         mask,
@@ -945,3 +953,121 @@ def calculate_seasonal_window_mean_std(ts):
         dict_window_std[(d.month, d.day)] = std_ts
 
     return dict_window_mean, dict_window_std
+
+
+def remap_and_save_smart_prec(prec_input_basepath, start_year, end_year,
+                              da_domain_target, out_remapped_dir, out_prefix,
+                              reuse_weight=False, da_domain_source=None):
+    ''' Remaps SMART-corrected rainfall and save
+    
+    PARAMETERS
+    ----------
+    prec_input_basepath: <str>
+        SMART-corrected input rainfall data to be corrected; 'YYYY.nc' will be appended
+    start_year: <int>
+        SMART start year
+    end_year: <int>
+        SMART end year
+    da_domain_target: <xr.DataArray>
+        Target domain mask
+    out_remapped_dir: <str>
+        Output directory for remapped rainfall (and weight files)
+    out_prefix: <str>
+        Prefix of output remapped rainfall data; 'YYYY.nc' will be appended
+    reuse_weight: <bool>
+        Whether reuse previously generated weight (the weight file is assumed
+        to be 'weight_final.nc' under out_remapped_dir)
+    da_domain_source: <xr.DataArray> (only needed when reuse_weight = False)
+        Source domain mask
+    '''
+
+    # Loop over each year
+    for year in range(start_year, end_year+1):
+        # Load input precipitation data
+        da_orig = xr.open_dataset(
+            '{}{}.nc'.format(prec_input_basepath, year))['prec_corrected']
+        # Only calculate weights once
+        if reuse_weight is False and year == start_year:
+            da_remapped, weight_array = remap_con(
+                reuse_weight=False,
+                da_source=da_orig,
+                final_weight_nc=os.path.join(out_remapped_dir, 'weight_final.nc'),
+                da_target_domain=da_domain_target,
+                da_source_domain=da_domain_source,
+                tmp_weight_nc=os.path.join(out_remapped_dir, 'weight.tmp.nc'))
+        else:
+            da_remapped, weight_array = remap_con(
+                reuse_weight=True,
+                da_source=da_orig,
+                final_weight_nc=os.path.join(out_remapped_dir, 'weight_final.nc'),
+                da_target_domain=da_domain_target)
+        # Save remapped data to file
+        ds_remapped = xr.Dataset({'prec_corrected': da_remapped})
+        to_netcdf_forcing_file_compress(
+            ds_remapped,
+            os.path.join(out_remapped_dir, '{}{}.nc'.format(out_prefix, year)))
+    
+    return da_remapped
+
+
+def change_weights_no_split(
+    weight_orig_nc, da_source_domain, da_target_domain,
+    output_weight_nc):
+    
+    ''' Change an xesmf weight file to be no-split-weight among source cells
+    
+    Parameters
+    ----------
+    weight_orig_nc: <str>
+        Original weight file nc
+    da_source_domain: <xr.DataArray>
+        Source domain
+    da_target_domain: <xr.DataArray>
+        Target domain
+    output_weight_nc: <str>
+        Output no-split weight nc
+    '''
+   
+    # --- Load original weight file --- #
+    n_source = len(da_source_domain['lat']) * len(da_source_domain['lon'])
+    n_target = len(da_target_domain['lat']) * len(da_target_domain['lon'])
+    A = xe.frontend.read_weights(weight_orig_nc, n_source, n_target)
+    weight_array = A.toarray()
+    
+    # --- For each source cell, find the SMAP cell to which it contributes the most --- #
+    max_smap_ind1D = np.argmax(weight_array, axis=0)  # [n_source]
+    # --- For each source cell, assign all weights to this max SMAP cell --- #
+    weight_array_new = np.zeros([n_target, n_source])
+    # Loop over each source cell
+    for i in range(len(max_smap_ind1D)):
+        weights_orig = weight_array[:, i]
+        # If this source cell is inactive (no overlap with any SMAP cell), skip
+        if len(weights_orig[weights_orig>0]) == 0:
+            weight_array_new[:, i] = weights_orig
+            continue
+        # Assign new weight of 1
+        weights_orig[weights_orig>0] = 0
+        weights_orig[max_smap_ind1D[i]] = 1
+        # Put in the new weight_array
+        weight_array_new[:, i] = weights_orig
+        
+    # --- Normalize weights for each SMAP cell --- #
+    # Loop voer each SMAP cell
+    for j in range(n_target):
+        # If this SMAP cell is inactive (no overlapping with any source cell), skip
+        if sum(weight_array_new[j, :]) < 0:
+            continue
+        # Normalize
+        weight_array_new[j, :] /= sum(weight_array_new[j, :])
+        
+    # --- Save new weights --- #
+    data = weight_array_new[weight_array_new!=0]
+    ind = np.where(weight_array_new!=0)
+    row = ind[0] + 1  # adjust index to start from 1
+    col = ind[1] + 1
+    ds_weight_new = xr.Dataset({'S': (['n_s'],  data),
+                                'col': (['n_s'],  col),
+                                'row': (['n_s'],  row)},
+                                coords={'n_s': (['n_s'], range(len(data)))})
+    ds_weight_new.to_netcdf(output_weight_nc, format='NETCDF4_CLASSIC')
+

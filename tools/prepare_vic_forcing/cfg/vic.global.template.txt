@@ -61,7 +61,7 @@ FORCEHOUR     0
 WIND_H          10.0    # height of wind speed measurement (m)
 MEASURE_H       2.0     # height of humidity measurement (m)
 ALMA_INPUT	FALSE	# TRUE = ALMA-compliant input variable units; 
-JULY_TAVG_SUPPLIED TRUE
+# JULY_TAVG_SUPPLIED TRUE
 #FORCING2      FALSE
 
 #######################################################################
@@ -69,17 +69,17 @@ JULY_TAVG_SUPPLIED TRUE
 #######################################################################
 NLAYER		3	# number of soil layers
 NODES		5	# number of soil thermal nodes 
-SOIL        /raid2/ymao/data_assim/param/vic/ArkRed/Maurer/soil.ArkRed
+SOIL        /civil/hydro/ymao/data_assim/param/vic/ArkRed/Maurer/soils/soil_ldas.ark
 BASEFLOW	NIJSSEN2001	# ARNO or NIJSSEN2001
 #ARC_SOIL       FALSE   # TRUE = read soil parameters from ARC/INFO ASCII grids
-VEGPARAM    /raid2/ymao/VIC_RBM_east_RIPS/RIPS/model_run/param/vic/Maurer_AndyWood_8th/setup_from_Andy_Wood/veg/us_all.veg.wsne
+VEGPARAM    /civil/hydro/ymao/data_assim/param/vic/ArkRed/Maurer/veg_param/veg_ldas.ark
 #GLOBAL_LAI 	TRUE    # TRUE read LAI from vegparam file; FALSE read LAI from veglib file
 VEGPARAM_LAI  TRUE 
 LAI_SRC  LAI_FROM_VEGPARAM
 ROOT_ZONES      3	# Number of root zones (must match format of veg param file)
-VEGLIB      /raid4/forecast/pnw_retro_forcing/vic.input.setup/LDAS_veg_lib
-SNOW_BAND  6 /raid2/ymao/VIC_RBM_east_RIPS/RIPS/model_run/param/vic/Maurer_AndyWood_8th/setup_from_Andy_Wood/snow/us_all.snowbands.wsne
-COMPUTE_TREELINE  10  # TRUE: you must specify the default understory veg type, eg 10
+VEGLIB      /civil/hydro/ymao/data_assim/param/vic/ArkRed/Maurer/veg_param/LDAS_veg_lib
+SNOW_BAND  6 /civil/hydro/ymao/data_assim/param/vic/ArkRed/Maurer/snowbands/snowbands_ldas.ark
+# COMPUTE_TREELINE  10  # TRUE: you must specify the default understory veg type, eg 10
 
 #######################################################################
 # Output Files and Parameters

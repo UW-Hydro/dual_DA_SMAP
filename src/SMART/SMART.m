@@ -7,13 +7,13 @@ rng(11);
 p = inputParser;
 % 'addParamValue' in old releases; 'addParameter' in new releases
 % WARNING...some of these choice are not fully implemented
-p.addParamValue('input_dataset', []);  % the input .mat file path; containing: 3 prec datasets; 2 soil moisture datasets; soil moisture error
+p.addParameter('input_dataset', []);  % the input .mat file path; containing: 3 prec datasets; 2 soil moisture datasets; soil moisture error
 p.addParamValue('output_dir', []);  % output directory; corrected rainfall data, innovation and lambda parameter will be written to this directory
 p.addParamValue('start_time', []);  % start time of simulation and data; format: "YYYY-MM-DD HH:MM"
 p.addParamValue('end_time', []);  % end time of simulation and data; format: "YYYY-MM-DD HH:MM"
 p.addParamValue('time_step', []);  % Time step length in hour for all input data 
 p.addParamValue('filter_flag', []);  % filter_flag 1)KF, 2)EnKF, 3)DI, 4)PART, 5)KF with RTS gap-filling, 6) EnKF with EnKS gap-filling, 7) PART - DIRECT RAINFALL
-p.addParamValue('transform_flag', []);  % transform_flag 1) CDF, 2) seasonal 1&2, 3) bias 1&2, 4) seasonal CDF 
+p.addParameter('transform_flag', []);  % transform_flag 1) CDF, 2) seasonal 1&2, 3) bias 1&2, 4) seasonal CDF 
 p.addParamValue('API_model_flag', []);  % API_model_flag 0) static 1) simple sine model, 2) Ta climatology, 3) PET climatologoy, 4) Ta-variation, 5) PET variation
 p.addParamValue('lambda_flag', []);  % if = 999 then obtain lambda via fitting against "rain_indep", otherwise it sets a fixed value of lambda
 p.addParamValue('NUMEN', []);  % NUMEN - number of ensembles used in EnKF or EnKS analysis...not used if filter_flag  = 1 or 3
@@ -21,12 +21,17 @@ p.addParamValue('Q_fixed', []);  % Q_fixed - if = 999 than whiten tune, otherwis
 p.addParamValue('P_inflation', []);
 p.addParamValue('upper_bound_API', []);  % set to 99999 if do not want to set max soil moisture
 p.addParamValue('logn_var', []);  % logn_var - variance of multiplicative ensemble perturbations...not sued if filter_flag = 1 or 3....setting to zero means all rainfall error is additive
+p.addParamValue('phi', []);  % precip perturbation autocorrelation
 p.addParamValue('slope_parameter_API', []);  % slope parameter API - not used if API_model_flag = 0
 p.addParamValue('location_flag', []);  % location flag 0) CONUS, 1) AMMA, 2) Global 3) Australia 31 4) Australia 240 5) Australia, 0.25-degree continental
 p.addParamValue('window_size', []);  % window size - number of time steps in a window
 p.addParamValue('API_mean', []);  % where API(t) = API_mean*API(t-1)^bb + rain(t)...default is 0.60
 p.addParamValue('bb', []);  % where API(t) = API_mean*API(t-1)^bb + rain(t)...default is 0.60
 p.addParamValue('API_range', []); % only used if API is varying seasonally
+p.addParamValue('if_rescale', []); % whether rescale input SM meas (1) or not (0)
+p.addParamValue('lambda_tuning_target', []); % 'rmse' or 'corrcoef'; only used if lambda_flag == 999
+p.addParamValue('correct_magnitude_only', []); % # 1 for correct rainfall when obs_rain > threshold only; 0 for no such constraint (original SMART)
+p.addParamValue('correct_magnitude_only_threshold', []); % obs_rain threshold as in above
 p.addParamValue('sep_sm_orbit', []); % 1 for separately rescale ascending and descending SM (this only makes sense for subdaily run); 0 for combining ascending and descending soil miosture products and SM obs appearing on the same timestep will be averaged
 p.parse(varargin{:});
 % Assign input arguments to variables
@@ -44,12 +49,23 @@ Q_fixed = str2num(p.Results.Q_fixed);
 P_inflation = str2num(p.Results.P_inflation);
 upper_bound_API = str2num(p.Results.upper_bound_API);
 logn_var = str2num(p.Results.logn_var);
+phi = str2num(p.Results.phi);
 slope_parameter_API = str2num(p.Results.slope_parameter_API);
 location_flag = str2num(p.Results.location_flag);
 window_size = str2num(p.Results.window_size);
 API_mean = str2num(p.Results.API_mean);
+if length(API_mean) == 0
+    API_mean = p.Results.API_mean;
+end
 bb = str2num(p.Results.bb);
+if length(bb) == 0
+    bb = p.Results.bb;
+end
 API_range = str2num(p.Results.API_range);
+if_rescale = str2num(p.Results.if_rescale);
+lambda_tuning_target = p.Results.lambda_tuning_target;
+correct_magnitude_only = str2num(p.Results.correct_magnitude_only);
+correct_magnitude_only_threshold = str2num(p.Results.correct_magnitude_only_threshold);
 sep_sm_orbit = str2num(p.Results.sep_sm_orbit);
 
 dump_flag = 0;
@@ -72,7 +88,22 @@ numpixels = size_data(1);
 innovation(1:ist, 1:numpixels) = 0;
 lambda(1:numpixels) = 0;
 
-for j=1:numpixels %space loop
+% Load API_mean and bb
+% If input is a number, convert API_mean to an array of pixels, 
+if isnumeric(API_mean)
+    API_mean(1:numpixels) = API_mean;
+else
+    load(API_mean);
+    API_mean = API_COEFF_tuned;
+end
+if isnumeric(bb)
+    bb(1:numpixels) = bb;
+else
+    load(bb);
+    bb = bb_tuned;
+end
+
+for j=1:numpixels  %j=1:numpixels %space loop
     
     % REQUIRED INPUTS (TIME SERIES FOR EACH SPATIAL PIXEL)
     % (Missing input data is assumed to be nan)
@@ -96,14 +127,6 @@ for j=1:numpixels %space loop
     smd_observed = sm_descend(j, 1:ist); % Soil Moisture - Descending
     sm_quality = sm_error(j, 1:ist);  % Soil moisture standard error
     
-    % Change nan missing data to negative values
-    % This is not ideal...should really change code to use nan for missing data
-    rain_observed(isnan(rain_observed)) = -1;
-    rain_indep(isnan(rain_indep)) = -1;
-    rain_true(isnan(rain_true)) = -1;
-    sma_observed(isnan(sma_observed)) = -1;
-    smd_observed(isnan(smd_observed)) = -1;
-    
     % The below data sources are used to defined to make the API coefficient vary in time
     % Only used for API_model_flag >= 2
     EVI_observed(1:ist) = -1;
@@ -126,18 +149,20 @@ for j=1:numpixels %space loop
         rain_observed(rain_observed < 0) = 0; %for the rain time series feed into the KF...get rid of missing rain data...dataset must be complete (no missing values)
         rain_true(rain_true < 0) = -99999; % all calibration/evaluation is based on windows with no missing indep or true rainfall data
         rain_indep(rain_indep < 0) = -99999; % all calibration/evaluation is based on windows with no missing indep or true rainfall data
-        rain_indep=rain_indep*mean(rain_observed_hold(rain_observed_hold >= 0))/mean(rain_indep(rain_indep >= 0)); %make sure RS precipitation products have same mean
-        
+%%%%%%%%%%%% Yixin HACK - do not bias-correct the independent rainfall for tuning lambda %%%%%%%%%%%%%%%%
+%        rain_indep=rain_indep*mean(rain_observed_hold(rain_observed_hold >= 0))/mean(rain_indep(rain_indep >= 0)); %make sure RS precipitation products have same mean
+%%%%%%%%%%%% END HACK %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
         % Calculate Increments
-        [increment_sum,increment_sum_hold,sum_rain,sum_rain_sp,sum_rain_sp_hold,sum_rain_sp2,increment_sum_ens, innovation(:, j), innovation_not_norm, rain_perturbed_sum_ens] = ...
+        [increment_sum,increment_sum_hold,sum_rain,sum_rain_sp,sum_rain_sp_hold,sum_rain_sp2,increment_sum_ens, innovation(:, j), innovation_not_norm, rain_perturbed_sum_ens, rain_perturbed_ens] = ...
             analysis(window_size,ist,filter_flag,transform_flag,API_model_flag,NUMEN,Q_fixed,P_inflation,...
-            logn_var,bb,rain_observed,rain_observed_hold,rain_indep,rain_true,sep_sm_orbit,sma_observed,smd_observed,...
+            logn_var,phi,bb(j),rain_observed,rain_observed_hold,rain_indep,rain_true,if_rescale,sep_sm_orbit,sma_observed,smd_observed,...
             ta_observed,ta_observed_climatology,PET_observed,PET_observed_climatology,EVI_observed,...
-            API_mean,sm_quality, API_range, slope_parameter_API, time_step);
+            API_mean(j),sm_quality, API_range, slope_parameter_API, time_step);
         
         % Correct Rainfall
         [sum_rain_corrected, sum_rain_corrected_ens, optimized_fraction] = ...
-            correction(increment_sum,increment_sum_hold,increment_sum_ens, sum_rain_sp,sum_rain_sp2,lambda_flag, filter_flag, NUMEN, rain_perturbed_sum_ens);
+            correction(increment_sum,increment_sum_hold,increment_sum_ens, sum_rain_sp,sum_rain_sp2,lambda_flag, filter_flag, NUMEN, rain_perturbed_sum_ens, lambda_tuning_target, correct_magnitude_only, correct_magnitude_only_threshold);
         lambda(j) = optimized_fraction;
         
         % Rescale corrected rainfall
@@ -172,6 +197,8 @@ for j=1:numpixels %space loop
         RAIN_SMART_SMOS(:,j) = sum_rain_corrected(:);
         RAIN_SMART_SMOS_ENS(:, :, j) = sum_rain_corrected_ens(:, :);
         INCREMENT_SUM(:, j) = increment_sum(:);
+        % Save perturbed rainfall ensemble as well (at orig. timestep without window-aggregation)
+        RAIN_PERTURBED_ENS(:, :, j) = rain_perturbed_ens(:, :);
         
         % Calculate calibration metric...use only when trying to calibrate API parameters again "rain_indep"
         % mask_sum_rain_sp2 = sum_rain_sp2 >=0; %need "independent" sat precip to be there (at least one)...for calibration
@@ -282,12 +309,26 @@ for j=1:numpixels %space loop
 %         
 %         % Output metrics
 %         fprintf(1,'%f %f %f  \n',-A(1,2)+B(1,2),-C+D,optimized_fraction)
-%     end       
+%   end
 end
 
 %% 
-save([output_dir '/SMART_corrected_rainfall.mat'], 'RAIN_SMART_SMOS');  % [ntime, npixel]
-save([output_dir '/SMART_corrected_rainfall_ens.mat'], 'RAIN_SMART_SMOS_ENS');  % [ntime, n_ens, npixel]
+% Save corrected rainfall
+save([output_dir '/SMART_corrected_rainfall.mat'], 'RAIN_SMART_SMOS');  % [nwindow, npixel]
+for i=1:NUMEN
+    RAIN_CORRECTED = [];
+    RAIN_CORRECTED.(sprintf('ens%d', i)) = RAIN_SMART_SMOS_ENS(:, i, :);
+    save([output_dir sprintf('/SMART_corrected_rainfall.ens%d.mat', i)], ...
+    'RAIN_CORRECTED');  % [nwindow, npixel]
+end
+% Save perturbed (but un-corrected) rainfall
+for i=1:NUMEN
+    RAIN_PERTURBED = [];
+    RAIN_PERTURBED.(sprintf('ens%d', i)) = RAIN_PERTURBED_ENS(:, i, :);
+    save([output_dir sprintf('/SMART_perturbed_rainfall.ens%d.mat', i)], ...
+    'RAIN_PERTURBED');  % [ntime, npixel]
+end
+% Save other results
 save([output_dir '/innovation.mat'], 'innovation');  % [ntime, npixel]
 save([output_dir '/lambda.mat'], 'lambda');  % [npixel]
 save([output_dir '/increment_sum.mat'], 'INCREMENT_SUM');  % [ntime, npixel]  
