@@ -1,3 +1,5 @@
+[![DOI](https://zenodo.org/badge/61920718.svg)](https://zenodo.org/badge/latestdoi/61920718)
+
 # Dual state/rainfall correction project - data assimilation of SMAP for VIC and GPM
 
 This repository stores all code development for the dual correction project that assimilates SMAP soil moisture measurement data to correct model states in the Variable Infiltration Capacity (VIC) model and to correct the GPM precipitation data.
